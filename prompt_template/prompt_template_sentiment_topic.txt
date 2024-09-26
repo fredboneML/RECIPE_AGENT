@@ -11,6 +11,7 @@ JSON format shown in the following example.
 
 Example output:
 {
+    "version": 0.1,
     "sentiment": <sentiment>,
     "topic": <topic>,
 }
