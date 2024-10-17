@@ -11,11 +11,10 @@ function App() {
   const navigate = useNavigate();
   const textareaRef = useRef(null);
   const commonQuestions = [
-    "Check inventory",
-    "Sales data last month",
-    "Most popular product",
-    "Order statistics",
-    "Customer feedback"
+    "Top 10 topics",
+    "Overall sentiment trend",
+    "Companies with highest average positive sentiment",
+    "Companies showing an increasing trend in negative call sentiments"
   ];
 
   useEffect(() => {
@@ -41,7 +40,11 @@ function App() {
     })
       .then(response => response.json())
       .then(data => {
-        setResult(data.result);
+        if (data.error) {
+          console.error("Query error:", data.message);
+        } else {
+          setResult(data.result);
+        }
       });
   };
 

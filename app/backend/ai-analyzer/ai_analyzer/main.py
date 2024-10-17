@@ -59,23 +59,17 @@ def hash_password(password: str) -> str:
 # API to handle login
 @app.post("/api/login")
 async def login(request: Request, db: Session = Depends(get_db)):
-    logger.info("Login attempt received")
     data = await request.json()
     username = data['username']
     password = data['password']
     
-    logger.info(f"Login attempt for user: {username}")
-    
     user = db.query(User).filter(User.username == username).first()
     if user and user.password_hash == hash_password(password):
-        logger.info(f"Successful login for user: {username}")
         return {"success": True}
     else:
-        logger.warning(f"Failed login attempt for user: {username}")
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-
-# API to handle queries
+# Updated API to handle queries
 @app.post("/api/query")
 async def query(request: Request):
     data = await request.json()
@@ -85,7 +79,7 @@ async def query(request: Request):
         answer = answer_question(question)
         return {"result": answer}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"error": True, "message": str(e)}
 
 # Optional: API to add a new user
 @app.post("/api/add_user")
