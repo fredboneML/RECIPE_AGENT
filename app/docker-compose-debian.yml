@@ -1,0 +1,48 @@
+services:
+  frontend_app:
+    build: ./frontend
+    container_name: frontend_app
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend_app
+    environment:
+      - REACT_APP_BACKEND_URL=https://37.97.226.251:8000
+    volumes:
+      - ./frontend:/usr/src/app
+    stdin_open: true
+    tty: true
+
+  backend_app:
+    build: ./backend
+    container_name: backend_app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - database
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
+    volumes:
+      - ./backend:/usr/src/app
+    command: ["uvicorn", "ai_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    stdin_open: true
+    tty: true
+
+  database:
+    image: postgres
+    container_name: postgres_db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - ./database/data:/var/lib/postgresql/data
+    stdin_open: true
+    tty: true
+
+networks:
+  default:
+    driver: bridge
