@@ -15,7 +15,7 @@ function Login() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/login', {
+      const response = await fetch('http://localhost:8000/api/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -26,7 +26,7 @@ function Login() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Assuming the API returns a token on successful login
+        // Store token if login is successful
         localStorage.setItem('token', data.token);
         navigate('/');
       } else {

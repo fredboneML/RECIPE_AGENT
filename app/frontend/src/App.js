@@ -6,15 +6,15 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [query, setQuery] = useState('');
   const [result, setResult] = useState('');
-  const [userInitial, setUserInitial] = useState('U');
+  const [userInitial, setUserInitial] = useState('A');
   const [showPopup, setShowPopup] = useState(false);
   const navigate = useNavigate();
   const textareaRef = useRef(null);
   const commonQuestions = [
     "Top 10 topics",
     "Overall sentiment trend",
-    "Companies with highest average positive sentiment",
-    "Companies showing an increasing trend in negative call sentiments"
+    "Companies (company name) with highest average positive sentiment",
+    "Companies (company name) showing an increasing trend in negative call sentiments"
   ];
 
   useEffect(() => {
@@ -30,8 +30,9 @@ function App() {
     }
   }, [query]);
 
+  // Update the URL to point to the backend on port 8000
   const handleSubmit = () => {
-    fetch('/api/query', {
+    fetch('http://localhost:8000/api/query', {  // Updated URL
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
