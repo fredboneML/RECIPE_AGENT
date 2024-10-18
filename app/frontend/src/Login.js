@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './Login.css';
 
 function Login() {
@@ -8,6 +8,13 @@ function Login() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      navigate('/');
+    }
+  }, [navigate]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -26,8 +33,8 @@ function Login() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Store token if login is successful
         localStorage.setItem('token', data.token);
+        localStorage.setItem('userName', username);
         navigate('/');
       } else {
         setError(data.detail || 'Invalid username or password');

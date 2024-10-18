@@ -6,7 +6,7 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [query, setQuery] = useState('');
   const [result, setResult] = useState('');
-  const [userInitial, setUserInitial] = useState('A');
+  const [userInitial, setUserInitial] = useState('');
   const [showPopup, setShowPopup] = useState(false);
   const navigate = useNavigate();
   const textareaRef = useRef(null);
@@ -18,10 +18,36 @@ function App() {
   ];
 
   useEffect(() => {
-    fetch('/api/get_conversations')
-      .then(response => response.json())
-      .then(data => setConversations(data));
-  }, []);
+    const token = localStorage.getItem('token');
+    const userName = localStorage.getItem('userName');
+    if (!token) {
+      navigate('/login');
+    } else {
+      if (userName) {
+        setUserInitial(userName.charAt(0).toUpperCase());
+      }
+      fetch('http://localhost:8000/api/get_conversations', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Failed to fetch conversations');
+          }
+          return response.json();
+        })
+        .then(data => setConversations(data))
+        .catch(error => {
+          console.error('Error fetching conversations:', error);
+          if (error.message === 'Unauthorized') {
+            localStorage.removeItem('token');
+            localStorage.removeItem('userName');
+            navigate('/login');
+          }
+        });
+    }
+  }, [navigate]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -30,21 +56,35 @@ function App() {
     }
   }, [query]);
 
-  // Update the URL to point to the backend on port 8000
   const handleSubmit = () => {
-    fetch('http://localhost:8000/api/query', {  // Updated URL
+    const token = localStorage.getItem('token');
+    fetch('http://localhost:8000/api/query', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({ query }),
     })
-      .then(response => response.json())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Failed to submit query');
+        }
+        return response.json();
+      })
       .then(data => {
         if (data.error) {
           console.error("Query error:", data.message);
         } else {
           setResult(data.result);
+        }
+      })
+      .catch(error => {
+        console.error('Error submitting query:', error);
+        if (error.message === 'Unauthorized') {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userName');
+          navigate('/login');
         }
       });
   };
@@ -54,7 +94,17 @@ function App() {
   };
 
   const handleSignOff = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userName');
     navigate('/login');
+  };
+
+  const handleNewConversation = () => {
+    setQuery('');
+    setResult('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
   };
 
   return (
@@ -62,7 +112,7 @@ function App() {
       <div className="sidebar">
         <img src="/logo.png" alt="Company Logo" className="small-logo" />
         <div className="new-conversation">
-          <button>New Conversation</button>
+          <button onClick={handleNewConversation}>New Conversation</button>
         </div>
         <div className="conversations">
           {conversations.map((conv, index) => (
