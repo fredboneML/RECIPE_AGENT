@@ -1,11 +1,8 @@
 import os
 from dotenv import load_dotenv, find_dotenv
+from langchain_openai import ChatOpenAI
 from langchain_community.utilities.sql_database import SQLDatabase
-from langchain_experimental.sql import SQLDatabaseSequentialChain, SQLDatabaseChain
-#from langchain_community.llms import SQLDatabase
-from langchain.chat_models import ChatOpenAI
-#from urllib.parse import quote_plus
-#from langchain import SQLDatabase, SQLDatabaseChain
+from langchain_experimental.sql import SQLDatabaseSequentialChain
 import logging
 
 # Configure logging
@@ -25,30 +22,44 @@ POSTGRES_DB = os.getenv('POSTGRES_DB')
 # Create SQLAlchemy engine string
 db_url = f'postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}'
 
-# Initialize OpenAI language model
-llm = ChatOpenAI(temperature=0, openai_api_key=os.environ['AI_ANALYZER_OPENAI_API_KEY'], model_name='gpt-3.5-turbo')
-
-# Initialize SQLDatabase
 db = SQLDatabase.from_uri(db_url)
 
-# Initialize SQLDatabaseChain
-db_chain = SQLDatabaseChain(llm=llm, database=db, verbose=True)
+# List available tables (schema)
+available_tables = db.get_table_info()
 
+print(available_tables)
+
+# Add context to every query
+def add_context_to_query(user_query):
+    context = f"Here is the schema of the available tables: {available_tables}. \
+    Make sure to give the result in an easy readable human format! \
+    Please only use these tables in your SQL query to answer the following question: "
+    return f"{context} {user_query}"
+
+
+# Initialize OpenAI language model
+llm = ChatOpenAI(temperature=0, openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'), model_name='gpt-3.5-turbo')
+
+# Initialize SQL database and chain
 def answer_question(question):
-    logger.info(f"Received question: {question}")
-
     try:
-        # Use SQLDatabaseChain to generate and execute SQL query
-        result = db_chain.run(question)
+        # Create SQL database and chain using the new method
+        db = SQLDatabase.from_uri(db_url)
+        db_chain = SQLDatabaseSequentialChain.from_llm(llm, db, verbose=True, use_query_checker=True)
+
+        logger.info(f"Received question: {question}")
+
+        # Process the query by adding the context with available tables
+        processed_query = add_context_to_query(question)
+
         
-        logger.info("Query executed successfully.")
-        print("\nAnswer:")
-        print(result)
-        
+        # Execute the question using the chain
+        result = db_chain.run(processed_query)
         return result
     except Exception as e:
         logger.error(f"Error processing question: {e}")
-        return f"An error occurred while processing your question: {str(e)}"
+        return f"An error occurred while processing your question: {e}"
+
 
 if __name__ == "__main__":
     # Sample questions to test the agent
@@ -72,8 +83,8 @@ if __name__ == "__main__":
     ]
 
     # Example usage with a single question
-    question = "What are the top 10 topics discussed in all transcriptions?"
-    answer_question(question)
+    # question = "What are the top 10 topics discussed in all transcriptions?"
+    # answer_question(question)
 
     # Alternatively, iterate through all sample questions
     # for q in sample_questions:

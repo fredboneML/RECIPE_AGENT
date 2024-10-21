@@ -7,6 +7,7 @@ import pandas as pd
 import logging
 from dotenv import load_dotenv, find_dotenv
 import hashlib
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv(find_dotenv())
@@ -40,9 +41,9 @@ class Transcription(Base):
     processingdate = Column(DateTime, nullable=False)
     transcription = Column(String, nullable=False)
     summary = Column(String)
-    topic_parent_class = Column(String)
+ #   topic_parent_class = Column(String)
     topic = Column(String)
-    sentiment_parent_class = Column(String)
+ #   sentiment_parent_class = Column(String)
     sentiment = Column(String)
 
 # User table ORM model
@@ -66,8 +67,28 @@ def create_tables(engine):
 
 # Load data from CSV
 def load_data_from_csv():
-    df_company = pd.read_csv('../data/df_company.csv')
-    df_transcription = pd.read_csv('../data/df_transcription.csv')
+
+    df__file_name = [file for file in os.listdir('../data') if file.startswith('df_transcription__')]
+
+    # Sorting the file names to make sure that we will always take the last one added
+    df__file_name = sorted(df__file_name,
+                        key=lambda x: datetime.strptime(x.split('__')[1].split('.csv')[0], '%Y-%m-%d'),
+                        reverse=True)
+    logger.info(df__file_name)
+    df__file_name = df__file_name[0]
+
+
+    df_company__file_name = [file for file in os.listdir('../data') if file.startswith('df_company__')]
+    df_company__file_name = sorted(df_company__file_name,
+                                key=lambda x: datetime.strptime(x.split('__')[1].split('.csv')[0], '%Y-%m-%d'),
+                                reverse=True)
+    logger.info(df_company__file_name)
+    df_company__file_name = df_company__file_name[0]
+
+
+    df_transcription = pd.read_csv(f'../data/{df__file_name}')
+    df_company = pd.read_csv(f'../data/{df_company__file_name}')
+
     logger.info("df_company.csv and df_transcription.csv loaded successfully.")
     return df_company, df_transcription
 
@@ -76,7 +97,7 @@ def insert_company_data(df_company, session):
     try:
         for index, row in df_company.iterrows():
             insert_stmt = insert(Company).values(
-                company_id=str(row['company_id']),
+                company_id=str(row['id']),
                 clid=str(row['clid']),
                 telephone_number=str(row['telephone_number'])
             )
@@ -104,9 +125,9 @@ def insert_transcription_data(df_transcription, session):
                     processingdate=row['processingdate'],
                     transcription=str(row['transcription']),
                     summary=str(row['summary']) if pd.notna(row['summary']) else None,
-                    topic_parent_class=str(row['topic_parent_class']) if pd.notna(row['topic_parent_class']) else None,
+                   # topic_parent_class=str(row['topic_parent_class']) if pd.notna(row['topic_parent_class']) else None,
                     topic=str(row['topic']) if pd.notna(row['topic']) else None,
-                    sentiment_parent_class=str(row['sentiment_parent_class']) if pd.notna(row['sentiment_parent_class']) else None,
+                   # sentiment_parent_class=str(row['sentiment_parent_class']) if pd.notna(row['sentiment_parent_class']) else None,
                     sentiment=str(row['sentiment']) if pd.notna(row['sentiment']) else None
                 )
                 do_nothing_stmt = insert_stmt.on_conflict_do_nothing(index_elements=['id'])
@@ -138,6 +159,13 @@ def hash_password(password):
 # Create a new user
 def create_user(session, username, password):
     try:
+        # Check if the user already exists
+        existing_user = session.query(User).filter_by(username=username).first()
+        if existing_user:
+            logger.info(f"User '{username}' already exists. Skipping creation.")
+            return
+
+        # If the user does not exist, proceed with creation
         hashed_password = hash_password(password)
         new_user = User(username=username, password_hash=hashed_password)
         session.add(new_user)
