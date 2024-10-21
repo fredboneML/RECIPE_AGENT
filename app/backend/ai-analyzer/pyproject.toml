@@ -16,6 +16,8 @@ python-dotenv = "^1.0.1"
 langchain-community = "^0.3.2"
 langchain-experimental = "^0.3.2"
 openai = "^1.52.0"
+langchain-openai = "^0.2.3"
+psycopg2 = "^2.9.10"
 
 
 [build-system]

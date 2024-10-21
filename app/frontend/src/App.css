@@ -1,76 +1,52 @@
+/* General App Styles */
 .App {
   text-align: center;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
-}
-
-.App-link {
-  color: #61dafb;
-}
-
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.app {
-  display: flex;
-  height: 100vh;
-}
-
+/* Sidebar */
 .sidebar {
-  width: 250px;
+  width: 250px; /* Adjust this width to match the original sidebar size */
   background-color: #f5f5f5;
   padding: 20px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  position: fixed; /* Ensure the sidebar stays fixed in place */
+  height: 100vh; /* Make the sidebar full height */
 }
 
 .small-logo {
-  width: 80px;
+  width: 100px; /* Adjust this if necessary */
   margin-bottom: 20px;
 }
 
+/* Adjust padding for the new conversation button */
 .new-conversation button {
   background-color: #4caf50;
   color: white;
   border: none;
-  padding: 10px;
+  padding: 15px;
   cursor: pointer;
   margin-bottom: 20px;
+  width: 100%;
 }
 
+/* Conversation summaries */
 .conversation-summary {
   margin: 10px 0;
-  font-size: 0.9rem;
+  font-size: 1rem;
+  padding: 10px;
+  background-color: #e0e0e0;
+  border-radius: 5px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
 }
 
+
+/* Main Content */
 .content {
+  margin-left: 270px;
   flex: 1;
   padding: 20px;
   display: flex;
@@ -94,6 +70,7 @@
   border-radius: 50%;
 }
 
+/* Popup for Sign Off */
 .popup {
   position: absolute;
   top: 40px;
@@ -113,6 +90,7 @@
   cursor: pointer;
 }
 
+/* Landing Section */
 .landing {
   display: flex;
   flex-direction: column;
@@ -137,8 +115,10 @@
   background-color: #f0f0f0;
   padding: 15px;
   cursor: pointer;
+  border-radius: 5px;
 }
 
+/* Query Input */
 .query-input {
   margin-top: 30px;
   display: flex;
@@ -171,10 +151,29 @@
   border-radius: 5px;
 }
 
+/* Query Result Section */
 .query-result {
   margin-top: 20px;
+  text-align: left;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+  background-color: #f9f9f9;
+  padding: 20px;
+  border-radius: 5px;
+  border: 1px solid #ddd;
 }
 
 .query-result h3 {
   margin: 10px 0;
+}
+
+.query-result pre {
+  background-color: #f4f4f4;
+  padding: 10px;
+  border-radius: 5px;
+  white-space: pre-wrap; /* This ensures new lines and white spaces are preserved */
+  word-wrap: break-word; /* Ensures long lines are properly wrapped */
+  font-family: monospace;
+  font-size: 14px;
 }

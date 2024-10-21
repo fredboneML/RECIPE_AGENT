@@ -18,7 +18,7 @@ The transcript of the conversation is between the <data> XML like tags.
 {{transcript}}
 </data>
 
-The sentiment should be a one word sentiment analysis, and 
+The sentiment should be a one word sentiment analysis (positive, negative, neutral), and 
 the topic of the conversation, both in Dutch! 
 
 The output must be provided in 
@@ -26,7 +26,7 @@ JSON format shown in the following example.
 
 Example output:
 {
-    "version": 0.2,
+    "version": 0.3,
     "sentiment": <sentiment>,
     "topic": <topic>,
     "summary": <summary>,

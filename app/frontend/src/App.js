@@ -12,9 +12,9 @@ function App() {
   const textareaRef = useRef(null);
   const commonQuestions = [
     "Top 10 topics",
-    "Overall sentiment trend",
-    "Companies (company name) with highest average positive sentiment",
-    "Companies (company name) showing an increasing trend in negative call sentiments"
+    "How does the sentiment of calls last week compare to the previous week?",
+    "Top 10 topics leading to higher customer satisfaction",
+    "Top 10 Companies showing an increasing trend in negative call sentiments"
   ];
 
   useEffect(() => {
@@ -162,7 +162,8 @@ function App() {
               <h3>Your Question:</h3>
               <p>{query}</p>
               <h3>Result:</h3>
-              <p>{result}</p>
+              {/* Pretty display the result */}
+              <pre>{typeof result === 'object' ? JSON.stringify(result, null, 4) : result}</pre>
               <button onClick={() => alert("Ask a follow-up question!")}>Follow Up?</button>
             </div>
           )}

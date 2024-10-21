@@ -2,3 +2,6 @@
 .env
 log.txt
 model/bertopic_model
+*.pyc
+__pycache__/
+
