@@ -1,0 +1,2 @@
+LIMIT = 10000
+LAST_ID = 0

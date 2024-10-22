@@ -9,6 +9,8 @@ function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -22,7 +24,7 @@ function Login() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/login', {
+      const response = await fetch(`${backendUrl}/api/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

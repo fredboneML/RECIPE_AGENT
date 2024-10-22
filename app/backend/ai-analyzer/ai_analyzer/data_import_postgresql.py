@@ -65,10 +65,19 @@ def create_tables(engine):
     Base.metadata.create_all(engine)
     logger.info("All database tables created successfully.")
 
+# Create the data directory if it doesn't exist
+data_dir = '/usr/src/app/ai-analyzer/data'
+
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
+    print(f"Directory '{data_dir}' created.")
+else:
+    print(f"Directory '{data_dir}' already exists.")
+
 # Load data from CSV
 def load_data_from_csv():
 
-    df__file_name = [file for file in os.listdir('../data') if file.startswith('df_transcription__')]
+    df__file_name = [file for file in os.listdir(data_dir) if file.startswith('df_transcription__')]
 
     # Sorting the file names to make sure that we will always take the last one added
     df__file_name = sorted(df__file_name,
@@ -78,7 +87,7 @@ def load_data_from_csv():
     df__file_name = df__file_name[0]
 
 
-    df_company__file_name = [file for file in os.listdir('../data') if file.startswith('df_company__')]
+    df_company__file_name = [file for file in os.listdir(data_dir) if file.startswith('df_company__')]
     df_company__file_name = sorted(df_company__file_name,
                                 key=lambda x: datetime.strptime(x.split('__')[1].split('.csv')[0], '%Y-%m-%d'),
                                 reverse=True)
@@ -86,8 +95,8 @@ def load_data_from_csv():
     df_company__file_name = df_company__file_name[0]
 
 
-    df_transcription = pd.read_csv(f'../data/{df__file_name}')
-    df_company = pd.read_csv(f'../data/{df_company__file_name}')
+    df_transcription = pd.read_csv(f'{data_dir}/{df__file_name}')
+    df_company = pd.read_csv(f'{data_dir}/{df_company__file_name}')
 
     logger.info("df_company.csv and df_transcription.csv loaded successfully.")
     return df_company, df_transcription
