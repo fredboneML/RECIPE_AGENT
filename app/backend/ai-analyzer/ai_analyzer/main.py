@@ -3,10 +3,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import OperationalError
 import os
 from dotenv import load_dotenv
 import hashlib
-from .database_agent_postgresql import answer_question
+from ai_analyzer.database_agent_postgresql import answer_question, get_db_connection
+from ai_analyzer.data_import_postgresql import run_data_import
+from ai_analyzer.fetch_data_from_api import fetch_data_from_api
+from ai_analyzer.make_openai_call_df import make_openai_call_df
+from ai_analyzer import config
+from datetime import datetime
+import pandas as pd
 
 # Load environment variables
 load_dotenv()
@@ -17,6 +24,10 @@ POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD')
 DB_HOST = os.getenv('DB_HOST')  
 DB_PORT = os.getenv('DB_PORT')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
+
+URL = os.getenv('URL')
+API_KEY = os.getenv('API_KEY')
+
 
 # SQLAlchemy setup
 DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}"
@@ -38,7 +49,13 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", " http://192.168.2.132:3000"],
+    allow_origins=[
+        "http://localhost:3000", 
+        " http://192.168.2.132:3000",  
+        "http://172.21.0.4:3000", 
+        "http://172.21.0.3:3000",
+          "http://frontend_app:3000",
+          ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,6 +72,34 @@ def get_db():
 # Hashing passwords
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
+
+### Pipeline ###
+# 1. Fetch data
+fetch_data_from_api(url=URL, api_key=API_KEY, 
+                    last_id=config.LAST_ID, limit=config.LIMIT)
+
+# 2.  Generating sentiment and topic
+df__file_name = [file for file in os.listdir('../data') if file.startswith('df__')]
+df__file_name = sorted(df__file_name,
+                       key=lambda x: datetime.strptime(x.split('__')[1].split('.csv')[0], '%Y-%m-%d'),
+                       reverse=True)
+print(df__file_name)
+df__file_name = df__file_name[0]
+df = pd.read_csv(f'../data/{df__file_name}')
+
+df = make_openai_call_df(df=df, model="gpt-4o-mini-2024-07-18")
+
+# 3. Load data to db
+run_data_import()
+
+###############
+
+# Test endpoint
+@app.get("/api/test")
+async def test():
+    print("Test endpoint hit!")
+    return {"message": "Backend is reachable"}
+
 
 # API to handle login
 @app.post("/api/login")

@@ -17,6 +17,8 @@ function App() {
     "Top 10 Companies showing an increasing trend in negative call sentiments"
   ];
 
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     const userName = localStorage.getItem('userName');
@@ -26,7 +28,7 @@ function App() {
       if (userName) {
         setUserInitial(userName.charAt(0).toUpperCase());
       }
-      fetch('http://localhost:8000/api/get_conversations', {
+      fetch(`${backendUrl}/api/get_conversations`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -47,7 +49,7 @@ function App() {
           }
         });
     }
-  }, [navigate]);
+  }, [navigate, backendUrl]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -58,7 +60,7 @@ function App() {
 
   const handleSubmit = () => {
     const token = localStorage.getItem('token');
-    fetch('http://localhost:8000/api/query', {
+    fetch(`${backendUrl}/api/query`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -162,7 +164,6 @@ function App() {
               <h3>Your Question:</h3>
               <p>{query}</p>
               <h3>Result:</h3>
-              {/* Pretty display the result */}
               <pre>{typeof result === 'object' ? JSON.stringify(result, null, 4) : result}</pre>
               <button onClick={() => alert("Ask a follow-up question!")}>Follow Up?</button>
             </div>

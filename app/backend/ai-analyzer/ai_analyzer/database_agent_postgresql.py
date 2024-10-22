@@ -3,6 +3,8 @@ from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_experimental.sql import SQLDatabaseSequentialChain
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 import logging
 
 # Configure logging
@@ -20,7 +22,27 @@ DB_PORT = os.getenv('DB_PORT')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
 
 # Create SQLAlchemy engine string
-db_url = f'postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}'
+db_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}" #service name of our database container
+
+def get_db_connection(max_retries=5, retry_delay=5):
+    for attempt in range(max_retries):
+        try:
+            engine = create_engine(db_url)
+            engine.connect()
+            return SQLDatabase.from_uri(db_url)
+        except OperationalError as e:
+            if attempt < max_retries - 1:
+                print(f"Database connection attempt {attempt + 1} failed. Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                raise Exception("Failed to connect to the database after multiple attempts") from e
+
+# Test connection
+db = get_db_connection()
+
+# Create SQLAlchemy engine string
+#db_url = f'postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}' # service name on localhost
+#db_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@database:5432/{POSTGRES_DB}" #service name of our database container
 
 db = SQLDatabase.from_uri(db_url)
 

@@ -14,7 +14,15 @@ client = OpenAI(
 )
 
 def generate_prompt(data, prompt_template_path):
+
     """Generates the prompt using a template."""
+    if not os.path.exists(prompt_template_path):
+        raise FileNotFoundError(
+            f"Prompt template not found at: {prompt_template_path}\n"
+            f"Current working directory: {os.getcwd()}\n"
+            f"Directory contents: {os.listdir(os.path.dirname(prompt_template_path))}"
+        )
+
     with open(prompt_template_path, 'r') as file:
         template_string = file.read()
 

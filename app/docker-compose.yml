@@ -1,41 +1,75 @@
 services:
   frontend_app:
-    build: ./frontend
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: frontend_app
     ports:
       - "3000:3000"
-    depends_on:
-      - backend_app
     environment:
-      - REACT_APP_BACKEND_URL=http://backend_app:8000
+      - REACT_APP_BACKEND_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/usr/src/app
+      - /usr/src/app/node_modules
     stdin_open: true
     tty: true
+    networks:
+      - app-network
 
   backend_app:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: backend_app
     ports:
       - "8000:8000"
     depends_on:
-      - database
+      database:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - DB_HOST=database
+      - DB_PORT=5432
     volumes:
       - ./backend:/usr/src/app
-    command: ["uvicorn", "ai_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "ai_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     stdin_open: true
     tty: true
+    networks:
+      - app-network
+
 
   database:
-    image: postgres
+    image: postgres:13
     container_name: postgres_db
     ports:
       - "5433:5432" 
-    env_file:
-      - .env
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
-      - ./database/data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
     stdin_open: true
     tty: true
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+    name: ai_analyzer_postgres_data
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
