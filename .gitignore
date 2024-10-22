@@ -4,4 +4,5 @@ log.txt
 model/bertopic_model
 *.pyc
 __pycache__/
+app/database/data/base
 
