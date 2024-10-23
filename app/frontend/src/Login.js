@@ -9,7 +9,10 @@ function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+  // Dynamically determine the backend URL
+  const backendUrl = window.location.hostname === 'localhost' 
+    ? 'http://localhost:8000'
+    : `http://${window.location.hostname}:8000`;
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -24,26 +27,31 @@ function Login() {
     setIsLoading(true);
 
     try {
+      console.log('Attempting to connect to:', backendUrl);
       const response = await fetch(`${backendUrl}/api/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ 
+          username: username.trim(), 
+          password: password 
+        }),
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('userName', username);
+        localStorage.setItem('token', data.token || 'dummy-token');
+        localStorage.setItem('userName', username.trim());
         navigate('/');
       } else {
         setError(data.detail || 'Invalid username or password');
       }
     } catch (err) {
       console.error('Login error:', err);
-      setError('An error occurred. Please try again.');
+      setError('Connection error. Please try again.');
     } finally {
       setIsLoading(false);
     }
