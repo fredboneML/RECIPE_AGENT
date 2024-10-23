@@ -171,6 +171,11 @@ Make it executable:
 chmod +x deploy.sh
 ```
 
+Run deployment
+```bash
+./deploy.sh
+```
+
 ## Backup Configuration
 
 ### 1. Create Backup Script
