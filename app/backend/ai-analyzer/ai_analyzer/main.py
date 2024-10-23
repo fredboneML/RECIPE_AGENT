@@ -14,6 +14,9 @@ from ai_analyzer.make_openai_call_df import make_openai_call_df
 from ai_analyzer import config
 from datetime import datetime
 import pandas as pd
+from ai_analyzer import config
+
+data_dir =config.DATA_DIR
 
 # Load environment variables
 load_dotenv()
@@ -51,7 +54,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000", 
-        " http://192.168.2.132:3000",  
+        "http://37.97.226.251:3000",  
+        "http://192.168.2.132:3000", 
         "http://172.21.0.4:3000", 
         "http://172.21.0.3:3000",
           "http://frontend_app:3000",
@@ -79,13 +83,13 @@ fetch_data_from_api(url=URL, api_key=API_KEY,
                     last_id=config.LAST_ID, limit=config.LIMIT)
 
 # 2.  Generating sentiment and topic
-df__file_name = [file for file in os.listdir('../data') if file.startswith('df__')]
+df__file_name = [file for file in os.listdir(data_dir) if file.startswith('df__')]
 df__file_name = sorted(df__file_name,
                        key=lambda x: datetime.strptime(x.split('__')[1].split('.csv')[0], '%Y-%m-%d'),
                        reverse=True)
 print(df__file_name)
 df__file_name = df__file_name[0]
-df = pd.read_csv(f'../data/{df__file_name}')
+df = pd.read_csv(f'{data_dir}/{df__file_name}')
 
 df = make_openai_call_df(df=df, model="gpt-4o-mini-2024-07-18")
 

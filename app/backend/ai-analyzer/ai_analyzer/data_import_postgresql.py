@@ -8,6 +8,7 @@ import logging
 from dotenv import load_dotenv, find_dotenv
 import hashlib
 from datetime import datetime
+from ai_analyzer import config
 
 # Load environment variables from .env file
 load_dotenv(find_dotenv())
@@ -66,7 +67,7 @@ def create_tables(engine):
     logger.info("All database tables created successfully.")
 
 # Create the data directory if it doesn't exist
-data_dir = '/usr/src/app/ai-analyzer/data'
+data_dir = config.DATA_DIR
 
 if not os.path.exists(data_dir):
     os.makedirs(data_dir)
