@@ -14,6 +14,8 @@ services:
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
       - DISABLE_ESLINT_PLUGIN=true
+      # Dynamic backend URL based on host
+      - REACT_APP_BACKEND_URL=http://${HOST:-localhost}:8000
     volumes:
       - ./frontend:/usr/src/app:cached
       - frontend_node_modules:/usr/src/app/node_modules
@@ -43,6 +45,10 @@ services:
       - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
       - URL=${URL}
       - API_KEY=${API_KEY}
+      # Add CORS allowed origins
+      - ALLOWED_ORIGINS=http://localhost:3000,http://37.97.226.251:3000,http://127.0.0.1:3000
+      # Add host environment variable
+      - HOST=${HOST:-localhost}
     volumes:
       - ./backend:/usr/src/app
     command: ["uvicorn", "ai_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

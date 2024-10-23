@@ -10,14 +10,18 @@ function App() {
   const [showPopup, setShowPopup] = useState(false);
   const navigate = useNavigate();
   const textareaRef = useRef(null);
+  
+  // Dynamically determine the backend URL
+  const backendUrl = window.location.hostname === 'localhost' 
+    ? 'http://localhost:8000'
+    : `http://${window.location.hostname}:8000`;
+
   const commonQuestions = [
     "Top 10 topics",
     "How does the sentiment of calls last week compare to the previous week?",
     "Top 10 topics leading to higher customer satisfaction",
     "Top 10 Companies showing an increasing trend in negative call sentiments"
   ];
-
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -30,7 +34,8 @@ function App() {
       }
       fetch(`${backendUrl}/api/get_conversations`, {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
         }
       })
         .then(response => {
@@ -64,7 +69,8 @@ function App() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
       },
       body: JSON.stringify({ query }),
     })
