@@ -1,18 +1,23 @@
 services:
   frontend_app:
-    build: 
+    build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        USER_ID: ${USER_ID:-1000}
+        GROUP_ID: ${GROUP_ID:-1000}
     container_name: frontend_app
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_BACKEND_URL=http://localhost:8000
+      - NODE_ENV=development
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
+      - DISABLE_ESLINT_PLUGIN=true
     volumes:
-      - ./frontend:/usr/src/app
-      - /usr/src/app/node_modules
+      - ./frontend:/usr/src/app:cached
+      - frontend_node_modules:/usr/src/app/node_modules
+      - frontend_cache:/usr/src/app/node_modules/.cache
     stdin_open: true
     tty: true
     networks:
@@ -46,7 +51,6 @@ services:
     networks:
       - app-network
 
-
   database:
     image: postgres:13
     container_name: postgres_db
@@ -70,6 +74,12 @@ services:
       - app-network
 
 volumes:
+  frontend_node_modules:
+    name: ai_analyzer_frontend_node_modules
+    driver: local
+  frontend_cache:
+    name: ai_analyzer_frontend_cache
+    driver: local
   postgres_data:
     name: ai_analyzer_postgres_data
     driver: local
