@@ -34,6 +34,10 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - DB_HOST=database
       - DB_PORT=5432
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
+      - URL=${URL}
+      - API_KEY=${API_KEY}
     volumes:
       - ./backend:/usr/src/app
     command: ["uvicorn", "ai_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
