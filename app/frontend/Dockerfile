@@ -1,21 +1,35 @@
-# Dockerfile for frontend_app
 FROM node:16-alpine
+
+# Install necessary packages
+RUN apk add --no-cache shadow
 
 # Set working directory
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json (if present)
-COPY package.json package-lock.json ./
+# Define build arguments for UID and GID
+ARG USER_ID
+ARG GROUP_ID
 
-# Install dependencies with npm
-RUN npm install
+# Create a non-root user with the provided UID and GID
+RUN groupadd -g ${GROUP_ID:-1000} appgroup && \
+    useradd -u ${USER_ID:-1000} -g appgroup -m appuser
+
+# Copy package files
+COPY package*.json ./
+
+# Set ownership and install dependencies
+RUN chown -R appuser:appgroup /usr/src/app && \
+    npm install && \
+    mkdir -p node_modules/.cache && \
+    chmod -R 777 node_modules/.cache
 
 # Copy the rest of the application
-COPY . .
+COPY --chown=appuser:appgroup . .
 
-# Build the application
-RUN npm run build
+# Switch to non-root user
+USER appuser
 
-# Expose the port and start the app
 EXPOSE 3000
+
+# Start the application
 CMD ["npm", "start"]

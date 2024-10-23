@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 from datetime import datetime
+from ai_analyzer import config
 
 
 # Get the current date
@@ -9,7 +10,7 @@ current_date = datetime.now().date().strftime("%Y-%m-%d")
 data_dir = '/usr/src/app/ai-analyzer/data'
 
 
-def fetch_data_from_api(url, api_key, last_id, limit=10000):
+def fetch_data_from_api(url, api_key, last_id, limit=config.LIMIT):
     # Define the URL parameters (query parameters)
     params = {
         'last_id': last_id,
