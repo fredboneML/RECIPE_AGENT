@@ -91,7 +91,7 @@ print(df__file_name)
 df__file_name = df__file_name[0]
 df = pd.read_csv(f'{data_dir}/{df__file_name}')
 
-df = make_openai_call_df(df=df, model="gpt-4o-mini-2024-07-18")
+# df = make_openai_call_df(df=df, model="gpt-4o-mini-2024-07-18")
 
 # 3. Load data to db
 run_data_import()
