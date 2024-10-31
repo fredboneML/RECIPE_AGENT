@@ -18,7 +18,7 @@ def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
     df_n = df.iloc[:n].copy().rename(columns={'summary': 'summary_old'})
     result_df = pd.DataFrame(columns = ['summary', 'topic', 'sentiment', 'cost'])
     for i in range(len(df_n)):
-        if i % 500 == 0:
+        if i % 250 == 0:
             print(f'{i} rows from {len(df_n)} processed')
         data = {
                 'transcript': df_n['transcription'][i],

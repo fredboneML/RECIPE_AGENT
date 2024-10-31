@@ -27,7 +27,7 @@ def fetch_data_from_api(url, api_key, last_id, limit=10000):
     # Check if the request was successful
     if response.status_code == 200:
         # Print the response data
-        print('data successfully fetched')  
+        print('API is reachable')  
     else:
         print(f"Failed to fetch data. Status code: {response.status_code}, Response: {response.text}")
 
@@ -40,7 +40,7 @@ def fetch_data_from_api(url, api_key, last_id, limit=10000):
         
         df_company.to_csv(f'../data/df_company__{current_date}.csv', index=False)
         df.to_csv(f'../data/df__{current_date}.csv', index=False)
-        print('data successfully saved') 
-        print(f"""first id: {min(df['id'])}, last id: {max(df['id'])}""")
+        print('data successfully fetched and saved') 
+        print(f"""first id: {min(df['id'])}, last id: {max(df['id'])}, number of rows: {len(df)}""")
     else:
         print('No new data to be fetched')

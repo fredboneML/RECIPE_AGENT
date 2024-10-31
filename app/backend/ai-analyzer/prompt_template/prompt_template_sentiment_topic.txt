@@ -22,7 +22,7 @@ The sentiment should be a one word sentiment analysis (positive, negative, neutr
 the topic of the conversation, both in Dutch! 
 
 The output must be provided in 
-JSON format shown in the following example. 
+JSON format shown in the following example!
 
 Example output:
 {
@@ -32,6 +32,6 @@ Example output:
     "summary": <summary>,
 }
 
-Write the JSON output and nothing more.
+Write the JSON output and nothing more!
 
 Here is the JSON output:
