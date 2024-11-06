@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from datetime import datetime 
 from dotenv import load_dotenv, find_dotenv
 from ai_analyzer import config
