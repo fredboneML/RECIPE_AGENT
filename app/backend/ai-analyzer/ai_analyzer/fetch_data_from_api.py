@@ -7,7 +7,7 @@ from ai_analyzer import config
 # Get the current date
 current_date = datetime.now().date().strftime("%Y-%m-%d")
 
-data_dir = '/usr/src/app/ai-analyzer/data'
+data_dir = config.DATA_DIR
 
 
 def fetch_data_from_api(url, api_key, last_id, limit=config.LIMIT):
