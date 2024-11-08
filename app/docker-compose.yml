@@ -121,4 +121,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    r
+    restart: always
+    stdin_open: true
+    tty: true
+    networks:
+      - app-network
+
+volumes:
+  frontend_node_modules:
+    name: ai_analyzer_frontend_node_modules
+    driver: local
+  frontend_npm_cache:
+    name: ai_analyzer_frontend_npm_cache
+    driver: local
+  frontend_npm_global:
+    name: ai_analyzer_frontend_npm_global
+    driver: local
+  frontend_cache:
+    name: ai_analyzer_frontend_cache
+    driver: local
+  postgres_data:
+    name: ai_analyzer_postgres_data
+    driver: local
+  cron_logs:
+    name: ai_analyzer_cron_logs
+    driver: local
+
+
+networks:
+  app-network:
+    driver: bridge
