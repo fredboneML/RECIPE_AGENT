@@ -14,7 +14,10 @@ docker-compose down -v
 
 # Create necessary directories with correct permissions
 mkdir -p frontend/node_modules
-sudo chown -R $USER_ID:$GROUP_ID frontend/node_modules
+sudo chown -R $USER_ID:$GROUP_ID frontend/node_modules frontend/src frontend/public
+
+# Clean up any existing node_modules
+rm -rf frontend/node_modules/*
 
 # Rebuild containers with current user's UID and GID
 docker-compose build --no-cache

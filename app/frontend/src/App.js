@@ -8,8 +8,11 @@ function App() {
   const [result, setResult] = useState('');
   const [userInitial, setUserInitial] = useState('');
   const [showPopup, setShowPopup] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isRequestCanceled, setIsRequestCanceled] = useState(false);
   const navigate = useNavigate();
   const textareaRef = useRef(null);
+  const abortControllerRef = useRef(null);
   
   // Dynamically determine the backend URL
   const backendUrl = window.location.hostname === 'localhost' 
@@ -63,42 +66,80 @@ function App() {
     }
   }, [query]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (!query.trim() || isProcessing) return;
+    
+    setIsProcessing(true);
+    setResult('');
     const token = localStorage.getItem('token');
-    fetch(`${backendUrl}/api/query`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({ query }),
-    })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Failed to submit query');
-        }
-        return response.json();
-      })
-      .then(data => {
+    
+    // Create new AbortController
+    abortControllerRef.current = new AbortController();
+    
+    try {
+      const response = await fetch(`${backendUrl}/api/query`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+        signal: abortControllerRef.current.signal
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to submit query');
+      }
+
+      const data = await response.json();
+      
+      if (!isRequestCanceled) {
         if (data.error) {
           console.error("Query error:", data.message);
         } else {
           setResult(data.result);
         }
-      })
-      .catch(error => {
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log('Request was canceled');
+      } else {
         console.error('Error submitting query:', error);
         if (error.message === 'Unauthorized') {
           localStorage.removeItem('token');
           localStorage.removeItem('userName');
           navigate('/login');
         }
-      });
+      }
+    } finally {
+      if (!isRequestCanceled) {
+        setIsProcessing(false);
+      }
+      setIsRequestCanceled(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
+  const handleStopRequest = () => {
+    if (abortControllerRef.current) {
+      setIsRequestCanceled(true);
+      abortControllerRef.current.abort();
+      setIsProcessing(false);
+    }
   };
 
   const handleQuestionClick = (question) => {
     setQuery(question);
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
   };
 
   const handleSignOff = () => {
@@ -156,24 +197,40 @@ function App() {
               </div>
             ))}
           </div>
-          <div className="query-input">
-            <textarea
-              ref={textareaRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask your question..."
-            />
-            <button onClick={handleSubmit}>Send</button>
-          </div>
-          {result && (
-            <div className="query-result">
-              <h3>Your Question:</h3>
-              <p>{query}</p>
-              <h3>Result:</h3>
-              <pre>{typeof result === 'object' ? JSON.stringify(result, null, 4) : result}</pre>
-              <button onClick={() => alert("Ask a follow-up question!")}>Follow Up?</button>
+
+          {isProcessing && (
+            <div className="processing-message">
+              Processing your request...
             </div>
           )}
+
+          <div className="input-container">
+            <div className="query-input">
+              <textarea
+                ref={textareaRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask your question... (Press Enter to send, Shift+Enter for new line)"
+              />
+              <button 
+                onClick={isProcessing ? handleStopRequest : handleSubmit}
+                className={isProcessing ? 'stop-button' : ''}
+              >
+                {isProcessing ? 'Stop' : 'Send'}
+              </button>
+            </div>
+
+            {result && (
+              <div className="query-result">
+                <h3>Your Question:</h3>
+                <p>{query}</p>
+                <h3>Result:</h3>
+                <pre>{typeof result === 'object' ? JSON.stringify(result, null, 4) : result}</pre>
+                <button onClick={() => alert("Ask a follow-up question!")}>Follow Up?</button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
