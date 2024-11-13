@@ -1,3 +1,4 @@
+# Frontend Dockerfile
 FROM node:16-alpine
 
 # Install necessary packages
@@ -10,9 +11,23 @@ WORKDIR /usr/src/app
 ARG USER_ID
 ARG GROUP_ID
 
-# Create a non-root user with the provided UID and GID
-RUN groupadd -g ${GROUP_ID:-1000} appgroup && \
-    useradd -u ${USER_ID:-1000} -g appgroup -m appuser
+# Create user and group more safely
+RUN if [ -z "$GROUP_ID" ]; then \
+      GROUP_ID=1000; \
+    fi && \
+    if [ -z "$USER_ID" ]; then \
+      USER_ID=1000; \
+    fi && \
+    # First try to create the group
+    if ! getent group appgroup > /dev/null 2>&1; then \
+      addgroup -g $GROUP_ID -S appgroup || addgroup -S appgroup; \
+    fi && \
+    # Then create the user
+    adduser -u $USER_ID -S appuser -G appgroup -h /home/appuser
+
+# Setup npm directories
+RUN mkdir -p /home/appuser/.npm /home/appuser/.npm-global && \
+    chown -R appuser:appgroup /home/appuser/.npm /home/appuser/.npm-global
 
 # Copy package files
 COPY package*.json ./

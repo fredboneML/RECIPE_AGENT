@@ -5,18 +5,18 @@
 
 /* Sidebar */
 .sidebar {
-  width: 250px; /* Adjust this width to match the original sidebar size */
+  width: 250px;
   background-color: #f5f5f5;
   padding: 20px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  position: fixed; /* Ensure the sidebar stays fixed in place */
-  height: 100vh; /* Make the sidebar full height */
+  position: fixed;
+  height: 100vh;
 }
 
 .small-logo {
-  width: 100px; /* Adjust this if necessary */
+  width: 100px;
   margin-bottom: 20px;
 }
 
@@ -42,7 +42,6 @@
   width: 100%;
   text-align: left;
 }
-
 
 /* Main Content */
 .content {
@@ -118,6 +117,16 @@
   border-radius: 5px;
 }
 
+/* Input Container */
+.input-container {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 /* Query Input */
 .query-input {
   margin-top: 30px;
@@ -126,12 +135,11 @@
   width: 100%;
   max-width: 800px;
   box-sizing: border-box;
-  justify-content: center;
 }
 
 .query-input textarea {
   flex-grow: 1;
-  padding: 10px;
+  padding: 12px;
   border-radius: 5px;
   border: 1px solid #ddd;
   font-size: 16px;
@@ -139,41 +147,94 @@
   overflow-y: auto;
   min-height: 40px;
   max-height: 200px;
+  font-family: inherit;
+  line-height: 1.5;
+  width: calc(100% - 24px);
+  box-sizing: border-box;
+}
+
+.query-input textarea:focus {
+  outline: none;
+  border-color: #4caf50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
 }
 
 .query-input button {
   align-self: flex-start;
-  padding: 10px;
+  padding: 10px 20px;
   background-color: #4caf50;
   color: white;
   border: none;
   cursor: pointer;
   border-radius: 5px;
+  transition: background-color 0.3s;
+  min-width: 80px;
+}
+
+.query-input button.stop-button {
+  background-color: #f44336;
+}
+
+.query-input button:hover {
+  opacity: 0.9;
+}
+
+/* Processing Message */
+.processing-message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 20px 30px;
+  border-radius: 10px;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease-in;
+  font-size: 16px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* Query Result Section */
 .query-result {
+  width: 100%;
   margin-top: 20px;
   text-align: left;
-  max-width: 800px;
-  margin-left: auto;
-  margin-right: auto;
   background-color: #f9f9f9;
   padding: 20px;
   border-radius: 5px;
   border: 1px solid #ddd;
+  box-sizing: border-box;
 }
 
 .query-result h3 {
   margin: 10px 0;
+  color: #333;
 }
 
 .query-result pre {
   background-color: #f4f4f4;
-  padding: 10px;
+  padding: 15px;
   border-radius: 5px;
-  white-space: pre-wrap; /* This ensures new lines and white spaces are preserved */
-  word-wrap: break-word; /* Ensures long lines are properly wrapped */
+  white-space: pre-wrap;
+  word-wrap: break-word;
   font-family: monospace;
   font-size: 14px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.query-result button {
+  margin-top: 15px;
+  padding: 8px 15px;
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
 }

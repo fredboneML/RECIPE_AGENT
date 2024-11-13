@@ -1,25 +1,35 @@
+# ai_analyzer/make_openai_call_df.py
 import time
 from ai_analyzer.make_openai_call import generate_prompt, make_openai_call
 import pandas as pd
 from datetime import datetime
 import os
-
+from pathlib import Path
+from ai_analyzer.config import DATA_DIR
 
 # Get the current date
 current_date = datetime.now().date().strftime("%Y-%m-%d")
 
-# Get the absolute path to the prompt template - adjusted for the correct directory structure
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PROMPT_TEMPLATE_PATH = os.path.join(BASE_DIR, 'ai-analyzer', 'prompt_template', 'prompt_template_sentiment_topic.txt')
-DATA_DIR = os.path.join(BASE_DIR, 'data')
+# Get the absolute path to the prompt template
+PROMPT_TEMPLATE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    'prompt_template',
+    'prompt_template_sentiment_topic.txt'
+)
 
 def debug_paths():
     """Print debug information about paths"""
-    print(f"BASE_DIR: {BASE_DIR}")
+    print(f"DATA_DIR: {DATA_DIR}")
     print(f"PROMPT_TEMPLATE_PATH: {PROMPT_TEMPLATE_PATH}")
     print(f"Current working directory: {os.getcwd()}")
+    print(f"Script directory: {os.path.dirname(__file__)}")
+    print(f"Parent directory: {os.path.dirname(os.path.dirname(__file__))}")
     print(f"File exists at PROMPT_TEMPLATE_PATH: {os.path.exists(PROMPT_TEMPLATE_PATH)}")
-    print(f"Directory contents of {os.path.dirname(PROMPT_TEMPLATE_PATH)}: {os.listdir(os.path.dirname(PROMPT_TEMPLATE_PATH))}")
+    if os.path.exists(os.path.dirname(PROMPT_TEMPLATE_PATH)):
+        print(f"Directory contents of {os.path.dirname(PROMPT_TEMPLATE_PATH)}: {os.listdir(os.path.dirname(PROMPT_TEMPLATE_PATH))}")
+    else:
+        print(f"Directory not found: {os.path.dirname(PROMPT_TEMPLATE_PATH)}")
+
 
 def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
     # Print debug information
@@ -29,7 +39,7 @@ def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
         raise FileNotFoundError(
             f"Prompt template not found at: {PROMPT_TEMPLATE_PATH}\n"
             f"Current working directory: {os.getcwd()}\n"
-            f"BASE_DIR contents: {os.listdir(BASE_DIR)}"
+            f"Parent directory contents: {os.listdir(os.path.dirname(DATA_DIR))}"
         )
 
     if not n:
@@ -38,7 +48,6 @@ def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
     # Ensure data directory exists
     os.makedirs(DATA_DIR, exist_ok=True)
     
-    # Start the timer
     start_time = time.time()
         
     df_n = df.iloc[:n].copy().rename(columns={'summary': 'summary_old'})
@@ -66,7 +75,6 @@ def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
     result_df = result_df.reset_index(drop=True)
     result_df = pd.concat([df_n, result_df], axis=1)
     
-    # Calculate and print the elapsed time
     elapsed_time = time.time() - start_time
     print(f"Total Elapsed time to process {n} rows: {elapsed_time} seconds")
     

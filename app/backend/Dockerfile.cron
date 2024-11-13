@@ -1,0 +1,82 @@
+FROM python:3.12-slim
+
+# Add curl for health checks, cron, and build dependencies
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    curl \
+    cron \
+    gcc \
+    libpq-dev \
+    procps \
+    python3-dev \
+    libc-dev \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src/app
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /usr/src/app/ai-analyzer/data \
+             /usr/src/app/ai-analyzer/prompt_template \
+             /var/log \
+    && touch /var/log/cron.log \
+    && chmod 0666 /var/log/cron.log
+
+# Copy application code and configuration
+COPY ai-analyzer /usr/src/app/ai-analyzer/
+COPY .env /usr/src/app/ai-analyzer/.env
+COPY requirements.txt .
+
+# Modify requirements to use psycopg2-binary instead of psycopg2
+RUN sed -i 's/psycopg2==/psycopg2-binary==/g' requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Set correct permissions
+RUN chmod 644 /usr/src/app/ai-analyzer/.env \
+    && chmod -R 755 /usr/src/app \
+    && chmod -R 777 /usr/src/app/ai-analyzer/data
+
+# Set environment variables
+ENV PYTHONPATH=/usr/src/app/ai-analyzer \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=UTF-8
+
+# Create debug script
+RUN echo '#!/bin/bash\n\
+echo "=== $(date) ===" >> /var/log/cron.log\n\
+echo "Directory contents:" >> /var/log/cron.log\n\
+ls -R /usr/src/app >> /var/log/cron.log\n\
+echo "Current PYTHONPATH:" >> /var/log/cron.log\n\
+echo $PYTHONPATH >> /var/log/cron.log\n\
+echo "Environment variables:" >> /var/log/cron.log\n\
+env >> /var/log/cron.log\n\
+echo ".env file contents:" >> /var/log/cron.log\n\
+cat /usr/src/app/ai-analyzer/.env >> /var/log/cron.log' > /usr/local/bin/debug.sh \
+    && chmod +x /usr/local/bin/debug.sh
+
+# Create the pipeline script
+RUN echo '#!/bin/bash\n\
+source /etc/environment\n\
+cd /usr/src/app\n\
+PYTHONPATH=/usr/src/app/ai-analyzer python3 -m ai_analyzer.data_pipeline' > /usr/local/bin/run-pipeline.sh \
+    && chmod +x /usr/local/bin/run-pipeline.sh
+
+# Set up cron job
+RUN echo "*/5 * * * * /usr/local/bin/run-pipeline.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/pipeline-cron \
+    && chmod 0644 /etc/cron.d/pipeline-cron \
+    && crontab /etc/cron.d/pipeline-cron
+
+# Create and set up startup script
+RUN echo '#!/bin/bash\n\
+echo "=== Starting container $(date) ===" >> /var/log/cron.log\n\
+/usr/local/bin/debug.sh\n\
+\n\
+# Export all environment variables for cron\n\
+printenv | grep -v "no_proxy" > /etc/environment\n\
+\n\
+# Start cron in foreground\n\
+exec cron -f' > /usr/local/bin/start.sh \
+    && chmod +x /usr/local/bin/start.sh
+
+# Use exec form of CMD
+CMD ["/usr/local/bin/start.sh"]
