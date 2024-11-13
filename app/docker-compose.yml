@@ -28,7 +28,7 @@ services:
     tty: true
     networks:
       - app-network
-
+ 
   backend_app:
     build:
       context: ./backend
