@@ -3,15 +3,39 @@ import sys
 import os
 import uuid
 from datetime import datetime 
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy import create_engine, Column, String, DateTime, Integer, text, cast, Numeric, UniqueConstraint  
 import logging
-import pandas as pd
-from ai_analyzer.config import config, DATABASE_URL, DATA_DIR
-from ai_analyzer import fetch_data_from_api as fetch_data
-from ai_analyzer.data_import_postgresql import run_data_import
-from ai_analyzer.make_openai_call_df import make_openai_call_df
+import importlib
 
+def verify_packages():
+    """Verify all required packages are installed"""
+    required_packages = [
+        'sqlalchemy',
+        'pandas',
+        'psycopg2',
+        'openai',
+        'dotenv',  # Changed from python-dotenv to dotenv
+        'fastapi',
+        'uvicorn'
+    ]
+    
+    logger = logging.getLogger('data_pipeline')
+    logger.info("Verifying required packages...")
+    
+    missing = []
+    for package in required_packages:
+        try:
+            importlib.import_module(package)
+            logger.info(f"✓ {package} is installed")
+        except ImportError:
+            missing.append(package)
+            logger.error(f"✗ {package} is missing")
+    
+    if missing:
+        logger.error(f"Missing required packages: {', '.join(missing)}")
+        sys.exit(1)
+    else:
+        logger.info("All required packages are installed")
+        
 # Enhanced logging setup
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +46,21 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger('data_pipeline')
+
+# Verify packages
+verify_packages()
+
+# Now import the packages after verification
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, text, cast, Numeric, UniqueConstraint  
+import pandas as pd
+from ai_analyzer.config import config, DATABASE_URL, DATA_DIR
+from ai_analyzer import fetch_data_from_api as fetch_data
+from ai_analyzer.data_import_postgresql import run_data_import
+from ai_analyzer.make_openai_call_df import make_openai_call_df
+
+
+
 
 # Get the current date
 current_date = datetime.now().date().strftime("%Y-%m-%d")
