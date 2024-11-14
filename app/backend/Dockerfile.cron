@@ -22,18 +22,15 @@ RUN mkdir -p /usr/src/app/ai-analyzer/data \
     && touch /var/log/cron.log \
     && chmod 0666 /var/log/cron.log
 
-# Copy application code and configuration
-COPY ai-analyzer /usr/src/app/ai-analyzer/
-COPY .env /usr/src/app/ai-analyzer/.env
-COPY requirements.txt .
+# Copy the entire backend directory structure
+COPY . /usr/src/app/
 
 # Modify requirements to use psycopg2-binary instead of psycopg2
 RUN sed -i 's/psycopg2==/psycopg2-binary==/g' requirements.txt && \
     pip install --no-cache-dir -r requirements.txt
 
 # Set correct permissions
-RUN chmod 644 /usr/src/app/ai-analyzer/.env \
-    && chmod -R 755 /usr/src/app \
+RUN chmod -R 755 /usr/src/app \
     && chmod -R 777 /usr/src/app/ai-analyzer/data
 
 # Set environment variables
@@ -49,34 +46,47 @@ ls -R /usr/src/app >> /var/log/cron.log\n\
 echo "Current PYTHONPATH:" >> /var/log/cron.log\n\
 echo $PYTHONPATH >> /var/log/cron.log\n\
 echo "Environment variables:" >> /var/log/cron.log\n\
-env >> /var/log/cron.log\n\
-echo ".env file contents:" >> /var/log/cron.log\n\
-cat /usr/src/app/ai-analyzer/.env >> /var/log/cron.log' > /usr/local/bin/debug.sh \
+env >> /var/log/cron.log' > /usr/local/bin/debug.sh \
     && chmod +x /usr/local/bin/debug.sh
 
-# Create the pipeline script
+# Create the pipeline script with proper env loading
 RUN echo '#!/bin/bash\n\
-source /etc/environment\n\
 cd /usr/src/app\n\
-PYTHONPATH=/usr/src/app/ai-analyzer python3 -m ai_analyzer.data_pipeline' > /usr/local/bin/run-pipeline.sh \
+eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
+PYTHONPATH=/usr/src/app/ai-analyzer exec python3 -m ai_analyzer.data_pipeline' > /usr/local/bin/run-pipeline.sh \
     && chmod +x /usr/local/bin/run-pipeline.sh
 
-# Set up cron job
+# Set up cron job with logging
 RUN echo "*/5 * * * * /usr/local/bin/run-pipeline.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/pipeline-cron \
     && chmod 0644 /etc/cron.d/pipeline-cron \
     && crontab /etc/cron.d/pipeline-cron
 
-# Create and set up startup script
+# Create and set up startup script with proper env loading
 RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
 echo "=== Starting container $(date) ===" >> /var/log/cron.log\n\
 /usr/local/bin/debug.sh\n\
 \n\
-# Export all environment variables for cron\n\
-printenv | grep -v "no_proxy" > /etc/environment\n\
+# Load environment variables from .env\n\
+eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
 \n\
-# Start cron in foreground\n\
-exec cron -f' > /usr/local/bin/start.sh \
-    && chmod +x /usr/local/bin/start.sh
+# Export all environment variables for cron\n\
+printenv | grep -v "^_\\|^HOSTNAME\\|^HOME\\|^PATH\\|^PWD" | while read -r line; do\n\
+    echo "export \"$line\"" >> /etc/environment\n\
+done\n\
+\n\
+# Ensure cron is not running\n\
+service cron stop || true\n\
+\n\
+# Start cron and verify it is running\n\
+service cron start\n\
+status=$(service cron status)\n\
+echo "Cron status: $status" >> /var/log/cron.log\n\
+\n\
+# Keep container running and tail logs\n\
+exec tail -f /var/log/cron.log' > /usr/local/bin/start.sh && \
+    chmod +x /usr/local/bin/start.sh
 
 # Use exec form of CMD
 CMD ["/usr/local/bin/start.sh"]
