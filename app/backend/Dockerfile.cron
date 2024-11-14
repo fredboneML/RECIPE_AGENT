@@ -38,7 +38,7 @@ ENV PYTHONPATH=/usr/src/app/ai-analyzer \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=UTF-8
 
-# Create debug script
+# Create debug script with correct .env path
 RUN echo '#!/bin/bash\n\
 echo "=== $(date) ===" >> /var/log/cron.log\n\
 echo "Directory contents:" >> /var/log/cron.log\n\
@@ -49,19 +49,28 @@ echo "Environment variables:" >> /var/log/cron.log\n\
 env >> /var/log/cron.log' > /usr/local/bin/debug.sh \
     && chmod +x /usr/local/bin/debug.sh
 
-# Create the pipeline script with proper env loading
+# Set up cron job with environment
 RUN echo '#!/bin/bash\n\
-cd /usr/src/app\n\
-eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
-PYTHONPATH=/usr/src/app/ai-analyzer exec python3 -m ai_analyzer.data_pipeline' > /usr/local/bin/run-pipeline.sh \
-    && chmod +x /usr/local/bin/run-pipeline.sh
+source /etc/environment\n\
+/usr/local/bin/run-pipeline.sh\n' > /usr/local/bin/cron-wrapper.sh \
+    && chmod +x /usr/local/bin/cron-wrapper.sh
 
-# Set up cron job with logging
-RUN echo "*/5 * * * * /usr/local/bin/run-pipeline.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/pipeline-cron \
+# Set up cron job with logging using the wrapper
+RUN echo "*/5 * * * * /usr/local/bin/cron-wrapper.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/pipeline-cron \
     && chmod 0644 /etc/cron.d/pipeline-cron \
     && crontab /etc/cron.d/pipeline-cron
 
-# Create and set up startup script with proper env loading
+# Create the pipeline script with proper env loading and DB host
+RUN echo '#!/bin/bash\n\
+cd /usr/src/app\n\
+eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
+export PATH="/usr/local/bin:$PATH"\n\
+export PYTHONPATH=/usr/src/app/ai-analyzer\n\
+export DB_HOST=database\n\
+exec python3 -m ai_analyzer.data_pipeline' > /usr/local/bin/run-pipeline.sh \
+    && chmod +x /usr/local/bin/run-pipeline.sh
+
+# Create and set up startup script
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
@@ -71,7 +80,14 @@ echo "=== Starting container $(date) ===" >> /var/log/cron.log\n\
 # Load environment variables from .env\n\
 eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
 \n\
-# Export all environment variables for cron\n\
+# Export Python-related environment variables\n\
+echo "export PATH=/usr/local/bin:$PATH" >> /etc/environment\n\
+echo "export PYTHONPATH=/usr/src/app/ai-analyzer" >> /etc/environment\n\
+echo "export PYTHONUNBUFFERED=1" >> /etc/environment\n\
+echo "export PYTHONIOENCODING=UTF-8" >> /etc/environment\n\
+echo "export DB_HOST=database" >> /etc/environment\n\
+\n\
+# Export all other environment variables for cron\n\
 printenv | grep -v "^_\\|^HOSTNAME\\|^HOME\\|^PATH\\|^PWD" | while read -r line; do\n\
     echo "export \"$line\"" >> /etc/environment\n\
 done\n\

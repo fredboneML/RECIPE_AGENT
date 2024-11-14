@@ -72,44 +72,36 @@ services:
       - app-network
 
   cron_app:
-          build:
-            context: ./backend
-            dockerfile: Dockerfile.cron
-          container_name: cron_app
-          depends_on:
-            database:
-              condition: service_healthy
-            backend_app:
-              condition: service_started
-          environment:
-            - POSTGRES_USER=${POSTGRES_USER}
-            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-            - POSTGRES_DB=${POSTGRES_DB}
-            - DB_HOST=database
-            - DB_PORT=5432
-            - OPENAI_API_KEY=${OPENAI_API_KEY}
-            - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
-            - URL=${URL}
-            - API_KEY=${API_KEY}
-            - HOST=${HOST:-localhost}
-            - PYTHONPATH=/usr/src/app/ai-analyzer
-            - PYTHONUNBUFFERED=1
-            - PYTHONIOENCODING=UTF-8
-          volumes:
-            - ./backend:/usr/src/app:delegated
-            - ./.env:/usr/src/app/.env:ro  # Updated to mount at the correct location
-            - cron_logs:/var/log
-          healthcheck:
-            test: ["CMD-SHELL", "pgrep cron || exit 1"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 30s
-          restart: unless-stopped
-          stdin_open: true
-          tty: true
-          networks:
-            - app-network      
+        build:
+          context: ./backend
+          dockerfile: Dockerfile.cron
+        container_name: cron_app
+        depends_on:
+          database:
+            condition: service_healthy
+          backend_app:
+            condition: service_started
+        environment:
+          - POSTGRES_USER=${POSTGRES_USER}
+          - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          - POSTGRES_DB=${POSTGRES_DB}
+          - DB_HOST=database   # This is crucial
+          - DB_PORT=5432
+          - OPENAI_API_KEY=${OPENAI_API_KEY}
+          - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
+          - URL=${URL}
+          - API_KEY=${API_KEY}
+          - HOST=${HOST:-localhost}
+          - PYTHONPATH=/usr/src/app/ai-analyzer
+          - PYTHONUNBUFFERED=1
+          - PYTHONIOENCODING=UTF-8
+        volumes:
+          - ./backend:/usr/src/app:delegated
+          - ./.env:/usr/src/app/.env:ro
+          - cron_logs:/var/log
+        restart: unless-stopped
+        networks:
+          - app-network   
 
   database:
     image: postgres:13
