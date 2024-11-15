@@ -1,49 +1,69 @@
 #!/usr/bin/env python3
-
 import sys
 import os
-
-# Add the parent directory to sys.path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(script_dir)
-sys.path.append(parent_dir)
-
+import uuid
 from datetime import datetime 
-from dotenv import load_dotenv, find_dotenv
-from ai_analyzer import config
+import logging
+import importlib
+
+def verify_packages():
+    """Verify all required packages are installed"""
+    required_packages = [
+        'sqlalchemy',
+        'pandas',
+        'psycopg2',
+        'openai',
+        'dotenv',  # Changed from python-dotenv to dotenv
+        'fastapi',
+        'uvicorn'
+    ]
+    
+    logger = logging.getLogger('data_pipeline')
+    logger.info("Verifying required packages...")
+    
+    missing = []
+    for package in required_packages:
+        try:
+            importlib.import_module(package)
+            logger.info(f"✓ {package} is installed")
+        except ImportError:
+            missing.append(package)
+            logger.error(f"✗ {package} is missing")
+    
+    if missing:
+        logger.error(f"Missing required packages: {', '.join(missing)}")
+        sys.exit(1)
+    else:
+        logger.info("All required packages are installed")
+        
+# Enhanced logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('/var/log/cron.log')
+    ]
+)
+logger = logging.getLogger('data_pipeline')
+
+# Verify packages
+verify_packages()
+
+# Now import the packages after verification
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy import create_engine, Column, String, DateTime, ForeignKey, Integer
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, text, cast, Numeric, UniqueConstraint  
+import pandas as pd
+from ai_analyzer.config import config, DATABASE_URL, DATA_DIR
 from ai_analyzer import fetch_data_from_api as fetch_data
 from ai_analyzer.data_import_postgresql import run_data_import
-import logging
-
-import os
-import pandas as pd
 from ai_analyzer.make_openai_call_df import make_openai_call_df
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('data_import_postgresql')
 
-# Load environment variables from .env file
-load_dotenv(find_dotenv())
 
-# PostgreSQL connection details
-POSTGRES_USER = os.getenv('POSTGRES_USER')
-POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD')
-DB_HOST = os.getenv('DB_HOST')  
-DB_PORT = os.getenv('DB_PORT')
-POSTGRES_DB = os.getenv('POSTGRES_DB')
-
-# API URL details
-url = os.getenv('URL')
-api_key = os.getenv('API_KEY')
-limit = config.LIMIT
 
 # Get the current date
 current_date = datetime.now().date().strftime("%Y-%m-%d")
-
-data_dir = config.DATA_DIR
 
 # Base for ORM models
 Base = declarative_base()
@@ -51,7 +71,7 @@ Base = declarative_base()
 # Transcription table ORM model
 class Transcription(Base):
     __tablename__ = 'transcription'
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), nullable=False)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     company_id = Column(String, nullable=False)
     processingdate = Column(DateTime, nullable=False)
     transcription = Column(String, nullable=False)
@@ -59,28 +79,25 @@ class Transcription(Base):
     topic = Column(String)
     sentiment = Column(String)
 
+    # Add a unique constraint on company_id and processingdate
+    __table_args__ = (
+        UniqueConstraint(
+            'company_id', 
+            'processingdate', 
+            name='unique_company_transcription'
+        ),
+    )
+
 # Create a database engine
 def create_db_engine():
-    engine = create_engine(f'postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}')
+    engine = create_engine(DATABASE_URL)
     engine.connect()
     logger.info("Successfully connected to the database.")
     return engine
 
 # Return the max id of the transcription table
 def get_max_company_id(session):
-    """
-    Get the maximum company_id from the transcription table.
-    Casts the company_id to numeric before sorting to ensure proper numerical ordering.
-    
-    Args:
-        session: SQLAlchemy session object
-    
-    Returns:
-        str: The maximum company_id, or None if the table is empty
-    """
     try:
-        # Cast company_id to numeric for proper sorting
-        from sqlalchemy import cast, Numeric
         max_id = session.query(Transcription.company_id)\
             .order_by(cast(Transcription.company_id, Numeric).desc())\
             .first()
@@ -90,35 +107,19 @@ def get_max_company_id(session):
             return max_id[0]
         else:
             logger.info("No transcription records found in the database")
-            return None
+            return config.LAST_ID
     except Exception as e:
         logger.error(f"Error retrieving maximum company_id: {e}")
-        return None
-engine = create_db_engine()
-Session = sessionmaker(bind=engine)
-session = Session()
+        return config.LAST_ID
 
 def delete_files_by_date(directory, target_date):
-    """
-    Delete all files in the specified directory that have a specific date pattern between '__' and '.csv'
-    
-    Args:
-        directory (str): The directory path where to look for files
-        target_date (str): The date in format 'YYYY-MM-DD' to match
-        
-    Returns:
-        list: Names of deleted files
-    """
     try:
         deleted_files = []
-        # Get all files in directory
         for filename in os.listdir(directory):
             try:
-                # Find the date pattern between '__' and '.csv'
                 if '__' in filename and '.csv' in filename:
                     date_part = filename.split('__')[1].split('.csv')[0]
                     
-                    # Check if the extracted date matches the target date
                     if date_part == target_date:
                         file_path = os.path.join(directory, filename)
                         os.remove(file_path)
@@ -140,42 +141,68 @@ def delete_files_by_date(directory, target_date):
         logger.error(f"Error while deleting files: {e}")
         return []
 
+if __name__ == "__main__":
+    try:
+        logger.info("Starting data pipeline execution")
+        
+        # Log the current configuration
+        logger.info(f"Using database: {config['POSTGRES_DB']} on host: {config['DB_HOST']}")
+        
+        # Create engine and session
+        engine = create_db_engine()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
 #########################################################################################
 #--------------------------------------- Pipeline ---------------------------------------
 #########################################################################################
+        
+        try:
+            # 1st Step: Querying the max id of the transcription table
+            logger.info("Step 1: Querying max company ID")
+            last_id = int(get_max_company_id(session=session))
+            logger.info(f"Retrieved last_id: {last_id}")
 
-## 1rst Step of the pipeline ##
-# Querying the max id of the transcription table
-last_id = int(get_max_company_id(session=session))
+            # 2nd Step: Fetching data using the last_id found in the database
+            logger.info("Step 2: Fetching data from API")
+            fetch_data.fetch_data_from_api(config['URL'], config['API_KEY'], last_id, config['LIMIT'])
+            
+            df__file_name = [file for file in os.listdir(DATA_DIR) if file.startswith('df__')]
+            df__file_name = sorted(df__file_name,
+                               key=lambda x: datetime.strptime(x.split('__')[1].split('.csv')[0], '%Y-%m-%d'),
+                               reverse=True)
 
+            
+            # Only process if there are new data files besides the initial one
+            if len(df__file_name) > 1:
 
-## 2nd Step of the pipeline ##
-# Fetching data using the last_id found in the database to make sure 
-# We are only fetching new data
-
-fetch_data.fetch_data_from_api(url, api_key, last_id, limit)
-
-## 3rd Step of the pipeline ##
-# Generating sentiment and topic of the new data that has been fetched
-
-df__file_name = [file for file in os.listdir(data_dir) if file.startswith('df__')]
-df__file_name = sorted(df__file_name,
-                       key=lambda x: datetime.strptime(x.split('__')[1].split('.csv')[0], '%Y-%m-%d'),
-                       reverse=True)
-# The 3rd step should only be triggered if there are new data
-if len(df__file_name) > 1:
-    df__file_name = df__file_name[0]
-    df = pd.read_csv(f'{data_dir}/{df__file_name}')
-    make_openai_call_df(df=df, model="gpt-4o-mini-2024-07-18")
-
-## 4th Step of the pipeline ##
-    # Insert the generated topics and sentiments to the db
-    run_data_import()
-    
-## 5th Step of the pipeline ##
-    # Clean up (removing data inside the data folder after successful data import)
-    delete_files_by_date(data_dir, current_date)
-
+                # 3rd Step: Generating sentiment and topic of the new data
+                logger.info("Step 3: Processing new data") 
+                logger.info("Found new data files to process")
+                df__file_name = df__file_name[0]
+                logger.info(f"Processing file: {df__file_name}")
+                df = pd.read_csv(f'{DATA_DIR}/{df__file_name}')
+                logger.info(f"Number of rows to process: {len(df)}")
+                make_openai_call_df(df=df, model="gpt-4o-mini-2024-07-18")
+                
+                # 4th Step: Insert the generated topics and sentiments to the db
+                logger.info("Step 4: Running data import")
+                run_data_import()
+                
+                # 5th Step: Clean up
+                logger.info("Step 5: Cleaning up files")
+                deleted_files = delete_files_by_date(DATA_DIR, current_date)
+                logger.info(f"Deleted files: {deleted_files}")
+                logger.info("Pipeline execution completed successfully")
+            else:
+                logger.info("No new data files to process")   
+            
+        finally:
+            session.close()
+        
+    except Exception as e:
+        logger.error(f"Pipeline execution failed: {str(e)}", exc_info=True)
+        raise
 #########################################################################################
 #--------------------------------------- End Pipeline -----------------------------------
 #########################################################################################

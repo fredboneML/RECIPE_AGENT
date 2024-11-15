@@ -1,7 +1,7 @@
 import os
-import openai
-from openai import OpenAI
+import time
 import json
+from openai import OpenAI
 from jinja2 import Template
 from dotenv import load_dotenv, find_dotenv
 
@@ -10,8 +10,18 @@ load_dotenv(find_dotenv())
 
 # Initialize OpenAI client
 client = OpenAI(
-  api_key=os.environ['AI_ANALYZER_OPENAI_API_KEY'],  
+    api_key=os.environ['AI_ANALYZER_OPENAI_API_KEY'],
 )
+
+# Define pricing per model (per 1K tokens)
+pricing = {
+    "gpt-4o-2024-08-06": {"prompt": 0.003750, "completion": 0.015000},  # GPT-4o with new pricing
+    "gpt-4o-mini-2024-07-18": {"prompt": 0.000330, "completion": 0.001200},  # GPT-4o-mini with new pricing
+    "gpt-3.5-turbo": {"prompt": 0.003000, "completion": 0.006000},  # GPT-3.5 pricing (chat model)
+    "gpt-3.5-turbo-instruct": {"prompt": 0.001500, "completion": 0.002000},  # GPT-3.5-turbo-instruct pricing
+    "davinci-002": {"prompt": 0.012000, "completion": 0.012000},  # DaVinci pricing
+    "babbage-002": {"prompt": 0.001600, "completion": 0.001600},  # Babbage pricing
+}
 
 def generate_prompt(data, prompt_template_path):
     """Generates the prompt using a template."""
@@ -47,6 +57,10 @@ def access_sentiment_topic(response, model_type):
     topic = json_output.get("topic")
     summary = json_output.get("summary")
 
+    # Check if required fields are present
+    if not all([sentiment, topic, summary]):
+        raise ValueError("Missing required fields in JSON response")
+
     result = {
         "sentiment": sentiment,
         "topic": topic,
@@ -55,17 +69,8 @@ def access_sentiment_topic(response, model_type):
     
     return result
 
-# Define pricing per model (per 1K tokens)
-pricing = {
-    "gpt-4o-2024-08-06": {"prompt": 0.003750, "completion": 0.015000},  # GPT-4o with new pricing
-    "gpt-4o-mini-2024-07-18": {"prompt": 0.000330, "completion": 0.001200},  # GPT-4o-mini with new pricing
-    "gpt-3.5-turbo": {"prompt": 0.003000, "completion": 0.006000},  # GPT-3.5 pricing (chat model)
-    "gpt-3.5-turbo-instruct": {"prompt": 0.001500, "completion": 0.002000},  #  GPT-3.5-turbo-instruct pricing
-    "davinci-002": {"prompt": 0.012000, "completion": 0.012000},  # DaVinci pricing
-    "babbage-002": {"prompt": 0.001600, "completion": 0.001600},  # Babbage pricing
-}
-# Helper function to determine model type (chat or completion)
 def is_chat_model(model):
+    """Helper function to determine model type (chat or completion)"""
     chat_models = ["gpt-3.5-turbo", "gpt-4o-2024-08-06", "gpt-4o-mini-2024-07-18"]
     return model in chat_models
 
@@ -73,59 +78,79 @@ def calculate_cost(model, prompt_tokens, completion_tokens):
     """Calculates the cost based on prompt and completion tokens."""
     prompt_cost = (prompt_tokens / 1000) * pricing[model]["prompt"]
     completion_cost = (completion_tokens / 1000) * pricing[model]["completion"]
-    total_cost = prompt_cost + completion_cost
-    return total_cost
+    return round(prompt_cost + completion_cost, 6)
 
-def make_openai_call(prompt, model):
-    """Make an OpenAI API call and calculate its cost."""
+def make_api_call(prompt, model, attempt=1, max_attempts=5):
+    """Make a single API call with the given model and handle the response"""
     model_type = "chat" if is_chat_model(model) else "completion"
     
-    if model_type == "chat":
-        # Use ChatCompletion for chat models
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that does summarization, sentiment analysis, and topic modeling."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=500,
-            temperature=0
-        )
-    else:
-        # Use Completion for completion models
-        response = client.completions.create(
-            model=model,
-            prompt=prompt,
-            max_tokens=500,
-            temperature=0
-        )
+    try:
+        if model_type == "chat":
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that does summarization, sentiment analysis, and topic modeling. You MUST respond in valid JSON format."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0
+            )
+        else:
+            response = client.completions.create(
+                model=model,
+                prompt=prompt,
+                max_tokens=500,
+                temperature=0
+            )
 
-    # Extract token usage from the response
-    prompt_tokens = response.usage.prompt_tokens
-    completion_tokens = response.usage.completion_tokens
+        # Try to parse the response
+        sentiment_topic = access_sentiment_topic(response, model_type)
+        
+        # Calculate costs
+        prompt_tokens = response.usage.prompt_tokens
+        completion_tokens = response.usage.completion_tokens
+        cost = calculate_cost(model, prompt_tokens, completion_tokens)
 
-    # Calculate the cost for this call
-    cost = calculate_cost(model, prompt_tokens, completion_tokens)
-    cost = round(cost, 6)
+        return {
+            "success": True,
+            "data": sentiment_topic,
+            "cost": cost,
+            "attempt": attempt
+        }
 
-    # Extract sentiment and topic from the response
-    sentiment_topic = access_sentiment_topic(response, model_type)
-    sentiment = sentiment_topic["sentiment"]
-    topic = sentiment_topic["topic"]
-    summary = sentiment_topic["summary"]
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"Attempt {attempt} failed: {str(e)}")  # Add logging for debugging
+        if attempt < max_attempts:
+            # Add a small delay before retrying
+            time.sleep(5)
+            # Modify the prompt to emphasize JSON format requirement
+            enhanced_prompt = f"{prompt}\n\nIMPORTANT: Your response MUST be in valid JSON format as shown in the example above. Do not include any other text or formatting."
+            return make_api_call(enhanced_prompt, model, attempt + 1, max_attempts)
+        else:
+            return {
+                "success": False,
+                "error": str(e),
+                "attempt": attempt
+            }
+    except Exception as e:
+        print(f"Unexpected error on attempt {attempt}: {str(e)}")  # Add logging for debugging
+        return {
+            "success": False,
+            "error": f"Unexpected error: {str(e)}",
+            "attempt": attempt
+        }
 
-    # Print the result and cost
-    # print(f"model: {model}")
-    # print(f"sentiment: {sentiment}")
-    # print(f"topic: {topic}")
-    # print(f"API Call Cost: ${cost:.5f}")
-    # print(f"Prompt Tokens: {prompt_tokens}, Completion Tokens: {completion_tokens}")
-    result = {
-        "summary": summary,
-        "topic": topic,
-        "sentiment": sentiment,
-        "cost": cost,
-    }
+def make_openai_call(prompt, model):
+    """Make OpenAI API call with retry logic and return the results"""
+    result = make_api_call(prompt, model)
     
-    return result
-
+    if result["success"]:
+        return {
+            "summary": result["data"]["summary"],
+            "topic": result["data"]["topic"],
+            "sentiment": result["data"]["sentiment"],
+            "cost": result["cost"],
+            "attempts": result["attempt"]
+        }
+    else:
+        raise ValueError(f"Failed to get valid response after multiple attempts. Last error: {result['error']}")

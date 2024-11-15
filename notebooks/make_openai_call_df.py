@@ -54,6 +54,6 @@ def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
                     .rename(columns={'id': 'company_id'})
                    )
 
-    result_df.to_csv(f'../data/df_transcription__{current_date}.csv', index=False)
+    result_df.to_csv(f'../app/backend/ai-analyzer/data/df_transcription__{current_date}.csv', index=False)
 
     return result_df

@@ -44,9 +44,7 @@ echo "=== $(date) ===" >> /var/log/cron.log\n\
 echo "Directory contents:" >> /var/log/cron.log\n\
 ls -R /usr/src/app >> /var/log/cron.log\n\
 echo "Current PYTHONPATH:" >> /var/log/cron.log\n\
-echo $PYTHONPATH >> /var/log/cron.log\n\
-echo "Environment variables:" >> /var/log/cron.log\n\
-env >> /var/log/cron.log' > /usr/local/bin/debug.sh \
+echo $PYTHONPATH >> /var/log/cron.log' > /usr/local/bin/debug.sh \
     && chmod +x /usr/local/bin/debug.sh
 
 # Set up cron job with environment
