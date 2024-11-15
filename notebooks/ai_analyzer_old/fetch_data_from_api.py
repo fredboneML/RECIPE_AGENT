@@ -28,9 +28,6 @@ def fetch_data_from_api(url, api_key, last_id, limit=None):
         }
 
         logger.info(f"Sending request to {url} with last_id: {last_id}")
-        logger.info(f"URL: {config['URL']}")
-        logger.info(f"API_KEY: {config['API_KEY']}")
-        logger.info(f"LIMIT: {config['LIMIT']} ")
         response = requests.post(url, data=form_data, params=params)
 
         if response.status_code == 200:

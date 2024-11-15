@@ -38,9 +38,10 @@ def fetch_data_from_api(url, api_key, last_id, limit=10000):
         df_company = df[['id', 'clid', 'dst']].rename(columns={'dst': 'telephone_number'})
         df = df[['id', 'processingdate', 'transcription', 'summary']]
         
-        df_company.to_csv(f'../data/df_company__{current_date}.csv', index=False)
-        df.to_csv(f'../data/df__{current_date}.csv', index=False)
+        df_company.to_csv(f'../app/backend/ai-analyzer/data/df_company__{current_date}.csv', index=False)
+        df.to_csv(f'../app/backend/ai-analyzer/data/df__{current_date}.csv', index=False)
         print('data successfully fetched and saved') 
         print(f"""first id: {min(df['id'])}, last id: {max(df['id'])}, number of rows: {len(df)}""")
     else:
         print('No new data to be fetched')
+

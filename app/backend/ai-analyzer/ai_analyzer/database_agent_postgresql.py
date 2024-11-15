@@ -1,24 +1,179 @@
 # ai_analyzer/database_agent_postgresql.py
-import os
-from dotenv import load_dotenv, find_dotenv
+from typing import List, Optional, Dict
+from enum import Enum
+from pydantic import BaseModel
+import re
+import logging
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_experimental.sql import SQLDatabaseSequentialChain
 from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
-import logging
-import re
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from ai_analyzer.config import config, DATABASE_URL
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create SQLAlchemy engine string
-#db_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}" #service name of our database container
+class SQLOperation(str, Enum):
+    SELECT = "SELECT"
+    INSERT = "INSERT"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+    CREATE = "CREATE"
+    ALTER = "ALTER"
+    DROP = "DROP"
+    TRUNCATE = "TRUNCATE"
 
-db_url=DATABASE_URL
+class SQLGuardrails(BaseModel):
+    allowed_operations: List[SQLOperation]
+    allowed_tables: List[str]
+    max_rows_per_query: int
+    sensitive_tables: List[str]
+    sensitive_columns: Dict[str, List[str]]
+    blacklisted_keywords: List[str]
+
+class DatabaseAgentValidator:
+    def __init__(self):
+        # Initialize guardrails with your specific configurations
+        self.guardrails = SQLGuardrails(
+            allowed_operations=[SQLOperation.SELECT],
+            allowed_tables=['company', 'transcription'],
+            max_rows_per_query=1000,
+            sensitive_tables=['user', 'users', 'user_memory'],
+            sensitive_columns={
+                'company': [],
+                'transcription': []
+            },
+            blacklisted_keywords=[
+                'DELETE', 'DROP', 'UPDATE', 'INSERT', 'ALTER', 'TRUNCATE',
+                'EXECUTE', 'SHELL', 'SYSTEM', 'GRANT', 'REVOKE'
+            ]
+        )
+        
+        self.dangerous_patterns = [
+            #r";\s*(\w+)",  # Multiple statements
+            r"--",         # SQL comments
+            r"/\*.*?\*/",  # Multi-line comments
+            r"xp_\w+",     # Extended stored procedures
+            r"sp_\w+",     # System stored procedures
+            r"WAITFOR",    # Time delay attacks
+            r"OPENROWSET", # Remote access
+            r"BULK INSERT" # Bulk operations
+        ]
+
+
+    def validate_query(self, query: str) -> tuple[bool, Optional[str]]:
+        """
+        Comprehensive query validation against security rules.
+        Returns (is_valid, error_message).
+        """
+        if not query:
+            return False, "Empty query is not allowed"
+
+        query = query.strip().upper()
+
+        # 1. Check for dangerous patterns
+        for pattern in self.dangerous_patterns:
+            if re.search(pattern, query, re.IGNORECASE):
+                return False, f"Query contains dangerous pattern: {pattern}"
+
+        # 2. Validate operation type
+        first_word = query.split()[0]
+        if first_word not in [op.value for op in self.guardrails.allowed_operations]:
+            return False, f"Operation {first_word} is not allowed"
+
+        # 3. Check for blacklisted keywords
+        for keyword in self.guardrails.blacklisted_keywords:
+            if keyword.upper() in query:
+                return False, f"Query contains blacklisted keyword: {keyword}"
+
+        # 4. Extract and validate tables
+        tables = self._extract_tables(query)
+
+        # Check for sensitive tables
+        for table in tables:
+            if table.lower() in self.guardrails.sensitive_tables:
+                return False, f"Access to sensitive table {table} is not allowed"
+            
+            if table.lower() not in self.guardrails.allowed_tables:
+                return False, f"Table {table} is not in the allowed tables list"
+
+        # 5. Validate sensitive columns
+        for table in tables:
+            if table in self.guardrails.sensitive_columns:
+                sensitive_cols = self.guardrails.sensitive_columns[table]
+                for col in sensitive_cols:
+                    if col.upper() in query:
+                        return False, f"Access to sensitive column {col} is not allowed"
+
+        # 6. Validate row limit for SELECT queries
+        #if not self._validate_row_limit(query):
+        #    return False, f"Query must include LIMIT clause not exceeding {self.guardrails.max_rows_per_query} rows"
+
+        return True, None       
+
+    
+    def _extract_tables(self, query: str) -> List[str]:
+        """
+        Extract table names from the query, properly handling aliases.
+        
+        Parameters:
+        query (str): SQL query string
+        
+        Returns:
+        List[str]: List of base table names without aliases
+        """
+        tables = []
+        
+        # Enhanced pattern to match tables with optional aliases
+        table_pattern = r'\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*(?:\s+(?:AS\s+)?[A-Za-z0-9_]+)?)'
+        
+        # Find all table references
+        matches = re.finditer(table_pattern, query, re.IGNORECASE)
+        
+        for match in matches:
+            # Extract the full table reference (including potential alias)
+            table_full = match.group(1)
+            # Split on whitespace and take first part (base table name)
+            base_table = table_full.split()[0].lower()
+            tables.append(base_table)
+        
+        # Return unique table names
+        return list(set(tables))   
+
+
+    def _validate_row_limit(self, query: str) -> bool:
+        """Validate that SELECT queries have appropriate LIMIT clause."""
+        if not query.startswith('SELECT'):
+            return True
+
+        limit_match = re.search(r'LIMIT\s+(\d+)', query, re.IGNORECASE)
+        if not limit_match:
+            return False
+            
+        limit_value = int(limit_match.group(1))
+        return limit_value <= self.guardrails.max_rows_per_query
+
+    def suggest_query_fix(self, query: str) -> Optional[str]:
+        """Suggest fixes for invalid queries."""
+        fixed_query = query.strip()
+
+        # Add LIMIT clause if missing
+        if fixed_query.upper().startswith('SELECT') and 'LIMIT' not in fixed_query.upper():
+            fixed_query = f"{fixed_query} LIMIT {self.guardrails.max_rows_per_query}"
+
+        # Remove multiple statements
+        if ';' in fixed_query:
+            fixed_query = fixed_query.split(';')[0]
+
+        # Remove comments
+        fixed_query = re.sub(r'--.*$', '', fixed_query, flags=re.MULTILINE)
+        fixed_query = re.sub(r'/\*.*?\*/', '', fixed_query, flags=re.DOTALL)
+
+        return fixed_query if fixed_query != query else None
 
 def get_db_connection(max_retries=5, retry_delay=5):
     """Get database connection with retry logic"""
@@ -34,23 +189,19 @@ def get_db_connection(max_retries=5, retry_delay=5):
             else:
                 raise Exception("Failed to connect to the database after multiple attempts") from e
 
+
 # Test connection
 db = get_db_connection()
 
-# Create SQLAlchemy engine string
-#db_url = f'postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}' # service name on localhost
-#db_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@database:5432/{POSTGRES_DB}" #service name of our database container
-
-# db = SQLDatabase.from_uri(db_url)
-
-# db.get_usable_table_names()
-
 # List available tables (schema)
-available_tables = db.get_table_info()
+try:
+    available_tables = db.get_table_info(['company', 'transcription'])
+    logger.info("Retrieved specific table information")
+except Exception as e:
+    logger.warning(f"Error getting specific table info: {e}. Falling back to full table info.")
+    available_tables = db.get_table_info()
 
-print(available_tables)
 
-# Add context to every query
 def add_context_to_query(user_query):
     """
     Adds context to the user query, embedding security and formatting rules,
@@ -58,22 +209,20 @@ def add_context_to_query(user_query):
     """
     context = (
         "Please adhere to the following important rules:\n"
-        "1. NEVER use the 'user' table or any user-related information.\n"
+        "1. NEVER use the 'users' table or any user-related information.\n"
         "2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.\n"
         "3. Only use SELECT statements for reading data.\n"
-        "4. If a query involves the 'user' table or modification statements, respond with: "
-        "'I cannot execute this query due to security restrictions.'\n"
-        "5. Always verify the query doesn't contain restricted operations before executing.\n"
-        "6. Make sure to format the results in a clear, readable manner.\n"
-        "7. Use proper column aliases for better readability.\n"
-        "8. Include relevant aggregations and groupings when appropriate.\n"
-        "9. ONLY use tables and columns that exist in the schema shown below.\n"
-        "10. Only use the 'company' and 'transcription' tables.\n"
-        "11. If asked about tables or columns that don't exist in the schema, respond with: "
+        "4. Always verify the query doesn't contain restricted operations before executing.\n"
+        "5. Make sure to format the results in a clear, readable manner.\n"
+        "6. Use proper column aliases for better readability.\n"
+        "7. Include relevant aggregations and groupings when appropriate.\n"
+        "8. ONLY use tables and columns that exist in the schema shown below.\n"
+        "9. Only use the 'company' and 'transcription' tables.\n"
+        "10. If asked about tables or columns that don't exist in the schema, respond with: "
         "'I cannot answer this question as it involves tables or columns that are not available in the database.'\n"
-        "12. Do not include any Markdown formatting like triple backticks or code blocks in any part of your response.\n"
-        "13. Do not prefix your SQL queries with 'SQL' or any other language identifiers.\n"
-        "14. Provide the SQL query as plain text within the quotes.\n\n"
+        "11. Do not include any Markdown formatting like triple backticks or code blocks in any part of your response.\n"
+        "12. Do not prefix your SQL queries with 'SQL' or any other language identifiers.\n"
+        "13. Provide the SQL query as plain text within the quotes.\n\n"
         "Schema of available tables:\n"
         f"{available_tables}\n\n"
         "Please only use these tables in your SQL query and do not make up non-existing ones to answer the following question:\n"
@@ -81,74 +230,54 @@ def add_context_to_query(user_query):
     return f"{context} {user_query}"
 
 
-# Initialize OpenAI language model
-llm = ChatOpenAI(temperature=0, openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'), model_name='gpt-3.5-turbo')
 
-# Initialize SQL database and chain
-def validate_query(query):
-    """
-    Validates SQL query based on security and formatting rules.
-
-    Parameters:
-    query (str): SQL query string to be validated.
-
-    Returns:
-    str: Error message if validation fails, otherwise None if query is valid.
-    """
-    forbidden_tables = ['user', 'users', 'user_memory']
-    forbidden_operations = ['DELETE', 'UPDATE', 'INSERT', 'DROP', 'ALTER']
-    allowed_tables = ['company', 'transcription']
-
-    # Find the position of the first 'SELECT' to isolate the SQL part
-    select_index = query.upper().find("SELECT")
-    if select_index == -1:
-        return "Only SELECT statements are allowed."
-
-    # Extract the SQL statement starting from the SELECT keyword
-    sql_statement = query[select_index:]
-
-    # Check for forbidden tables
-    for table in forbidden_tables:
-        if re.search(rf'\b{table}\b', sql_statement, re.IGNORECASE):
-            return "I cannot execute this query due to security restrictions."
-
-    # Check for forbidden operations (whole words only)
-    for operation in forbidden_operations:
-        if re.search(rf'\b{operation}\b', sql_statement, re.IGNORECASE):
-            return "I cannot execute this query due to security restrictions."
-
-    # Ensure only allowed tables are used (matches table names after FROM or JOIN)
-    tables_in_query = re.findall(r'\b(?:FROM|JOIN)\s+([A-Za-z_]+)', sql_statement, re.IGNORECASE)
-    if any(table for table in tables_in_query if table not in allowed_tables):
-        return "I cannot answer this question as it involves tables or columns that are not available in the database."
-
-    # Query passed validation
-    return None
-
-
-def answer_question(question):
+def answer_question(question: str):
+    """Enhanced question answering with guardrails validation"""
     try:
-        db = SQLDatabase.from_uri(db_url)
+        # Initialize validator
+        validator = DatabaseAgentValidator()
+        
+        # Get database connection
+        db = get_db_connection()
+        llm = ChatOpenAI(
+            temperature=0, 
+            openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'), 
+            model_name='gpt-3.5-turbo'
+        )
         db_chain = SQLDatabaseSequentialChain.from_llm(llm, db, verbose=True, use_query_checker=True)
 
         logger.info(f"Received question: {question}")
 
-        # Process the query by adding the context with available tables
+        # Process the query
         processed_query = add_context_to_query(question)
         
-        # Validate the query before execution
-        validation_error = validate_query(processed_query)
-        print(validation_error )
-        #if validation_error:
-         #   return validation_error
+        # Extract actual SQL query from the LLM response
+        # This is a simplified extraction - you might need to adjust based on your LLM's output format
+        sql_match = re.search(r'SELECT.*?(?=\n|$)', processed_query, re.IGNORECASE | re.DOTALL)
+        if sql_match:
+            sql_query = sql_match.group(0)
+            
+            # Validate the query
+            is_valid, error_message = validator.validate_query(sql_query)
+            
+            if not is_valid:
+                suggested_fix = validator.suggest_query_fix(sql_query)
+                error_response = f"Query validation failed: {error_message}"
+                if suggested_fix:
+                    error_response += f"\nSuggested fix: {suggested_fix}"
+                return error_response
 
-        # Execute the question using the chain
-        result = db_chain.run(processed_query)
-        return result
+            # Execute the validated query
+            result = db_chain.run(processed_query)
+            return result
+        else:
+            return "No valid SQL query found in the response"
+
     except Exception as e:
         logger.error(f"Error processing question: {e}")
         return f"An error occurred while processing your question: {e}"
 
+# Example usage
 if __name__ == "__main__":
     # Sample questions to test the agent
     sample_questions = [

@@ -1,15 +1,16 @@
-# ai_analyzer/make_openai_call.py
 import os
 import openai
 from openai import OpenAI
 import json
 from jinja2 import Template
-from ai_analyzer.config import config
+from dotenv import load_dotenv, find_dotenv
 
+# Load environment variables from .env file
+load_dotenv(find_dotenv())
 
 # Initialize OpenAI client
 client = OpenAI(
-  api_key=config['AI_ANALYZER_OPENAI_API_KEY'],  
+  api_key=os.environ['AI_ANALYZER_OPENAI_API_KEY'],  
 )
 
 def generate_prompt(data, prompt_template_path):
