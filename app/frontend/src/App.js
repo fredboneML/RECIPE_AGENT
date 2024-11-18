@@ -17,7 +17,6 @@ function App() {
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
   
-  // Dynamically determine the backend URL
   const backendUrl = window.location.hostname === 'localhost' 
     ? 'http://localhost:8000'
     : `http://${window.location.hostname}:8000`;
@@ -81,7 +80,13 @@ function App() {
       });
       if (response.ok) {
         const data = await response.json();
-        setMessages(data);
+        // Transform the data to include both query and response in each message
+        const transformedMessages = data.map(item => ({
+          query: item.query,
+          response: item.response,
+          timestamp: new Date(item.timestamp)
+        }));
+        setMessages(transformedMessages);
         scrollToBottom();
       }
     } catch (error) {
@@ -100,10 +105,7 @@ function App() {
     if (!query.trim() || isProcessing) return;
     
     setIsProcessing(true);
-    const currentMessage = { query, timestamp: new Date() };
-    setMessages(prev => [...prev, currentMessage]);
     
-    // Create new AbortController
     abortControllerRef.current = new AbortController();
     
     try {
@@ -132,13 +134,23 @@ function App() {
           console.error("Query error:", data.message);
         } else {
           setResult(data.result);
-          setMessages(prev => [...prev, { 
-            response: data.result, 
-            timestamp: new Date() 
-          }]);
+          const lastMessage = messages[messages.length - 1];
+          // Update the last message to include both query and response
+          if (lastMessage && lastMessage.query === query) {
+            setMessages(prev => [
+              ...prev.slice(0, -1),
+              { ...lastMessage, response: data.result }
+            ]);
+          } else {
+            setMessages(prev => [...prev, { 
+              query,
+              response: data.result, 
+              timestamp: new Date() 
+            }]);
+          }
           if (!currentConversation) {
             setCurrentConversation({ id: data.conversation_id });
-            fetchConversations(); // Refresh conversation list
+            fetchConversations();
           }
         }
       }
@@ -258,10 +270,21 @@ function App() {
 
           <div className="messages-container">
             {messages.map((message, index) => (
-              <div key={index} className={`message ${message.query ? 'user' : 'assistant'}`}>
-                <div className={`message-content ${message.query ? 'user-message' : 'assistant-message'}`}>
-                  {message.query || message.response}
-                </div>
+              <div key={index}>
+                {message.query && (
+                  <div className="message user">
+                    <div className="message-content user-message">
+                      {message.query}
+                    </div>
+                  </div>
+                )}
+                {message.response && (
+                  <div className="message assistant">
+                    <div className="message-content assistant-message">
+                      {message.response}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             <div ref={messagesEndRef} />
