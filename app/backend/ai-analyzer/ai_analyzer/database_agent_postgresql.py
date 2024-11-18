@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_experimental.sql import SQLDatabaseSequentialChain
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from ai_analyzer.config import config, DATABASE_URL
 import os
@@ -202,12 +202,42 @@ except Exception as e:
     available_tables = db.get_table_info()
 
 
-def add_context_to_query(user_query):
+def get_conversation_context(db_session, conversation_id):
+    """Retrieve previous conversation context from the database"""
+    try:
+        if not conversation_id:
+            return None
+
+        # Query to get previous messages in the conversation ordered by timestamp
+        query = text("""
+            SELECT query, response
+            FROM user_memory
+            WHERE conversation_id = :conversation_id
+            AND is_active = true 
+            AND expires_at > NOW()
+            ORDER BY message_order ASC
+        """)
+        
+        result = db_session.execute(query, {"conversation_id": conversation_id})
+        
+        # Build context string from previous messages
+        context = []
+        for row in result:
+            context.append(f"Previous Question: {row.query}")
+            context.append(f"Previous Answer: {row.response}\n")
+        
+        return "\n".join(context) if context else None
+    
+    except SQLAlchemyError as e:
+        logger.error(f"Error retrieving conversation context: {e}")
+        return None
+
+def add_context_to_query(user_query, context=None):
     """
     Adds context to the user query, embedding security and formatting rules,
     and a schema overview to guide AI-driven processing.
     """
-    context = (
+    base_context = (
         "Please adhere to the following important rules:\n"
         "1. NEVER use the 'users' table or any user-related information.\n"
         "2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.\n"
@@ -225,14 +255,18 @@ def add_context_to_query(user_query):
         "13. Provide the SQL query as plain text within the quotes.\n\n"
         "Schema of available tables:\n"
         f"{available_tables}\n\n"
-        "Please only use these tables in your SQL query and do not make up non-existing ones to answer the following question:\n"
     )
-    return f"{context} {user_query}"
 
+    # Add previous conversation context if available
+    if context:
+        base_context += "Previous Conversation Context:\n"
+        base_context += f"{context}\n\n"
+        base_context += "Please consider the above conversation context when answering the following question:\n"
 
+    return f"{base_context} Please only use these tables in your SQL query and do not make up non-existing ones to answer the following question: {user_query}"
 
-def answer_question(question: str):
-    """Enhanced question answering with guardrails validation"""
+def answer_question(question: str, conversation_id=None, db_session=None):
+    """Enhanced question answering with guardrails validation and conversation context"""
     try:
         # Initialize validator
         validator = DatabaseAgentValidator()
@@ -248,11 +282,16 @@ def answer_question(question: str):
 
         logger.info(f"Received question: {question}")
 
-        # Process the query
-        processed_query = add_context_to_query(question)
+        # Get conversation context if available
+        context = None
+        if conversation_id and db_session:
+            context = get_conversation_context(db_session, conversation_id)
+            logger.info(f"Retrieved conversation context for ID {conversation_id}")
+
+        # Process the query with context
+        processed_query = add_context_to_query(question, context)
         
         # Extract actual SQL query from the LLM response
-        # This is a simplified extraction - you might need to adjust based on your LLM's output format
         sql_match = re.search(r'SELECT.*?(?=\n|$)', processed_query, re.IGNORECASE | re.DOTALL)
         if sql_match:
             sql_query = sql_match.group(0)
@@ -276,7 +315,7 @@ def answer_question(question: str):
     except Exception as e:
         logger.error(f"Error processing question: {e}")
         return f"An error occurred while processing your question: {e}"
-
+    
 # Example usage
 if __name__ == "__main__":
     # Sample questions to test the agent

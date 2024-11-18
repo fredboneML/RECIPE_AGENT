@@ -4,6 +4,8 @@ import './App.css';
 
 function App() {
   const [conversations, setConversations] = useState([]);
+  const [currentConversation, setCurrentConversation] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [query, setQuery] = useState('');
   const [result, setResult] = useState('');
   const [userInitial, setUserInitial] = useState('');
@@ -13,6 +15,7 @@ function App() {
   const navigate = useNavigate();
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const messagesEndRef = useRef(null);
   
   // Dynamically determine the backend URL
   const backendUrl = window.location.hostname === 'localhost' 
@@ -26,6 +29,14 @@ function App() {
     "Top 10 Companies showing an increasing trend in negative call sentiments"
   ];
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     const userName = localStorage.getItem('userName');
@@ -35,29 +46,48 @@ function App() {
       if (userName) {
         setUserInitial(userName.charAt(0).toUpperCase());
       }
-      fetch(`${backendUrl}/api/get_conversations`, {
+      fetchConversations();
+    }
+  }, [navigate]);
+
+  const fetchConversations = async () => {
+    try {
+      const response = await fetch(`${backendUrl}/api/conversations`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
           'Accept': 'application/json',
         }
-      })
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Failed to fetch conversations');
-          }
-          return response.json();
-        })
-        .then(data => setConversations(data))
-        .catch(error => {
-          console.error('Error fetching conversations:', error);
-          if (error.message === 'Unauthorized') {
-            localStorage.removeItem('token');
-            localStorage.removeItem('userName');
-            navigate('/login');
-          }
-        });
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setConversations(data);
+      }
+    } catch (error) {
+      console.error('Error fetching conversations:', error);
+      if (error.message === 'Unauthorized') {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userName');
+        navigate('/login');
+      }
     }
-  }, [navigate, backendUrl]);
+  };
+
+  const fetchConversationMessages = async (conversationId) => {
+    try {
+      const response = await fetch(`${backendUrl}/api/conversations/${conversationId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(data);
+        scrollToBottom();
+      }
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+    }
+  };
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -70,8 +100,8 @@ function App() {
     if (!query.trim() || isProcessing) return;
     
     setIsProcessing(true);
-    setResult('');
-    const token = localStorage.getItem('token');
+    const currentMessage = { query, timestamp: new Date() };
+    setMessages(prev => [...prev, currentMessage]);
     
     // Create new AbortController
     abortControllerRef.current = new AbortController();
@@ -81,10 +111,13 @@ function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
           'Accept': 'application/json',
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ 
+          query,
+          conversation_id: currentConversation?.id 
+        }),
         signal: abortControllerRef.current.signal
       });
 
@@ -99,6 +132,14 @@ function App() {
           console.error("Query error:", data.message);
         } else {
           setResult(data.result);
+          setMessages(prev => [...prev, { 
+            response: data.result, 
+            timestamp: new Date() 
+          }]);
+          if (!currentConversation) {
+            setCurrentConversation({ id: data.conversation_id });
+            fetchConversations(); // Refresh conversation list
+          }
         }
       }
     } catch (error) {
@@ -117,6 +158,7 @@ function App() {
         setIsProcessing(false);
       }
       setIsRequestCanceled(false);
+      setQuery('');
     }
   };
 
@@ -149,6 +191,8 @@ function App() {
   };
 
   const handleNewConversation = () => {
+    setCurrentConversation(null);
+    setMessages([]);
     setQuery('');
     setResult('');
     if (textareaRef.current) {
@@ -164,9 +208,19 @@ function App() {
           <button onClick={handleNewConversation}>New Conversation</button>
         </div>
         <div className="conversations">
-          {conversations.map((conv, index) => (
-            <div key={index} className="conversation-summary">
-              {conv.summary}
+          {conversations.map((conv) => (
+            <div
+              key={conv.id}
+              className={`conversation-summary ${currentConversation?.id === conv.id ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentConversation(conv);
+                fetchConversationMessages(conv.id);
+              }}
+            >
+              <div className="conversation-title">{conv.title}</div>
+              <div className="conversation-date">
+                {new Date(conv.timestamp).toLocaleDateString()}
+              </div>
             </div>
           ))}
         </div>
@@ -185,17 +239,32 @@ function App() {
         </div>
 
         <div className="landing">
-          <img src="/logo.png" alt="Company Logo" className="large-logo" />
-          <div className="common-questions">
-            {commonQuestions.map((question, index) => (
-              <div
-                key={index}
-                className="question-box"
-                onClick={() => handleQuestionClick(question)}
-              >
-                {question}
+          {!currentConversation && !messages.length && (
+            <>
+              <img src="/logo.png" alt="Company Logo" className="large-logo" />
+              <div className="common-questions">
+                {commonQuestions.map((question, index) => (
+                  <div
+                    key={index}
+                    className="question-box"
+                    onClick={() => handleQuestionClick(question)}
+                  >
+                    {question}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div className="messages-container">
+            {messages.map((message, index) => (
+              <div key={index} className={`message ${message.query ? 'user' : 'assistant'}`}>
+                <div className={`message-content ${message.query ? 'user-message' : 'assistant-message'}`}>
+                  {message.query || message.response}
+                </div>
               </div>
             ))}
+            <div ref={messagesEndRef} />
           </div>
 
           {isProcessing && (
@@ -220,16 +289,6 @@ function App() {
                 {isProcessing ? 'Stop' : 'Send'}
               </button>
             </div>
-
-            {result && (
-              <div className="query-result">
-                <h3>Your Question:</h3>
-                <p>{query}</p>
-                <h3>Result:</h3>
-                <pre>{typeof result === 'object' ? JSON.stringify(result, null, 4) : result}</pre>
-                <button onClick={() => alert("Ask a follow-up question!")}>Follow Up?</button>
-              </div>
-            )}
           </div>
         </div>
       </div>
