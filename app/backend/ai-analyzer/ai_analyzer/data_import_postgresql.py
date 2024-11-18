@@ -10,7 +10,8 @@ from sqlalchemy import (
     Integer, 
     Text, 
     Boolean,
-    UniqueConstraint 
+    UniqueConstraint,
+    Index  # Added Index import
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.dialects.postgresql import insert
@@ -47,24 +48,37 @@ class Transcription(Base):
         ),
     )
 
-# User Memory table ORM model
 class UserMemory(Base):
     __tablename__ = 'user_memory'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String, nullable=False)
     conversation_id = Column(String, nullable=False)
+    title = Column(String, nullable=False)
     query = Column(Text, nullable=False)
     response = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
     is_active = Column(Boolean, default=True)
+    message_order = Column(Integer, nullable=False)  # To maintain message order within conversation
+    expires_at = Column(DateTime, nullable=False)  # For 30-day retention
 
-    def __init__(self, user_id, conversation_id, query, response, is_active=True):
+    __table_args__ = (
+        UniqueConstraint('conversation_id', 'message_order', name='unique_message_order'),
+        Index('idx_user_conversations', user_id, conversation_id),
+    )
+
+    def __init__(self, user_id, conversation_id, query, response, title=None, message_order=0):
         self.user_id = user_id
         self.conversation_id = conversation_id
         self.query = query
         self.response = response
-        self.is_active = is_active
+        self.title = title or self._generate_title(query)
+        self.message_order = message_order
+        self.expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=30)
+
+    def _generate_title(self, query):
+        # Generate a title from the first query of conversation
+        return query[:50] + "..." if len(query) > 50 else query
 
 
 # Company table ORM model
@@ -86,28 +100,88 @@ class User(Base):
         return self.role in ['admin', 'write']
     
 
-# Function storing user memory
-def store_user_memory(user_id, query, response):
-    session = SessionLocal()
+# conversation management functions
+
+def store_conversation(session, user_id, conversation_id, query, response, title=None, message_order=None):
+    """Store a conversation message"""
     try:
-        user_memory = UserMemory(user_id=user_id, query=query, response=response)
-        session.add(user_memory)
+        if message_order is None:
+            # Get the last message order for this conversation
+            last_message = session.query(UserMemory)\
+                .filter(UserMemory.conversation_id == conversation_id)\
+                .order_by(UserMemory.message_order.desc())\
+                .first()
+            message_order = (last_message.message_order + 1) if last_message else 0
+
+        memory = UserMemory(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            query=query,
+            response=response,
+            title=title,
+            message_order=message_order
+        )
+        session.add(memory)
         session.commit()
+        return True
     except Exception as e:
         session.rollback()
-        print(f"Error storing user memory: {e}")
-    finally:
-        session.close()
+        print(f"Error storing conversation: {e}")
+        return False
 
-# Function retrieving user memory
-def get_user_memory(user_id):
-    session = SessionLocal()
+def get_user_conversations(session, user_id, limit=5):
+    """Get user's recent conversations"""
     try:
-        memories = session.query(UserMemory).filter(UserMemory.user_id == user_id).order_by(UserMemory.timestamp).all()
-        return memories
+        # Get distinct conversations with their latest message
+        subquery = session.query(
+            UserMemory.conversation_id,
+            func.max(UserMemory.timestamp).label('max_timestamp')
+        ).filter(
+            UserMemory.user_id == user_id,
+            UserMemory.is_active == True,
+            UserMemory.expires_at > datetime.datetime.utcnow()
+        ).group_by(UserMemory.conversation_id).subquery()
+
+        conversations = session.query(UserMemory).join(
+            subquery,
+            and_(
+                UserMemory.conversation_id == subquery.c.conversation_id,
+                UserMemory.timestamp == subquery.c.max_timestamp
+            )
+        ).order_by(UserMemory.timestamp.desc()).limit(limit).all()
+
+        return conversations
     except Exception as e:
-        print(f"Error retrieving user memory: {e}")
+        print(f"Error retrieving conversations: {e}")
         return []
+
+def get_conversation_messages(session, conversation_id):
+    """Get all messages in a conversation"""
+    try:
+        messages = session.query(UserMemory)\
+            .filter(
+                UserMemory.conversation_id == conversation_id,
+                UserMemory.is_active == True,
+                UserMemory.expires_at > datetime.datetime.utcnow()
+            )\
+            .order_by(UserMemory.message_order)\
+            .all()
+        return messages
+    except Exception as e:
+        print(f"Error retrieving conversation messages: {e}")
+        return []
+
+def cleanup_expired_conversations():
+    """Cleanup expired conversations (can be run as a periodic task)"""
+    try:
+        session = SessionLocal()
+        session.query(UserMemory)\
+            .filter(UserMemory.expires_at <= datetime.datetime.utcnow())\
+            .delete()
+        session.commit()
+    except Exception as e:
+        print(f"Error cleaning up conversations: {e}")
+        session.rollback()
     finally:
         session.close()
 

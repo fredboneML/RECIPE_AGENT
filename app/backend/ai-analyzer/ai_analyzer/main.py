@@ -1,19 +1,28 @@
 # ai_analyzer/main.py
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, text
+from sqlalchemy import create_engine, Column, Integer, String, text, func, and_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import OperationalError
 import hashlib
 from ai_analyzer.database_agent_postgresql import answer_question, get_db_connection
-from ai_analyzer.data_import_postgresql import run_data_import
+from ai_analyzer.data_import_postgresql import (
+    run_data_import, 
+    User, 
+    UserMemory,  # Add this import
+    store_conversation,
+    get_user_conversations,
+    get_conversation_messages
+)
 from ai_analyzer.fetch_data_from_api import fetch_data_from_api
 from ai_analyzer.make_openai_call_df import make_openai_call_df
 import time
 import logging
 from psycopg2 import connect
 from ai_analyzer.config import config, DATABASE_URL, DATA_DIR
+import uuid
+from datetime import datetime
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -197,18 +206,112 @@ async def login(request: Request, db: Session = Depends(get_db)):
         logger.error(f"Login error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
     
-
-# Updated API to handle queries
-@app.post("/api/query")
-async def query(request: Request):
-    data = await request.json()
-    question = data['query']
-    
+@app.get("/api/conversations")
+async def get_conversations(db: Session = Depends(get_db)):
     try:
-        answer = answer_question(question)
-        return {"result": answer}
+        # Get recent conversations for current user
+        conversations = db.query(UserMemory)\
+            .filter(
+                UserMemory.is_active == True,
+                UserMemory.expires_at > datetime.utcnow()
+            )\
+            .order_by(UserMemory.timestamp.desc())\
+            .limit(10)\
+            .all()
+            
+        return [
+            {
+                "id": conv.conversation_id,
+                "title": conv.title,
+                "timestamp": conv.timestamp.isoformat()
+            }
+            for conv in conversations
+        ]
     except Exception as e:
-        return {"error": True, "message": str(e)}
+        logger.error(f"Error retrieving conversations: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve conversations"
+        )
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db)
+):
+    try:
+        messages = db.query(UserMemory)\
+            .filter(
+                UserMemory.conversation_id == conversation_id,
+                UserMemory.is_active == True,
+                UserMemory.expires_at > datetime.utcnow()
+            )\
+            .order_by(UserMemory.message_order)\
+            .all()
+
+        if not messages:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found"
+            )
+
+        return [
+            {
+                "query": msg.query,
+                "response": msg.response,
+                "timestamp": msg.timestamp.isoformat()
+            }
+            for msg in messages
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving conversation messages: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve conversation messages"
+        )
+
+
+@app.post("/api/query")
+async def query(request: Request, db: Session = Depends(get_db)):
+    try:
+        data = await request.json()
+        question = data['query']
+        conversation_id = data.get('conversation_id', str(uuid.uuid4()))
+        
+        # Get the answer using the updated function with conversation context
+        answer = answer_question(
+            question=question,
+            conversation_id=conversation_id,
+            db_session=db
+        )
+        
+        # Store the conversation
+        store_success = store_conversation(
+            session=db,
+            user_id="current_user",  # Replace with actual user ID from auth
+            conversation_id=conversation_id,
+            query=question,
+            response=answer,
+            message_order=None  # It will auto-increment
+        )
+        
+        if not store_success:
+            logger.warning("Failed to store conversation")
+            
+        return {
+            "result": answer,
+            "conversation_id": conversation_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing query: {e}")
+        return {
+            "error": True,
+            "message": str(e)
+        }
+        
 
 # Optional: API to add a new user
 @app.post("/api/add_user")
@@ -238,6 +341,53 @@ async def add_user(request: Request, db: Session = Depends(get_db), current_user
     db.add(new_user)
     db.commit()
     return {"success": True, "message": "User added successfully"}
+
+
+@app.get("/api/conversations")
+async def get_conversations(db: Session = Depends(get_db)):
+    try:
+        user_id = "current_user"  # Replace with actual user ID from auth
+        conversations = get_user_conversations(db, user_id)
+        return [{"id": conv.conversation_id, 
+                "title": conv.title, 
+                "timestamp": conv.timestamp} for conv in conversations]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str, db: Session = Depends(get_db)):
+    try:
+        messages = get_conversation_messages(db, conversation_id)
+        return [{"query": msg.query, 
+                "response": msg.response, 
+                "timestamp": msg.timestamp} for msg in messages]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/query")
+async def query(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
+    question = data['query']
+    conversation_id = data.get('conversation_id', str(uuid.uuid4()))
+    
+    try:
+        answer = answer_question(question)
+        
+        # Store the conversation
+        store_conversation(
+            db,
+            user_id="current_user",  # Replace with actual user ID from auth
+            conversation_id=conversation_id,
+            query=question,
+            response=answer
+        )
+        
+        return {
+            "result": answer,
+            "conversation_id": conversation_id
+        }
+    except Exception as e:
+        return {"error": True, "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
