@@ -72,17 +72,17 @@ Base = declarative_base()
 class Transcription(Base):
     __tablename__ = 'transcription'
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    company_id = Column(String, nullable=False)
+    transcription_id = Column(String, nullable=False)
     processingdate = Column(DateTime, nullable=False)
     transcription = Column(String, nullable=False)
     summary = Column(String)
     topic = Column(String)
     sentiment = Column(String)
 
-    # Add a unique constraint on company_id and processingdate
+    # Add a unique constraint on transcription_id and processingdate
     __table_args__ = (
         UniqueConstraint(
-            'company_id', 
+            'transcription_id', 
             'processingdate', 
             name='unique_company_transcription'
         ),
@@ -96,20 +96,20 @@ def create_db_engine():
     return engine
 
 # Return the max id of the transcription table
-def get_max_company_id(session):
+def get_max_transcription_id(session):
     try:
-        max_id = session.query(Transcription.company_id)\
-            .order_by(cast(Transcription.company_id, Numeric).desc())\
+        max_id = session.query(Transcription.transcription_id)\
+            .order_by(cast(Transcription.transcription_id, Numeric).desc())\
             .first()
         
         if max_id:
-            logger.info(f"Retrieved maximum company_id: {max_id[0]}")
+            logger.info(f"Retrieved maximum transcription_id: {max_id[0]}")
             return max_id[0]
         else:
             logger.info("No transcription records found in the database")
             return config.LAST_ID
     except Exception as e:
-        logger.error(f"Error retrieving maximum company_id: {e}")
+        logger.error(f"Error retrieving maximum transcription_id: {e}")
         return config.LAST_ID
 
 def delete_files_by_date(directory, target_date):
@@ -160,7 +160,7 @@ if __name__ == "__main__":
         try:
             # 1st Step: Querying the max id of the transcription table
             logger.info("Step 1: Querying max company ID")
-            last_id = int(get_max_company_id(session=session))
+            last_id = int(get_max_transcription_id(session=session))
             logger.info(f"Retrieved last_id: {last_id}")
 
             # 2nd Step: Fetching data using the last_id found in the database

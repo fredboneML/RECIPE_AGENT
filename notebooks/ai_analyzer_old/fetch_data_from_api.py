@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 import logging
 import json
-from ai_analyzer.config import config, DATA_DIR
+from ai_analyzer_old.config import config, DATA_DIR
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
