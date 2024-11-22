@@ -32,17 +32,17 @@ Base = declarative_base()
 class Transcription(Base):
     __tablename__ = 'transcription'
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    company_id = Column(String, nullable=False)
+    transcription_id = Column(String, nullable=False)
     processingdate = Column(DateTime, nullable=False)
     transcription = Column(String, nullable=False)
     summary = Column(String)
     topic = Column(String)
     sentiment = Column(String)
 
-    # Add a unique constraint on company_id and processingdate
+    # Add a unique constraint on transcription_id and processingdate
     __table_args__ = (
         UniqueConstraint(
-            'company_id', 
+            'transcription_id', 
             'processingdate', 
             name='unique_company_transcription'
         ),
@@ -84,7 +84,7 @@ class UserMemory(Base):
 # Company table ORM model
 class Company(Base):
     __tablename__ = 'company'
-    company_id = Column(String, primary_key=True)
+    transcription_id = Column(String, primary_key=True)
     clid = Column(String)
     telephone_number = Column(String)
 
@@ -271,11 +271,11 @@ def insert_company_data(df_company, session):
         logger.info(f"Starting to import {len(df_company)} company records.")
         for index, row in df_company.iterrows():
             insert_stmt = insert(Company).values(
-                company_id=str(row['id']),
+                transcription_id=str(row['id']),
                 clid=str(row['clid']),
                 telephone_number=str(row['telephone_number'])
             )
-            do_nothing_stmt = insert_stmt.on_conflict_do_nothing(index_elements=['company_id'])
+            do_nothing_stmt = insert_stmt.on_conflict_do_nothing(index_elements=['transcription_id'])
             session.execute(do_nothing_stmt)
 
         session.commit()
@@ -296,9 +296,9 @@ def insert_transcription_data(df_transcription, session):
         # Convert processingdate to datetime
         df_transcription['processingdate'] = pd.to_datetime(df_transcription['processingdate'])
         
-        # Group by company_id and get the latest record for each company
+        # Group by transcription_id and get the latest record for each company
         df_transcription = df_transcription.sort_values('processingdate', ascending=False)
-        df_transcription = df_transcription.drop_duplicates(subset=['company_id'], keep='first')
+        df_transcription = df_transcription.drop_duplicates(subset=['transcription_id'], keep='first')
         
         logger.info(f"After removing duplicates: {len(df_transcription)} unique records")
         
@@ -306,7 +306,7 @@ def insert_transcription_data(df_transcription, session):
             try:
                 insert_stmt = insert(Transcription).values(
                     id=str(uuid.uuid4()),
-                    company_id=str(row['company_id']),
+                    transcription_id=str(row['transcription_id']),
                     processingdate=row['processingdate'],
                     transcription=str(row['transcription']),
                     summary=str(row['summary']) if pd.notna(row.get('summary')) else None,

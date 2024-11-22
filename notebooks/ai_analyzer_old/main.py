@@ -7,14 +7,14 @@ from sqlalchemy.exc import OperationalError
 import os
 from dotenv import load_dotenv
 import hashlib
-from ai_analyzer.database_agent_postgresql import answer_question, get_db_connection
-from ai_analyzer.data_import_postgresql import run_data_import
-from ai_analyzer.fetch_data_from_api import fetch_data_from_api
-from ai_analyzer.make_openai_call_df import make_openai_call_df
-from ai_analyzer import config
+from ai_analyzer_old.database_agent_postgresql import answer_question, get_db_connection
+from ai_analyzer_old.data_import_postgresql import run_data_import
+from ai_analyzer_old.fetch_data_from_api import fetch_data_from_api
+from ai_analyzer_old.make_openai_call_df import make_openai_call_df
+from ai_analyzer_old import config
 from datetime import datetime
 import pandas as pd
-from ai_analyzer import config
+from ai_analyzer_old import config
 
 data_dir =config.DATA_DIR
 

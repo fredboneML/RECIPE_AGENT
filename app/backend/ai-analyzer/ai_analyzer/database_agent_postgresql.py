@@ -4,7 +4,6 @@ from enum import Enum
 from pydantic import BaseModel
 import re
 import logging
-from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_experimental.sql import SQLDatabaseSequentialChain
@@ -37,7 +36,7 @@ class SQLGuardrails(BaseModel):
 
 class DatabaseAgentValidator:
     def __init__(self):
-        # Initialize guardrails with your specific configurations
+        # Initializing guardrails our specific configurations
         self.guardrails = SQLGuardrails(
             allowed_operations=[SQLOperation.SELECT],
             allowed_tables=['company', 'transcription'],

@@ -1,5 +1,5 @@
 import time
-from ai_analyzer.make_openai_call import generate_prompt, make_openai_call
+from ai_analyzer_old.make_openai_call import generate_prompt, make_openai_call
 import pandas as pd
 from datetime import datetime
 import os

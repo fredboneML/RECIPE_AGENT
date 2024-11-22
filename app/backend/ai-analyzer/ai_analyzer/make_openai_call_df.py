@@ -87,7 +87,7 @@ def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
                      'topic',
                      'sentiment'
                  ])
-                 .rename(columns={'id': 'company_id'})
+                 .rename(columns={'id': 'transcription_id'})
                 )
 
     output_path = os.path.join(DATA_DIR, f'df_transcription__{current_date}.csv')

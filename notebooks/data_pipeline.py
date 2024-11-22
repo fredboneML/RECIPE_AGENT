@@ -7,10 +7,10 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import create_engine, Column, String, DateTime, text, cast, Numeric, UniqueConstraint  
 import logging
 import pandas as pd
-from ai_analyzer.config import config, DATABASE_URL, DATA_DIR
-from ai_analyzer import fetch_data_from_api as fetch_data
-from ai_analyzer.data_import_postgresql import run_data_import
-from ai_analyzer.make_openai_call_df import make_openai_call_df
+from ai_analyzer_old.config import config, DATABASE_URL, DATA_DIR
+from ai_analyzer_old import fetch_data_from_api as fetch_data
+from ai_analyzer_old.data_import_postgresql import run_data_import
+from ai_analyzer_old.make_openai_call_df import make_openai_call_df
 import time
 
 # Enhanced logging setup
