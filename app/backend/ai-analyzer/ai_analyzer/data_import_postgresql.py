@@ -48,6 +48,7 @@ class Transcription(Base):
         ),
     )
 
+
 class UserMemory(Base):
     __tablename__ = 'user_memory'
 
