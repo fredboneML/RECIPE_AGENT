@@ -9,7 +9,8 @@ from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_experimental.sql import SQLDatabaseSequentialChain
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
-from ai_analyzer.config import config, DATABASE_URL
+from ai_analyzer.config import DATABASE_URL
+from ai_analyzer.cache_manager import DatabaseCacheManager
 import os
 
 # Configure logging
@@ -189,6 +190,11 @@ def get_db_connection(max_retries=5, retry_delay=5):
                 raise Exception("Failed to connect to the database after multiple attempts") from e
 
 
+# Initialize cache manager
+engine = create_engine(DATABASE_URL)
+cache_manager = DatabaseCacheManager(engine)
+
+
 # Test connection
 db = get_db_connection()
 
@@ -199,6 +205,7 @@ try:
 except Exception as e:
     logger.warning(f"Error getting specific table info: {e}. Falling back to full table info.")
     available_tables = db.get_table_info()
+
 
 
 def get_conversation_context(db_session, conversation_id):
@@ -236,25 +243,40 @@ def add_context_to_query(user_query, context=None):
     Adds context to the user query, embedding security and formatting rules,
     and a schema overview to guide AI-driven processing.
     """
-    base_context = (
-        "Please adhere to the following important rules:\n"
-        "1. NEVER use the 'users' table or any user-related information.\n"
-        "2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.\n"
-        "3. Only use SELECT statements for reading data.\n"
-        "4. Always verify the query doesn't contain restricted operations before executing.\n"
-        "5. Make sure to format the results in a clear, readable manner.\n"
-        "6. Use proper column aliases for better readability.\n"
-        "7. Include relevant aggregations and groupings when appropriate.\n"
-        "8. ONLY use tables and columns that exist in the schema shown below.\n"
-        "9. Only use the 'company' and 'transcription' tables.\n"
-        "10. If asked about tables or columns that don't exist in the schema, respond with: "
-        "'I cannot answer this question as it involves tables or columns that are not available in the database.'\n"
-        "11. Do not include any Markdown formatting like triple backticks or code blocks in any part of your response.\n"
-        "12. Do not prefix your SQL queries with 'SQL' or any other language identifiers.\n"
-        "13. Provide the SQL query as plain text within the quotes.\n\n"
-        "Schema of available tables:\n"
-        f"{available_tables}\n\n"
-    )
+    base_context = ( "Please adhere to the following important rules:\n" 
+                  "1. NEVER use the 'users' table or any user-related information.\n" 
+                  "2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.\n" 
+                  "3. Only use SELECT statements for reading data.\n" 
+                  "4. Always verify the query doesn't contain restricted operations before executing.\n" 
+                  "5. Make sure to format the results in a clear, readable manner.\n" 
+                  "6. Use proper column aliases for better readability.\n" 
+                  "7. Include relevant aggregations and groupings when appropriate.\n" 
+                  "8. ONLY use tables and columns that exist in the schema shown below.\n" 
+                  "9. Only use the 'company' and 'transcription' tables.\n" 
+                  "10. When comparing text fields or generating queries (like topic, sentiment), always:\n" 
+                  "    - Use LOWER() function for case-insensitive comparisons\n" 
+                  "    - Use TRIM() to remove leading/trailing spaces\n" 
+                  "    - Consider NULL values in your counts\n" 
+                  "    - Show total counts including NULLs for verification\n" 
+                  "11. When dealing with sentiment values:\n" 
+                  "    - 'neutral' and 'neutraal' are the same sentiment and should be counted together\n" 
+                  "    - ALWAYS use this exact pattern for sentiment queries:\n" 
+                  "      WITH standardized_sentiments AS (\n" 
+                  "          SELECT CASE\n" 
+                  "              WHEN LOWER(TRIM(sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'\n" 
+                  "              ELSE LOWER(TRIM(sentiment))\n" "          END AS standardized_sentiment,\n" 
+                  "          LOWER(TRIM(topic)) as standardized_topic\n" "          FROM transcription\n" 
+                  "      )\n" 
+                  "    - Then query from standardized_sentiments instead of the original table\n" 
+                  "    - Always group by standardized_sentiment\n" "12. When doing counts or aggregations:\n" 
+                  "    - First show the total count for verification\n" "    - Then show the detailed breakdown\n" 
+                  "    - Explain any differences in the counts\n" 
+                  "13. Do not include any Markdown formatting like triple backticks or code blocks in any part of your response.\n" 
+                  "14. Do not prefix your SQL queries with 'SQL' or any other language identifiers.\n" 
+                  "15. Provide the SQL query as plain text within the quotes.\n\n" "Schema of available tables:\n" 
+                  f"{available_tables}\n\n"
+)
+    
 
     # Add previous conversation context if available
     if context:
@@ -264,56 +286,70 @@ def add_context_to_query(user_query, context=None):
 
     return f"{base_context} Please only use these tables in your SQL query and do not make up non-existing ones to answer the following question: {user_query}"
 
-def answer_question(question: str, conversation_id=None, db_session=None):
-    """Enhanced question answering with guardrails validation and conversation context"""
-    try:
-        # Initialize validator
-        validator = DatabaseAgentValidator()
+
+def generate_db_response(question: str, context: Optional[str] = None) -> str:
+    """Generate new response using OpenAI"""
+    validator = DatabaseAgentValidator()
+    db = get_db_connection()
+    llm = ChatOpenAI(
+        temperature=0,
+        openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
+        model_name='gpt-3.5-turbo'
+    )
+    db_chain = SQLDatabaseSequentialChain.from_llm(llm, db, verbose=True, use_query_checker=True)
+    
+    processed_query = add_context_to_query(question, context)
+    sql_match = re.search(r'SELECT.*?(?=\n|$)', processed_query, re.IGNORECASE | re.DOTALL)
+    
+    if sql_match:
+        sql_query = sql_match.group(0)
+        is_valid, error_message = validator.validate_query(sql_query)
         
-        # Get database connection
-        db = get_db_connection()
-        llm = ChatOpenAI(
-            temperature=0, 
-            openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'), 
-            model_name='gpt-3.5-turbo'
-        )
-        db_chain = SQLDatabaseSequentialChain.from_llm(llm, db, verbose=True, use_query_checker=True)
+        if not is_valid:
+            suggested_fix = validator.suggest_query_fix(sql_query)
+            error_response = f"Query validation failed: {error_message}"
+            if suggested_fix:
+                error_response += f"\nSuggested fix: {suggested_fix}"
+            return error_response
+        
+        result = db_chain.run(processed_query)
+        return result
+    else:
+        return "No valid SQL query found in the response"
 
+
+def answer_question(question: str, conversation_id=None, db_session=None):
+    """Enhanced question answering with caching"""
+    try:
         logger.info(f"Received question: {question}")
-
+        
+        # Check cache first
+        is_cached, cached_response, has_new_records = cache_manager.check_cache(question)
+        
+        if is_cached and not has_new_records:
+            logger.info("Using cached response")
+            return cached_response
+        
         # Get conversation context if available
         context = None
         if conversation_id and db_session:
             context = get_conversation_context(db_session, conversation_id)
             logger.info(f"Retrieved conversation context for ID {conversation_id}")
-
-        # Process the query with context
-        processed_query = add_context_to_query(question, context)
         
-        # Extract actual SQL query from the LLM response
-        sql_match = re.search(r'SELECT.*?(?=\n|$)', processed_query, re.IGNORECASE | re.DOTALL)
-        if sql_match:
-            sql_query = sql_match.group(0)
-            
-            # Validate the query
-            is_valid, error_message = validator.validate_query(sql_query)
-            
-            if not is_valid:
-                suggested_fix = validator.suggest_query_fix(sql_query)
-                error_response = f"Query validation failed: {error_message}"
-                if suggested_fix:
-                    error_response += f"\nSuggested fix: {suggested_fix}"
-                return error_response
-
-            # Execute the validated query
-            result = db_chain.run(processed_query)
-            return result
-        else:
-            return "No valid SQL query found in the response"
+        # Generate new response
+        response = generate_db_response(question, context)
+        
+        # Cache the new response
+        if response and "error" not in response.lower():
+            cache_manager.cache_response(question, response)
+            logger.info("Cached new response")
+        
+        return response
 
     except Exception as e:
         logger.error(f"Error processing question: {e}")
         return f"An error occurred while processing your question: {e}"
+
     
 # Example usage
 if __name__ == "__main__":
