@@ -12,10 +12,12 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from ai_analyzer.config import DATABASE_URL
 from ai_analyzer.cache_manager import DatabaseCacheManager
 import os
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class SQLOperation(str, Enum):
     SELECT = "SELECT"
@@ -27,6 +29,7 @@ class SQLOperation(str, Enum):
     DROP = "DROP"
     TRUNCATE = "TRUNCATE"
 
+
 class SQLGuardrails(BaseModel):
     allowed_operations: List[SQLOperation]
     allowed_tables: List[str]
@@ -34,6 +37,7 @@ class SQLGuardrails(BaseModel):
     sensitive_tables: List[str]
     sensitive_columns: Dict[str, List[str]]
     blacklisted_keywords: List[str]
+
 
 class DatabaseAgentValidator:
     def __init__(self):
@@ -52,18 +56,17 @@ class DatabaseAgentValidator:
                 'EXECUTE', 'SHELL', 'SYSTEM', 'GRANT', 'REVOKE'
             ]
         )
-        
+
         self.dangerous_patterns = [
-            #r";\s*(\w+)",  # Multiple statements
+            # r";\s*(\w+)",  # Multiple statements
             r"--",         # SQL comments
             r"/\*.*?\*/",  # Multi-line comments
             r"xp_\w+",     # Extended stored procedures
             r"sp_\w+",     # System stored procedures
             r"WAITFOR",    # Time delay attacks
-            r"OPENROWSET", # Remote access
-            r"BULK INSERT" # Bulk operations
+            r"OPENROWSET",  # Remote access
+            r"BULK INSERT"  # Bulk operations
         ]
-
 
     def validate_query(self, query: str) -> tuple[bool, Optional[str]]:
         """
@@ -97,7 +100,7 @@ class DatabaseAgentValidator:
         for table in tables:
             if table.lower() in self.guardrails.sensitive_tables:
                 return False, f"Access to sensitive table {table} is not allowed"
-            
+
             if table.lower() not in self.guardrails.allowed_tables:
                 return False, f"Table {table} is not in the allowed tables list"
 
@@ -110,40 +113,38 @@ class DatabaseAgentValidator:
                         return False, f"Access to sensitive column {col} is not allowed"
 
         # 6. Validate row limit for SELECT queries
-        #if not self._validate_row_limit(query):
+        # if not self._validate_row_limit(query):
         #    return False, f"Query must include LIMIT clause not exceeding {self.guardrails.max_rows_per_query} rows"
 
-        return True, None       
+        return True, None
 
-    
     def _extract_tables(self, query: str) -> List[str]:
         """
         Extract table names from the query, properly handling aliases.
-        
+
         Parameters:
         query (str): SQL query string
-        
+
         Returns:
         List[str]: List of base table names without aliases
         """
         tables = []
-        
+
         # Enhanced pattern to match tables with optional aliases
         table_pattern = r'\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*(?:\s+(?:AS\s+)?[A-Za-z0-9_]+)?)'
-        
+
         # Find all table references
         matches = re.finditer(table_pattern, query, re.IGNORECASE)
-        
+
         for match in matches:
             # Extract the full table reference (including potential alias)
             table_full = match.group(1)
             # Split on whitespace and take first part (base table name)
             base_table = table_full.split()[0].lower()
             tables.append(base_table)
-        
-        # Return unique table names
-        return list(set(tables))   
 
+        # Return unique table names
+        return list(set(tables))
 
     def _validate_row_limit(self, query: str) -> bool:
         """Validate that SELECT queries have appropriate LIMIT clause."""
@@ -153,7 +154,7 @@ class DatabaseAgentValidator:
         limit_match = re.search(r'LIMIT\s+(\d+)', query, re.IGNORECASE)
         if not limit_match:
             return False
-            
+
         limit_value = int(limit_match.group(1))
         return limit_value <= self.guardrails.max_rows_per_query
 
@@ -163,7 +164,8 @@ class DatabaseAgentValidator:
 
         # Add LIMIT clause if missing
         if fixed_query.upper().startswith('SELECT') and 'LIMIT' not in fixed_query.upper():
-            fixed_query = f"{fixed_query} LIMIT {self.guardrails.max_rows_per_query}"
+            fixed_query = f"{fixed_query} LIMIT {
+                self.guardrails.max_rows_per_query}"
 
         # Remove multiple statements
         if ';' in fixed_query:
@@ -175,6 +177,7 @@ class DatabaseAgentValidator:
 
         return fixed_query if fixed_query != query else None
 
+
 def get_db_connection(max_retries=5, retry_delay=5):
     """Get database connection with retry logic"""
     for attempt in range(max_retries):
@@ -184,10 +187,12 @@ def get_db_connection(max_retries=5, retry_delay=5):
             return SQLDatabase.from_uri(DATABASE_URL)
         except OperationalError as e:
             if attempt < max_retries - 1:
-                logger.warning(f"Database connection attempt {attempt + 1} failed. Retrying in {retry_delay} seconds...")
+                logger.warning(f"Database connection attempt {
+                               attempt + 1} failed. Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
             else:
-                raise Exception("Failed to connect to the database after multiple attempts") from e
+                raise Exception(
+                    "Failed to connect to the database after multiple attempts") from e
 
 
 # Initialize cache manager
@@ -203,9 +208,9 @@ try:
     available_tables = db.get_table_info(['company', 'transcription'])
     logger.info("Retrieved specific table information")
 except Exception as e:
-    logger.warning(f"Error getting specific table info: {e}. Falling back to full table info.")
+    logger.warning(f"Error getting specific table info: {
+                   e}. Falling back to full table info.")
     available_tables = db.get_table_info()
-
 
 
 def get_conversation_context(db_session, conversation_id):
@@ -223,60 +228,70 @@ def get_conversation_context(db_session, conversation_id):
             AND expires_at > NOW()
             ORDER BY message_order ASC
         """)
-        
-        result = db_session.execute(query, {"conversation_id": conversation_id})
-        
+
+        result = db_session.execute(
+            query, {"conversation_id": conversation_id})
+
         # Build context string from previous messages
         context = []
         for row in result:
             context.append(f"Previous Question: {row.query}")
             context.append(f"Previous Answer: {row.response}\n")
-        
+
         return "\n".join(context) if context else None
-    
+
     except SQLAlchemyError as e:
         logger.error(f"Error retrieving conversation context: {e}")
         return None
+
 
 def add_context_to_query(user_query, context=None):
     """
     Adds context to the user query, embedding security and formatting rules,
     and a schema overview to guide AI-driven processing.
     """
-    base_context = ( "Please adhere to the following important rules:\n" 
-                  "1. NEVER use the 'users' table or any user-related information.\n" 
-                  "2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.\n" 
-                  "3. Only use SELECT statements for reading data.\n" 
-                  "4. Always verify the query doesn't contain restricted operations before executing.\n" 
-                  "5. Make sure to format the results in a clear, readable manner.\n" 
-                  "6. Use proper column aliases for better readability.\n" 
-                  "7. Include relevant aggregations and groupings when appropriate.\n" 
-                  "8. ONLY use tables and columns that exist in the schema shown below.\n" 
-                  "9. Only use the 'company' and 'transcription' tables.\n" 
-                  "10. When comparing text fields or generating queries (like topic, sentiment), always:\n" 
-                  "    - Use LOWER() function for case-insensitive comparisons\n" 
-                  "    - Use TRIM() to remove leading/trailing spaces\n" 
-                  "    - Consider NULL values in your counts\n" 
-                  "    - Show total counts including NULLs for verification\n" 
-                  "11. When dealing with sentiment values:\n" 
-                  "    - 'neutral' and 'neutraal' are the same sentiment and should be counted together\n" 
-                  "    - ALWAYS use this exact pattern for sentiment queries:\n" 
-                  "      WITH standardized_sentiments AS (\n" 
-                  "          SELECT CASE\n" 
-                  "              WHEN LOWER(TRIM(sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'\n" 
-                  "              ELSE LOWER(TRIM(sentiment))\n" "          END AS standardized_sentiment,\n" 
-                  "          LOWER(TRIM(topic)) as standardized_topic\n" "          FROM transcription\n" 
-                  "      )\n" 
-                  "    - Then query from standardized_sentiments instead of the original table\n" 
-                  "    - Always group by standardized_sentiment\n" "12. When doing counts or aggregations:\n" 
-                  "    - First show the total count for verification\n" "    - Then show the detailed breakdown\n" 
-                  "    - Explain any differences in the counts\n" 
-                  "13. Do not include any Markdown formatting like triple backticks or code blocks in any part of your response.\n" 
-                  "14. Do not prefix your SQL queries with 'SQL' or any other language identifiers.\n" 
-                  "15. Provide the SQL query as plain text within the quotes.\n\n" "Schema of available tables:\n" 
-                  f"{available_tables}\n\n"
-)
-    
+
+    base_context = ("Please adhere to the following important rules:\n"
+
+
+                    "1. NEVER use the 'users' table or any user-related information.\n"
+                    "2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.\n"
+                    "3. Only use SELECT statements for reading data.\n"
+                    "4. Always verify the query doesn't contain restricted operations before executing.\n"
+                    "5. Make sure to format the results in a clear, readable manner.\n"
+                    "6. Use proper column aliases for better readability.\n"
+                    "7. Include relevant aggregations and groupings when appropriate.\n"
+                    "8. ONLY use tables and columns that exist in the schema shown below.\n"
+                    "9. Only use the 'company' and 'transcription' tables.\n"
+                    "10. When querying any text fields (especially topic and sentiment), ALWAYS:\n"
+                    "    - Wrap them in LOWER(TRIM()) for case-insensitive comparison\n"
+                    "    - Use this pattern for any field comparison: LOWER(TRIM(field_name)) = LOWER(TRIM('value'))\n"
+                    "    - Always standardize text fields in WITH clauses before querying\n"
+                    "11. For ALL queries involving topics or sentiments, ALWAYS start with:\n"
+                    "    WITH standardized_data AS (\n"
+                    "        SELECT \n"
+                    "            id,\n"
+                    "            LOWER(TRIM(transcription)) as transcription,\n"
+                    "            CASE\n"
+                    "                WHEN LOWER(TRIM(sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'\n"
+                    "                ELSE LOWER(TRIM(sentiment))\n"
+                    "            END AS standardized_sentiment,\n"
+                    "            LOWER(TRIM(topic)) as standardized_topic,\n"
+                    "            processingdate\n"
+                    "        FROM transcription\n"
+                    "    )\n"
+                    "    Then query from standardized_data instead of the original table.\n"
+                    "12. When doing counts or aggregations:\n"
+                    "    - First show the total count for verification\n"
+                    "    - Then show the detailed breakdown\n"
+                    "    - Include percentage distributions when relevant\n"
+                    "    - Explain any differences in the counts\n"
+                    "13. Do not include any Markdown formatting like triple backticks or code blocks in any part of your response.\n"
+                    "14. Do not prefix your SQL queries with 'SQL' or any other language identifiers.\n"
+                    "15. Always start with the standardized_data CTE before any topic or sentiment analysis.\n\n"
+                    f"Schema of available tables:\n{available_tables}\n\n"
+
+                    )
 
     # Add previous conversation context if available
     if context:
@@ -288,7 +303,7 @@ def add_context_to_query(user_query, context=None):
 
 
 def generate_db_response(question: str, context: Optional[str] = None) -> str:
-    """Generate new response using OpenAI"""
+    """Generate new response using OpenAI with context length handling"""
     validator = DatabaseAgentValidator()
     db = get_db_connection()
     llm = ChatOpenAI(
@@ -296,61 +311,168 @@ def generate_db_response(question: str, context: Optional[str] = None) -> str:
         openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
         model_name='gpt-3.5-turbo'
     )
-    db_chain = SQLDatabaseSequentialChain.from_llm(llm, db, verbose=True, use_query_checker=True)
-    
+    db_chain = SQLDatabaseSequentialChain.from_llm(
+        llm, db, verbose=True, use_query_checker=True)
+
     processed_query = add_context_to_query(question, context)
-    sql_match = re.search(r'SELECT.*?(?=\n|$)', processed_query, re.IGNORECASE | re.DOTALL)
-    
+    sql_match = re.search(r'SELECT.*?(?=\n|$)',
+                          processed_query, re.IGNORECASE | re.DOTALL)
+
     if sql_match:
         sql_query = sql_match.group(0)
         is_valid, error_message = validator.validate_query(sql_query)
-        
+
         if not is_valid:
             suggested_fix = validator.suggest_query_fix(sql_query)
             error_response = f"Query validation failed: {error_message}"
             if suggested_fix:
                 error_response += f"\nSuggested fix: {suggested_fix}"
             return error_response
-        
-        result = db_chain.run(processed_query)
-        return result
+
+        try:
+            start_time = time.time()
+            result = db_chain.run(processed_query)
+            response_time = int((time.time() - start_time)
+                                * 1000)  # Convert to milliseconds
+
+            # Track successful query
+            cache_manager.track_query_performance(
+                query=question,
+                was_answered=True,
+                response_time=response_time,
+                topic_category=detect_query_topic(question),
+                tokens_used=estimate_tokens_used(result)
+            )
+
+            return result
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            response_time = int((time.time() - start_time) * 1000)
+
+            # Check for context length related errors
+            if any(phrase in error_msg for phrase in [
+                "context length", "maximum context length", "too many tokens",
+                "context window", "token limit"
+            ]):
+                # Track failed query
+                cache_manager.track_query_performance(
+                    query=question,
+                    was_answered=False,
+                    response_time=response_time,
+                    error_message="Context length exceeded",
+                    topic_category=detect_query_topic(question)
+                )
+
+                return (
+                    "The requested time range contains too much data to process. Please try:\n"
+                    "1. Reducing the time range (e.g., last week instead of last month)\n"
+                    "2. Narrowing down your search criteria\n"
+                    "3. Breaking your question into smaller parts\n"
+                    "\nFor example, if you asked about a year of data, try asking about a month or a quarter instead."
+                )
+
+            # Track other types of failures
+            cache_manager.track_query_performance(
+                query=question,
+                was_answered=False,
+                response_time=response_time,
+                error_message=str(e),
+                topic_category=detect_query_topic(question)
+            )
+
+            return f"An error occurred: {str(e)}"
     else:
+        cache_manager.track_query_performance(
+            query=question,
+            was_answered=False,
+            error_message="No valid SQL query found",
+            topic_category="invalid_query"
+        )
         return "No valid SQL query found in the response"
 
 
+def detect_query_topic(question: str) -> str:
+    """Detect the topic category of a question"""
+    question_lower = question.lower()
+
+    categories = {
+        'sentiment_analysis': ['sentiment', 'positive', 'negative', 'neutral'],
+        'topic_analysis': ['topic', 'subjects', 'themes'],
+        'time_analysis': ['trend', 'over time', 'period', 'duration'],
+        'company_specific': ['company', 'client', 'customer'],
+        'performance_metrics': ['average', 'count', 'total', 'number of'],
+        'comparison': ['compare', 'difference', 'versus', 'vs']
+    }
+
+    for category, keywords in categories.items():
+        if any(keyword in question_lower for keyword in keywords):
+            return category
+
+    return 'general'
+
+
+def estimate_tokens_used(response: str) -> int:
+    """Estimate the number of tokens used in a response"""
+    # Rough estimation: 1 token ≈ 4 characters for English text
+    return len(response) // 4
+
+
 def answer_question(question: str, conversation_id=None, db_session=None):
-    """Enhanced question answering with caching"""
+    """Enhanced question answering with performance tracking and error handling"""
     try:
         logger.info(f"Received question: {question}")
-        
+        start_time = time.time()
+
         # Check cache first
-        is_cached, cached_response, has_new_records = cache_manager.check_cache(question)
-        
+        is_cached, cached_response, has_new_records = cache_manager.check_cache(
+            question)
+
         if is_cached and not has_new_records:
+            response_time = int((time.time() - start_time) * 1000)
             logger.info("Using cached response")
+
+            # Track cached response
+            cache_manager.track_query_performance(
+                query=question,
+                was_answered=True,
+                response_time=response_time,
+                topic_category=detect_query_topic(question),
+                tokens_used=estimate_tokens_used(cached_response)
+            )
+
             return cached_response
-        
+
         # Get conversation context if available
         context = None
         if conversation_id and db_session:
             context = get_conversation_context(db_session, conversation_id)
-            logger.info(f"Retrieved conversation context for ID {conversation_id}")
-        
+            logger.info(f"Retrieved conversation context for ID {
+                        conversation_id}")
+
         # Generate new response
         response = generate_db_response(question, context)
-        
-        # Cache the new response
+
+        # Cache the new response if successful
         if response and "error" not in response.lower():
             cache_manager.cache_response(question, response)
             logger.info("Cached new response")
-        
+
         return response
 
     except Exception as e:
+        # Track unexpected errors
+        cache_manager.track_query_performance(
+            query=question,
+            was_answered=False,
+            error_message=f"Unexpected error: {str(e)}",
+            topic_category=detect_query_topic(question)
+        )
+
         logger.error(f"Error processing question: {e}")
         return f"An error occurred while processing your question: {e}"
 
-    
+
 # Example usage
 if __name__ == "__main__":
     # Sample questions to test the agent

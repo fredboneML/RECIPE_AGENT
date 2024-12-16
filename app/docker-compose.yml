@@ -28,7 +28,7 @@ services:
     tty: true
     networks:
       - app-network
- 
+
   backend_app:
     build:
       context: ./backend
@@ -59,7 +59,16 @@ services:
       - HOST=${HOST:-localhost}
     volumes:
       - ./backend:/usr/src/app
-    command: ["uvicorn", "ai_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command:
+      [
+        "uvicorn",
+        "ai_analyzer.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+      ]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -72,48 +81,48 @@ services:
       - app-network
 
   cron_app:
-        build:
-          context: ./backend
-          dockerfile: Dockerfile.cron
-        container_name: cron_app
-        depends_on:
-          database:
-            condition: service_healthy
-          backend_app:
-            condition: service_started
-        environment:
-          - POSTGRES_USER=${POSTGRES_USER}
-          - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-          - POSTGRES_DB=${POSTGRES_DB}
-          - DB_HOST=database   # This is crucial
-          - DB_PORT=5432
-          - OPENAI_API_KEY=${OPENAI_API_KEY}
-          - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
-          - URL=${URL}
-          - API_KEY=${API_KEY}
-          - HOST=${HOST:-localhost}
-          - PYTHONPATH=/usr/src/app/ai-analyzer
-          - PYTHONUNBUFFERED=1
-          - PYTHONIOENCODING=UTF-8
-        volumes:
-          - ./backend:/usr/src/app:delegated
-          - ./.env:/usr/src/app/.env:ro
-          - cron_logs:/var/log
-        restart: unless-stopped
-        networks:
-          - app-network   
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.cron
+    container_name: cron_app
+    depends_on:
+      database:
+        condition: service_healthy
+      backend_app:
+        condition: service_started
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - DB_HOST=database # This is crucial
+      - DB_PORT=5432
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
+      - URL=${URL}
+      - API_KEY=${API_KEY}
+      - HOST=${HOST:-localhost}
+      - PYTHONPATH=/usr/src/app/ai-analyzer
+      - PYTHONUNBUFFERED=1
+      - PYTHONIOENCODING=UTF-8
+    volumes:
+      - ./backend:/usr/src/app:delegated
+      - ./.env:/usr/src/app/.env:ro
+      - cron_logs:/var/log
+    restart: unless-stopped
+    networks:
+      - app-network
 
   database:
     image: postgres:13
     container_name: postgres_db
     ports:
-      - "5433:5432" 
+      - "5433:5432"
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_HOST_AUTH_METHOD=md5
-      - 'listen_addresses=*'
+      - "listen_addresses=*"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -146,7 +155,6 @@ volumes:
   cron_logs:
     name: ai_analyzer_cron_logs
     driver: local
-
 
 networks:
   app-network:
