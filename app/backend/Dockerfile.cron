@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM --platform=linux/amd64 python:3.12-slim
 
 # Add curl for health checks, cron, and build dependencies
 RUN apt-get update && \
@@ -17,8 +17,8 @@ WORKDIR /usr/src/app
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /usr/src/app/ai-analyzer/data \
-             /usr/src/app/ai-analyzer/prompt_template \
-             /var/log \
+    /usr/src/app/ai-analyzer/prompt_template \
+    /var/log \
     && touch /var/log/cron.log \
     && chmod 0666 /var/log/cron.log
 
@@ -40,17 +40,17 @@ ENV PYTHONPATH=/usr/src/app/ai-analyzer \
 
 # Create debug script with correct .env path
 RUN echo '#!/bin/bash\n\
-echo "=== $(date) ===" >> /var/log/cron.log\n\
-echo "Directory contents:" >> /var/log/cron.log\n\
-ls -R /usr/src/app >> /var/log/cron.log\n\
-echo "Current PYTHONPATH:" >> /var/log/cron.log\n\
-echo $PYTHONPATH >> /var/log/cron.log' > /usr/local/bin/debug.sh \
+    echo "=== $(date) ===" >> /var/log/cron.log\n\
+    echo "Directory contents:" >> /var/log/cron.log\n\
+    ls -R /usr/src/app >> /var/log/cron.log\n\
+    echo "Current PYTHONPATH:" >> /var/log/cron.log\n\
+    echo $PYTHONPATH >> /var/log/cron.log' > /usr/local/bin/debug.sh \
     && chmod +x /usr/local/bin/debug.sh
 
 # Set up cron job with environment
 RUN echo '#!/bin/bash\n\
-source /etc/environment\n\
-/usr/local/bin/run-pipeline.sh\n' > /usr/local/bin/cron-wrapper.sh \
+    source /etc/environment\n\
+    /usr/local/bin/run-pipeline.sh\n' > /usr/local/bin/cron-wrapper.sh \
     && chmod +x /usr/local/bin/cron-wrapper.sh
 
 # Set up cron job with logging using the wrapper
@@ -60,46 +60,46 @@ RUN echo "*/5 * * * * /usr/local/bin/cron-wrapper.sh >> /var/log/cron.log 2>&1" 
 
 # Create the pipeline script with proper env loading and DB host
 RUN echo '#!/bin/bash\n\
-cd /usr/src/app\n\
-eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
-export PATH="/usr/local/bin:$PATH"\n\
-export PYTHONPATH=/usr/src/app/ai-analyzer\n\
-export DB_HOST=database\n\
-exec python3 -m ai_analyzer.data_pipeline' > /usr/local/bin/run-pipeline.sh \
+    cd /usr/src/app\n\
+    eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
+    export PATH="/usr/local/bin:$PATH"\n\
+    export PYTHONPATH=/usr/src/app/ai-analyzer\n\
+    export DB_HOST=database\n\
+    exec python3 -m ai_analyzer.data_pipeline' > /usr/local/bin/run-pipeline.sh \
     && chmod +x /usr/local/bin/run-pipeline.sh
 
 # Create and set up startup script
 RUN echo '#!/bin/bash\n\
-set -e\n\
-\n\
-echo "=== Starting container $(date) ===" >> /var/log/cron.log\n\
-/usr/local/bin/debug.sh\n\
-\n\
-# Load environment variables from .env\n\
-eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
-\n\
-# Export Python-related environment variables\n\
-echo "export PATH=/usr/local/bin:$PATH" >> /etc/environment\n\
-echo "export PYTHONPATH=/usr/src/app/ai-analyzer" >> /etc/environment\n\
-echo "export PYTHONUNBUFFERED=1" >> /etc/environment\n\
-echo "export PYTHONIOENCODING=UTF-8" >> /etc/environment\n\
-echo "export DB_HOST=database" >> /etc/environment\n\
-\n\
-# Export all other environment variables for cron\n\
-printenv | grep -v "^_\\|^HOSTNAME\\|^HOME\\|^PATH\\|^PWD" | while read -r line; do\n\
+    set -e\n\
+    \n\
+    echo "=== Starting container $(date) ===" >> /var/log/cron.log\n\
+    /usr/local/bin/debug.sh\n\
+    \n\
+    # Load environment variables from .env\n\
+    eval "$(cat /usr/src/app/.env | sed -e '\''s/[[:space:]]*=[[:space:]]*/=/g'\'' -e '\''s/^/export /'\'')" \n\
+    \n\
+    # Export Python-related environment variables\n\
+    echo "export PATH=/usr/local/bin:$PATH" >> /etc/environment\n\
+    echo "export PYTHONPATH=/usr/src/app/ai-analyzer" >> /etc/environment\n\
+    echo "export PYTHONUNBUFFERED=1" >> /etc/environment\n\
+    echo "export PYTHONIOENCODING=UTF-8" >> /etc/environment\n\
+    echo "export DB_HOST=database" >> /etc/environment\n\
+    \n\
+    # Export all other environment variables for cron\n\
+    printenv | grep -v "^_\\|^HOSTNAME\\|^HOME\\|^PATH\\|^PWD" | while read -r line; do\n\
     echo "export \"$line\"" >> /etc/environment\n\
-done\n\
-\n\
-# Ensure cron is not running\n\
-service cron stop || true\n\
-\n\
-# Start cron and verify it is running\n\
-service cron start\n\
-status=$(service cron status)\n\
-echo "Cron status: $status" >> /var/log/cron.log\n\
-\n\
-# Keep container running and tail logs\n\
-exec tail -f /var/log/cron.log' > /usr/local/bin/start.sh && \
+    done\n\
+    \n\
+    # Ensure cron is not running\n\
+    service cron stop || true\n\
+    \n\
+    # Start cron and verify it is running\n\
+    service cron start\n\
+    status=$(service cron status)\n\
+    echo "Cron status: $status" >> /var/log/cron.log\n\
+    \n\
+    # Keep container running and tail logs\n\
+    exec tail -f /var/log/cron.log' > /usr/local/bin/start.sh && \
     chmod +x /usr/local/bin/start.sh
 
 # Use exec form of CMD
