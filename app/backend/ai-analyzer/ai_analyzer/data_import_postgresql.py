@@ -286,23 +286,38 @@ def load_data_from_csv():
 def insert_company_data(df_company, session):
     try:
         logger.info(f"Starting to import {len(df_company)} company records.")
+
+        # Rename 'id' column to 'transcription_id' if it exists
+        if 'id' in df_company.columns:
+            df_company = df_company.rename(columns={'id': 'transcription_id'})
+
         for index, row in df_company.iterrows():
+            # Make sure transcription_id exists
+            if 'transcription_id' not in row:
+                logger.error("Missing transcription_id column in company data")
+                continue
+
             insert_stmt = insert(Company).values(
-                transcription_id=str(row['id']),
-                clid=str(row['clid']),
-                telephone_number=str(row['telephone_number'])
+                transcription_id=str(row['transcription_id']),
+                clid=str(row['clid']) if pd.notna(row.get('clid')) else None,
+                telephone_number=str(row['telephone_number']) if pd.notna(
+                    row.get('telephone_number')) else None
             )
             do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
                 index_elements=['transcription_id'])
             session.execute(do_nothing_stmt)
 
+            # Commit every 1000 records to avoid memory issues
+            if (index + 1) % 1000 == 0:
+                session.commit()
+                logger.info(f"Imported {index + 1} company records")
+
         session.commit()
         logger.info("Completed importing Company data.")
+
     except Exception as e:
         logger.error(f"Error importing Company data: {e}")
         session.rollback()
-
-# Insert data into the Transcription table with uniqueness check
 
 
 def insert_transcription_data(df_transcription, session):

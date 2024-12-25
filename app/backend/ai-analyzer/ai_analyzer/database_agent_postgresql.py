@@ -13,10 +13,62 @@ from ai_analyzer.config import DATABASE_URL
 from ai_analyzer.cache_manager import DatabaseCacheManager
 import os
 import time
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+class ConversationContext:
+    def __init__(self):
+        self.topics = {}  # Store mentioned topics and their occurrences
+        self.current_focus = None  # Track current topic of focus
+        self.last_query_result = None  # Store last query result
+
+    def update_from_result(self, result_text: str):
+        """Update context based on query results"""
+        try:
+            # Extract topics and occurrences from result text
+            lines = result_text.split('\n')
+            for line in lines:
+                if '-' in line and 'occurrences' in line.lower():
+                    parts = line.split('-')
+                    if len(parts) == 2:
+                        topic = parts[0].strip()
+                        count = int(
+                            re.search(r'(\d+)\s+occurrences', parts[1]).group(1))
+                        self.topics[topic] = count
+
+            # Set current focus to the first topic if not set
+            if not self.current_focus and self.topics:
+                self.current_focus = list(self.topics.keys())[0]
+
+        except Exception as e:
+            logger.error(f"Error updating context: {e}")
+
+    def get_current_topic(self) -> Optional[str]:
+        """Get the currently focused topic"""
+        return self.current_focus
+
+    def update_focus(self, query: str):
+        """Update focus based on new query"""
+        # Check if query mentions any known topics
+        for topic in self.topics.keys():
+            if topic.lower() in query.lower():
+                self.current_focus = topic
+                break
+
+        # Handle "first", "second", etc. references
+        ordinal_matches = re.findall(
+            r'(first|second|third|fourth|fifth)', query.lower())
+        if ordinal_matches:
+            ordinal_map = {
+                'first': 0, 'second': 1, 'third': 2, 'fourth': 3, 'fifth': 4
+            }
+            idx = ordinal_map.get(ordinal_matches[0])
+            if idx is not None and idx < len(self.topics):
+                self.current_focus = list(self.topics.keys())[idx]
 
 
 class SQLOperation(str, Enum):
@@ -214,10 +266,10 @@ except Exception as e:
 
 
 def get_conversation_context(db_session, conversation_id):
-    """Retrieve previous conversation context from the database"""
+    """Enhanced conversation context retrieval"""
     try:
         if not conversation_id:
-            return None
+            return None, None
 
         # Query to get previous messages in the conversation ordered by timestamp
         query = text("""
@@ -232,28 +284,29 @@ def get_conversation_context(db_session, conversation_id):
         result = db_session.execute(
             query, {"conversation_id": conversation_id})
 
-        # Build context string from previous messages
-        context = []
-        for row in result:
-            context.append(f"Previous Question: {row.query}")
-            context.append(f"Previous Answer: {row.response}\n")
+        # Build context string and ConversationContext object
+        context_text = []
+        context_obj = ConversationContext()
 
-        return "\n".join(context) if context else None
+        for row in result:
+            context_text.append(f"Previous Question: {row.query}")
+            context_text.append(f"Previous Answer: {row.response}\n")
+            context_obj.update_from_result(row.response)
+
+        return "\n".join(context_text) if context_text else None, context_obj
 
     except SQLAlchemyError as e:
         logger.error(f"Error retrieving conversation context: {e}")
-        return None
+        return None, None
 
 
-def add_context_to_query(user_query, context=None):
+def add_context_to_query(user_query: str, text_context: Optional[str] = None, context_obj: Optional[ConversationContext] = None):
     """
     Adds context to the user query, embedding security and formatting rules,
     and a schema overview to guide AI-driven processing.
     """
 
     base_context = ("Please adhere to the following important rules:\n"
-
-
                     "1. NEVER use the 'users' table or any user-related information.\n"
                     "2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.\n"
                     "3. Only use SELECT statements for reading data.\n"
@@ -263,74 +316,122 @@ def add_context_to_query(user_query, context=None):
                     "7. Include relevant aggregations and groupings when appropriate.\n"
                     "8. ONLY use tables and columns that exist in the schema shown below.\n"
                     "9. Only use the 'company' and 'transcription' tables.\n"
-                    "10. When querying any text fields (especially names, topics, and sentiments), ALWAYS:\n"
-                    "    - Use LOWER(TRIM()) for case-insensitive comparison\n"
-                    "    - For exact matches use: LOWER(TRIM(field_name)) = LOWER(TRIM('value'))\n"
-                    "    - For partial matches use: LOWER(TRIM(field_name)) LIKE LOWER(TRIM('%value%'))\n"
-                    "    - When searching for companies or employee names, ALWAYS use LIKE with wildcards\n"
-                    "    - Example for name search: LOWER(TRIM(clid)) LIKE LOWER(TRIM('%name%'))\n"
-                    "    - Always standardize text fields in WITH clauses before querying\n"
-                    "11. For ALL time-based comparisons (e.g., this week vs last week, this month vs last month):\n"
-                    "    WITH time_periods AS (\n"
+                    "10. Every query MUST start with defining the base_data CTE exactly like this:\n"
+                    "    WITH base_data AS (\n"
+                    "        SELECT \n"
+                    "            t.id,\n"
+                    "            t.transcription_id,\n"
+                    "            t.transcription,\n"
+                    "            t.topic,\n"
+                    "            LOWER(TRIM(t.topic)) as clean_topic,\n"
+                    "            t.summary,\n"
+                    "            t.processingdate,\n"
+                    "            t.sentiment,\n"
+                    "            CASE\n"
+                    "                WHEN LOWER(TRIM(t.sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'\n"
+                    "                ELSE LOWER(TRIM(t.sentiment))\n"
+                    "            END AS clean_sentiment,\n"
+                    "            c.clid,\n"
+                    "            LOWER(TRIM(c.clid)) as clean_clid\n"
+                    "        FROM transcription t\n"
+                    "        LEFT JOIN company c ON t.transcription_id = c.transcription_id\n"
+                    "    )\n"
+                    "11. For topic analysis, your complete query should look like this:\n"
+                    "    WITH base_data AS (\n"
+                    "        -- Base data CTE definition as shown above\n"
+                    "    ),\n"
+                    "    topic_analysis AS (\n"
+                    "        SELECT\n"
+                    "            clean_topic as topic,\n"
+                    "            COUNT(*) as total_count,\n"
+                    "            COUNT(*) FILTER (WHERE clean_sentiment = 'positief') as positive_count,\n"
+                    "            COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') as negative_count,\n"
+                    "            COUNT(*) FILTER (WHERE clean_sentiment = 'neutral') as neutral_count,\n"
+                    "            ROUND(CAST(COUNT(*) FILTER (WHERE clean_sentiment = 'positief') * 100.0 / \n"
+                    "                NULLIF(COUNT(*), 0) AS NUMERIC), 2) as satisfaction_rate\n"
+                    "        FROM base_data\n"
+                    "        GROUP BY clean_topic\n"
+                    "        HAVING COUNT(*) > 0\n"
+                    "    )\n"
+                    "    SELECT * FROM topic_analysis ...\n"
+                    "12. For time-based analysis, your complete query should look like this:\n"
+                    "    WITH base_data AS (\n"
+                    "        -- Base data CTE definition as shown above\n"
+                    "    ),\n"
+                    "    time_based_data AS (\n"
                     "        SELECT \n"
                     "            id,\n"
+                    "            transcription_id,\n"
+                    "            clean_topic,\n"
+                    "            clean_sentiment,\n"
+                    "            clean_clid,\n"
+                    "            processingdate,\n"
                     "            CASE\n"
                     "                WHEN processingdate >= CURRENT_DATE - INTERVAL '7 days' THEN 'Current Week'\n"
                     "                WHEN processingdate >= CURRENT_DATE - INTERVAL '14 days' THEN 'Previous Week'\n"
                     "                WHEN processingdate >= CURRENT_DATE - INTERVAL '30 days' THEN 'Current Month'\n"
                     "                WHEN processingdate >= CURRENT_DATE - INTERVAL '60 days' THEN 'Previous Month'\n"
-                    "            END AS time_period,\n"
-                    "            CASE\n"
-                    "                WHEN LOWER(TRIM(sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'\n"
-                    "                ELSE LOWER(TRIM(sentiment))\n"
-                    "            END AS standardized_sentiment,\n"
-                    "            LOWER(TRIM(topic)) as standardized_topic,\n"
-                    "            processingdate\n"
-                    "        FROM transcription\n"
+                    "            END AS time_period\n"
+                    "        FROM base_data\n"
                     "        WHERE processingdate >= CURRENT_DATE - INTERVAL '60 days'\n"
                     "    )\n"
-                    "12. For ALL non-time-based queries involving text searches, use:\n"
-                    "    WITH standardized_data AS (\n"
-                    "        SELECT \n"
-                    "            id,\n"
-                    "            LOWER(TRIM(transcription)) as transcription,\n"
-                    "            CASE\n"
-                    "                WHEN LOWER(TRIM(sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'\n"
-                    "                ELSE LOWER(TRIM(sentiment))\n"
-                    "            END AS standardized_sentiment,\n"
-                    "            LOWER(TRIM(topic)) as standardized_topic,\n"
-                    "            LOWER(TRIM(c.clid)) as standardized_clid,\n"
-                    "            processingdate\n"
-                    "        FROM transcription t\n"
-                    "        LEFT JOIN company c ON t.transcription_id = c.transcription_id\n"
-                    "    )\n"
-                    "13. When doing counts or aggregations:\n"
-                    "    - First show the total count for verification\n"
-                    "    - Then show the detailed breakdown\n"
-                    "    - Include percentage distributions when relevant\n"
-                    "    - Calculate and show period-over-period changes for time-based comparisons\n"
-                    "    - Show both absolute numbers and percentages for better context\n"
-                    "    - Explain any significant changes or trends\n"
-                    "14. Do not include any Markdown formatting like triple backticks or code blocks in any part of your response.\n"
-                    "15. Do not prefix your SQL queries with 'SQL' or any other language identifiers.\n"
-                    "16. Always provide clear comparisons in your answers, including:\n"
-                    "    - Absolute numbers for each period\n"
-                    "    - Percentage changes between periods\n"
-                    "    - Notable trends or patterns\n\n"
-                    f"Schema of available tables:\n{available_tables}\n\n"
+                    "    SELECT * FROM time_based_data ...\n"
+                    "13. For text comparisons, ALWAYS use these patterns:\n"
+                    "    - Exact match: clean_topic = 'value' or clean_sentiment = 'value'\n"
+                    "    - Partial match: clean_topic LIKE '%value%'\n"
+                    "14. For calculations ALWAYS use:\n"
+                    "    - NULLIF(value, 0) for division\n"
+                    "    - COALESCE(value, 0) for NULL handling\n"
+                    "    - ROUND(CAST(value AS NUMERIC), 2) for decimals\n"
+                    "15. For filtering dates ALWAYS use:\n"
+                    "    - WHERE processingdate >= CURRENT_DATE - INTERVAL 'X days'\n"
+                    "16. For aggregations ALWAYS use:\n"
+                    "    - COUNT(*) FILTER (WHERE condition) for conditional counting\n"
+                    "    - SUM(CASE WHEN condition THEN 1 ELSE 0 END) for counting matches\n"
+                    "17. Never use:\n"
+                    "    - Raw tables directly (always go through base_data)\n"
+                    "    - Raw topic or sentiment columns (always use clean_topic and clean_sentiment)\n"
+                    "    - Calculations without CAST and ROUND\n"
+                    "    - Division without NULLIF\n"
+                    "    - Date comparisons without INTERVAL\n"
+                    "18. ALWAYS include proper ordering:\n"
+                    "    ORDER BY [columns] {ASC|DESC} NULLS LAST\n"
+                    "19. For limiting results:\n"
+                    "    LIMIT [number]\n"
+                    "20. Make sure to answer the question using the same language used by the user to ask it.\n"
+                    "21. CRITICAL REMINDERS:\n"
+                    "    - EVERY query MUST start with WITH base_data AS (...)\n"
+                    "    - NEVER try to reference base_data without defining it first\n"
+                    "    - ALWAYS include the complete base_data CTE definition\n"
+                    "    - COPY and PASTE the exact base_data CTE structure shown above\n"
+                    f"\nSchema of available tables:\n{available_tables}\n\n")
 
-                    )
+    enhanced_query = user_query
 
-    # Add previous conversation context if available
-    if context:
+    # Add context object awareness
+    if context_obj and context_obj.get_current_topic():
+        context_obj.update_focus(user_query)
+        current_topic = context_obj.get_current_topic()
+
+        if any(phrase in user_query.lower() for phrase in ['first issue', 'the issue', 'that issue']):
+            enhanced_query = user_query.replace(
+                'first issue', f'"{current_topic}"'
+            ).replace(
+                'the issue', f'"{current_topic}"'
+            ).replace(
+                'that issue', f'"{current_topic}"'
+            )
+
+    # Add text context if available
+    if text_context:
         base_context += "Previous Conversation Context:\n"
-        base_context += f"{context}\n\n"
+        base_context += f"{text_context}\n\n"
         base_context += "Please consider the above conversation context when answering the following question:\n"
 
-    return f"{base_context} Please only use these tables in your SQL query and do not make up non-existing ones to answer the following question: {user_query}"
+    return f"{base_context} Please only use these tables in your SQL query and do not make up non-existing ones to answer the following question: {enhanced_query}"
 
 
-def generate_db_response(question: str, context: Optional[str] = None) -> str:
+def generate_db_response(question: str, text_context: Optional[str] = None, context_obj: Optional[ConversationContext] = None) -> str:
     """Generate new response using OpenAI with context length handling"""
     validator = DatabaseAgentValidator()
     db = get_db_connection()
@@ -342,7 +443,7 @@ def generate_db_response(question: str, context: Optional[str] = None) -> str:
     db_chain = SQLDatabaseSequentialChain.from_llm(
         llm, db, verbose=True, use_query_checker=True)
 
-    processed_query = add_context_to_query(question, context)
+    processed_query = add_context_to_query(question, text_context, context_obj)
     sql_match = re.search(r'SELECT.*?(?=\n|$)',
                           processed_query, re.IGNORECASE | re.DOTALL)
 
@@ -360,8 +461,7 @@ def generate_db_response(question: str, context: Optional[str] = None) -> str:
         try:
             start_time = time.time()
             result = db_chain.run(processed_query)
-            response_time = int((time.time() - start_time)
-                                * 1000)  # Convert to milliseconds
+            response_time = int((time.time() - start_time) * 1000)
 
             # Track successful query
             cache_manager.track_query_performance(
@@ -446,8 +546,8 @@ def estimate_tokens_used(response: str) -> int:
     return len(response) // 4
 
 
-def answer_question(question: str, conversation_id=None, db_session=None):
-    """Enhanced question answering with performance tracking and error handling"""
+def answer_question(question: str, conversation_id: Optional[str] = None, db_session=None):
+    """Enhanced question answering with better context awareness"""
     try:
         logger.info(f"Received question: {question}")
         start_time = time.time()
@@ -471,15 +571,16 @@ def answer_question(question: str, conversation_id=None, db_session=None):
 
             return cached_response
 
-        # Get conversation context if available
-        context = None
+        # Get enhanced conversation context
+        text_context, context_obj = None, None
         if conversation_id and db_session:
-            context = get_conversation_context(db_session, conversation_id)
+            text_context, context_obj = get_conversation_context(
+                db_session, conversation_id)
             logger.info(f"Retrieved conversation context for ID {
                         conversation_id}")
 
-        # Generate new response
-        response = generate_db_response(question, context)
+        # Generate new response with enhanced context
+        response = generate_db_response(question, text_context, context_obj)
 
         # Cache the new response if successful
         if response and "error" not in response.lower():
