@@ -404,6 +404,7 @@ def add_context_to_query(user_query: str, text_context: Optional[str] = None, co
                     "    - NEVER try to reference base_data without defining it first\n"
                     "    - ALWAYS include the complete base_data CTE definition\n"
                     "    - COPY and PASTE the exact base_data CTE structure shown above\n"
+                    "22. NEVER execute a DELETE, UPDATE, INSERT, DROP, or any other data modification statements.\n"
                     f"\nSchema of available tables:\n{available_tables}\n\n")
 
     enhanced_query = user_query
@@ -432,22 +433,28 @@ def add_context_to_query(user_query: str, text_context: Optional[str] = None, co
 
 
 def generate_db_response(question: str, text_context: Optional[str] = None, context_obj: Optional[ConversationContext] = None) -> str:
-    """Generate new response using OpenAI with context length handling"""
-    validator = DatabaseAgentValidator()
-    db = get_db_connection()
-    llm = ChatOpenAI(
-        temperature=0,
-        openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
-        model_name='gpt-3.5-turbo'
-    )
-    db_chain = SQLDatabaseSequentialChain.from_llm(
-        llm, db, verbose=True, use_query_checker=True)
+    """Generate new response using OpenAI with context length handling and retry logic"""
+    def try_generate_response(attempt: int = 1) -> tuple[Optional[str], Optional[str], int]:
+        """Helper function to attempt query generation and execution"""
+        start_time = time.time()
+        validator = DatabaseAgentValidator()
+        db = get_db_connection()
+        llm = ChatOpenAI(
+            temperature=0,
+            openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
+            model_name='gpt-3.5-turbo'
+        )
+        db_chain = SQLDatabaseSequentialChain.from_llm(
+            llm, db, verbose=True, use_query_checker=True)
 
-    processed_query = add_context_to_query(question, text_context, context_obj)
-    sql_match = re.search(r'SELECT.*?(?=\n|$)',
-                          processed_query, re.IGNORECASE | re.DOTALL)
+        processed_query = add_context_to_query(
+            question, text_context, context_obj)
+        sql_match = re.search(r'SELECT.*?(?=\n|$)',
+                              processed_query, re.IGNORECASE | re.DOTALL)
 
-    if sql_match:
+        if not sql_match:
+            return None, "No valid SQL query found in the response", 0
+
         sql_query = sql_match.group(0)
         is_valid, error_message = validator.validate_query(sql_query)
 
@@ -456,68 +463,77 @@ def generate_db_response(question: str, text_context: Optional[str] = None, cont
             error_response = f"Query validation failed: {error_message}"
             if suggested_fix:
                 error_response += f"\nSuggested fix: {suggested_fix}"
-            return error_response
+            return None, error_response, 0
 
         try:
-            start_time = time.time()
             result = db_chain.run(processed_query)
             response_time = int((time.time() - start_time) * 1000)
-
-            # Track successful query
-            cache_manager.track_query_performance(
-                query=question,
-                was_answered=True,
-                response_time=response_time,
-                topic_category=detect_query_topic(question),
-                tokens_used=estimate_tokens_used(result)
-            )
-
-            return result
-
+            return result, None, response_time
         except Exception as e:
             error_msg = str(e).lower()
             response_time = int((time.time() - start_time) * 1000)
 
-            # Check for context length related errors
             if any(phrase in error_msg for phrase in [
                 "context length", "maximum context length", "too many tokens",
                 "context window", "token limit"
             ]):
-                # Track failed query
-                cache_manager.track_query_performance(
-                    query=question,
-                    was_answered=False,
-                    response_time=response_time,
-                    error_message="Context length exceeded",
-                    topic_category=detect_query_topic(question)
-                )
+                return None, "context_length_error", response_time
+            return None, str(e), response_time
 
-                return (
-                    "The requested time range contains too much data to process. Please try:\n"
-                    "1. Reducing the time range (e.g., last week instead of last month)\n"
-                    "2. Narrowing down your search criteria\n"
-                    "3. Breaking your question into smaller parts\n"
-                    "\nFor example, if you asked about a year of data, try asking about a month or a quarter instead."
-                )
+    # First attempt
+    result, error, response_time = try_generate_response(1)
 
-            # Track other types of failures
-            cache_manager.track_query_performance(
-                query=question,
-                was_answered=False,
-                response_time=response_time,
-                error_message=str(e),
-                topic_category=detect_query_topic(question)
-            )
-
-            return f"An error occurred: {str(e)}"
-    else:
+    if result:
+        # Track successful query
         cache_manager.track_query_performance(
             query=question,
-            was_answered=False,
-            error_message="No valid SQL query found",
-            topic_category="invalid_query"
+            was_answered=True,
+            response_time=response_time,
+            topic_category=detect_query_topic(question),
+            tokens_used=estimate_tokens_used(result)
         )
-        return "No valid SQL query found in the response"
+        return result
+
+    # If first attempt failed, log it and retry
+    logger.warning(f"First query attempt failed: {error}. Retrying...")
+
+    # Second attempt
+    result, error, response_time = try_generate_response(2)
+
+    if result:
+        # Track successful retry
+        cache_manager.track_query_performance(
+            query=question,
+            was_answered=True,
+            response_time=response_time,
+            topic_category=detect_query_topic(question),
+            tokens_used=estimate_tokens_used(result)
+        )
+        return result
+
+    # Both attempts failed - track the final failure with specific error message
+    if error == "context_length_error":
+        error_message = "Context length exceeded - Too much data requested"
+        user_message = (
+            "The requested time range contains too much data to process. Please try:\n"
+            "1. Reducing the time range (e.g., last week instead of last month)\n"
+            "2. Narrowing down your search criteria\n"
+            "3. Breaking your question into smaller parts\n"
+            "\nFor example, if you asked about a year of data, try asking about a month or a quarter instead."
+        )
+    else:
+        error_message = "Invalid SQL query"
+        user_message = "No valid SQL query found in the response"
+
+    cache_manager.track_query_performance(
+        query=question,
+        was_answered=False,
+        response_time=response_time,
+        error_message=error_message,
+        topic_category=detect_query_topic(question)
+    )
+
+    return user_message
 
 
 def detect_query_topic(question: str) -> str:
