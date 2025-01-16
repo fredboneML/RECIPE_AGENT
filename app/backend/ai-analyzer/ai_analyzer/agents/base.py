@@ -1,11 +1,22 @@
-# backend/ai-analyzer/ai_analyzer/agents/base.py
+# File: backend/ai-analyzer/ai_analyzer/agents/base.py
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Any, Union
 import logging
 from datetime import datetime
+from langchain.chat_models import ChatOpenAI
+from langchain_community.llms import Ollama
+from langchain.callbacks.manager import CallbackManagerForLLMRun
+from langchain.schema import LLMResult
+from langchain.prompts import PromptTemplate, ChatPromptTemplate
+from langchain_core.language_models.llms import LLM
+from langchain.chains import LLMChain
+from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -15,7 +26,7 @@ class DatabaseContext:
     allowed_tables: List[str]
     restricted_tables: List[str]
     table_schemas: Dict[str, Dict[str, str]]
-    base_context: Optional[str] = None
+ #   base_context: Optional[str] = None
 
 
 @dataclass
@@ -28,77 +39,64 @@ class AgentResponse:
     reformulated_question: Optional[str] = None
 
 
-class ModelProvider(ABC):
-    """Abstract base class for different model providers"""
+class LangChainModelProvider:
+    """Factory class for creating LangChain model instances"""
 
-    @abstractmethod
-    async def generate_response(self, prompt: str) -> str:
-        pass
-
-
-class OpenAIProvider(ModelProvider):
-    def __init__(self, model_name: str, api_key: str):
-        from openai import OpenAI
-        self.client = OpenAI(api_key=api_key)
-        self.model_name = model_name
-
-    async def generate_response(self, prompt: str) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        return response.choices[0].message.content
-
-
-class OllamaProvider(ModelProvider):
-    def __init__(self, model_name: str):
-        from langchain_community.llms import Ollama
-        self.model = Ollama(model=model_name)
-
-    async def generate_response(self, prompt: str) -> str:
-        return await self.model.agenerate([prompt])
-
-
-class HuggingFaceProvider(ModelProvider):
-    def __init__(self, model_name: str, api_key: Optional[str] = None):
-        from transformers import pipeline
-        self.pipeline = pipeline(
-            "text-generation",
-            model=model_name,
-            token=api_key
-        )
-
-    async def generate_response(self, prompt: str) -> str:
-        response = self.pipeline(prompt, max_length=500)
-        return response[0]['generated_text']
+    @staticmethod
+    def create_model(
+        provider: str,
+        model_name: str,
+        api_key: Optional[str] = None,
+        **kwargs
+    ) -> Union[ChatOpenAI, Ollama, LLM]:
+        if provider == "openai":
+            return ChatOpenAI(
+                model_name=model_name,
+                openai_api_key=api_key,
+                temperature=kwargs.get('temperature', 0),
+                **kwargs
+            )
+        elif provider == "ollama":
+            return Ollama(
+                model=model_name,
+                **kwargs
+            )
+        elif provider == "huggingface":
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForCausalLM.from_pretrained(model_name)
+            pipe = pipeline(
+                "text-generation",
+                model=model,
+                tokenizer=tokenizer,
+                **kwargs
+            )
+            return HuggingFacePipeline(pipeline=pipe)
+        else:
+            raise ValueError(f"Unsupported model provider: {provider}")
 
 
 class BaseAgent(ABC):
-    """Abstract base class for all agents"""
+    """Abstract base class for all agents using LangChain"""
 
     def __init__(self,
                  model_provider: str,
                  model_name: str,
-                 api_key: Optional[str] = None):
-        self.model_provider = self._initialize_provider(
+                 api_key: Optional[str] = None,
+                 **kwargs):
+        self.llm = LangChainModelProvider.create_model(
             model_provider,
             model_name,
-            api_key
+            api_key,
+            **kwargs
         )
 
-    def _initialize_provider(self,
-                             provider: str,
-                             model_name: str,
-                             api_key: Optional[str]) -> ModelProvider:
-        if provider == "openai":
-            return OpenAIProvider(model_name, api_key)
-        elif provider == "ollama":
-            return OllamaProvider(model_name)
-        elif provider == "huggingface":
-            return HuggingFaceProvider(model_name, api_key)
-        else:
-            raise ValueError(f"Unsupported model provider: {provider}")
+    def _create_chain(self, prompt_template: str) -> LLMChain:
+        """Create a LangChain chain with the given prompt template"""
+        prompt = PromptTemplate(
+            input_variables=["input"],
+            template=prompt_template
+        )
+        return LLMChain(llm=self.llm, prompt=prompt)
 
     @abstractmethod
     async def process(self, *args, **kwargs) -> AgentResponse:

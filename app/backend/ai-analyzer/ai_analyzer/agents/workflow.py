@@ -1,18 +1,29 @@
 # backend/ai-analyzer/ai_analyzer/agents/workflow.py
-
-from typing import List, Dict, Optional, Any
-from database_inspector import DatabaseInspectorAgent
-from sql_generator import SQLGeneratorAgent
-from question_generator import QuestionGeneratorAgent
-from response_analyzer import ResponseAnalyzerAgent
-from datetime import datetime
 import logging
+import os
+from ai_analyzer.agents.initial_questions import InitialQuestionGenerator
+from ai_analyzer.agents.response_analyzer import ResponseAnalyzerAgent
+from ai_analyzer.agents.question_generator import QuestionGeneratorAgent
+from ai_analyzer.agents.sql_generator import SQLGeneratorAgent
+from ai_analyzer.agents.database_inspector import DatabaseInspectorAgent
+from typing import List, Dict, Optional, Any
+from sqlalchemy import create_engine, text
+import json
+from datetime import datetime
+from typing import List, Dict, Optional, Any, Union
 
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class CallAnalysisWorkflow:
+    """
+    Orchestrates the workflow for analyzing call center data through various specialized agents.
+    Handles question processing, SQL generation, response analysis, and caching.
+    """
+
     def __init__(self,
                  db_url: str,
                  model_provider: str,
@@ -21,133 +32,224 @@ class CallAnalysisWorkflow:
                  restricted_tables: Optional[List[str]] = None,
                  base_context: Optional[str] = None,
                  cache_manager=None):
+        """
+        Initialize the workflow with necessary components and configurations.
 
+        Args:
+            db_url: Database connection URL
+            model_provider: AI model provider (e.g., "openai")
+            model_name: Name of the model to use
+            api_key: API key for the model provider
+            restricted_tables: List of tables to exclude from queries
+            base_context: Additional context for query processing
+            cache_manager: Optional cache manager instance
+        """
+        # Initialize database connection
+        self.engine = create_engine(db_url)
         self.db_inspector = DatabaseInspectorAgent(db_url)
         self.cache_manager = cache_manager
 
-        # Initialize agents with the same model provider
-        self.question_generator = QuestionGeneratorAgent(
+        # Initialize specialized agents
+        self.initial_question_generator = InitialQuestionGenerator(
             model_provider, model_name, api_key)
         self.sql_generator = SQLGeneratorAgent(
+            model_provider, model_name, api_key, base_context)
+        self.question_generator = QuestionGeneratorAgent(
             model_provider, model_name, api_key)
         self.response_analyzer = ResponseAnalyzerAgent(
             model_provider, model_name, api_key)
 
-        # Get database context
+        # Get database context and store configuration
         self.db_context = self.db_inspector.inspect_database(restricted_tables)
-        if base_context:
-            self.db_context.base_context = base_context
+        self.base_context = base_context
 
-    async def process_user_question(self, question: str) -> Dict[str, Any]:
-        """Process a user's question with caching and performance tracking"""
+    async def get_initial_questions(self) -> Dict[str, Dict[str, Any]]:
+        """Get categorized initial questions for users to start with."""
+        try:
+            response = await self.initial_question_generator.process(self.db_context)
+            if not response.success:
+                logger.warning(
+                    "Failed to generate initial questions, using defaults")
+                return self._get_default_questions()
+            return response.content if response.success else {}
+        except Exception as e:
+            logger.error(f"Error getting initial questions: {e}")
+            return self._get_default_questions()
 
-        start_time = datetime.now()
+    async def process_user_question(self, question: str, conversation_id: str = None, db_session=None) -> Dict[str, Any]:
+        try:
+            # Get conversation context
+            text_context, context_obj = self.db_inspector.get_conversation_context(
+                db_session, conversation_id)
 
-        # Check cache first
-        if self.cache_manager:
-            is_cached, cached_response, has_new_records = (
-                self.cache_manager.check_cache(question)
+            # Format the context into a structured summary
+            context_summary = None
+            if text_context:
+                context_summary = {
+                    'previous_question': text_context.split('Previous Question: ')[-1].split('\n')[0] if 'Previous Question: ' in text_context else None,
+                    'previous_results': text_context.split('Previous Answer: ')[-1].split('\n')[0] if 'Previous Answer: ' in text_context else None,
+                }
+                logger.info(f"Previous context summary: {context_summary}")
+
+            # Enhance question with context if available
+            if context_obj:
+                enhanced_question = self.db_inspector.enhance_question_with_context(
+                    question, context_obj)
+                logger.info(f"Enhanced question: {enhanced_question}")
+            else:
+                enhanced_question = question
+
+            # Generate SQL from the question with structured context
+            logger.info("Generating SQL query...")
+            sql_response = await self.sql_generator.process(
+                question=enhanced_question,
+                db_context=self.db_context,
+                conversation_context=context_summary,
+                context_obj=context_obj
             )
 
-            if is_cached and not has_new_records:
-                # Get follow-up questions for cached response
-                analysis = await self.response_analyzer.process(
-                    question, cached_response, None
-                )
+            logger.info(f"Generated SQL: {
+                        sql_response.content if sql_response.success else 'Failed'}")
 
-                self.cache_manager.track_query_performance(
-                    query=question,
-                    was_answered=True,
-                    response_time=(datetime.now() -
-                                   start_time).total_seconds(),
-                    topic_category="cached_response"
-                )
-
+            if not sql_response.success:
+                logger.error(f"SQL generation failed: {
+                             sql_response.error_message}")
                 return {
-                    'success': True,
-                    'response': cached_response,
-                    'followup_questions': analysis.suggested_followup
+                    'success': False,
+                    'error': sql_response.error_message,
+                    'reformulated_question': sql_response.reformulated_question,
+                    'followup_questions': sql_response.suggested_followup
                 }
 
-        # Process new question
-        result = await self._process_question(question)
+            # Execute the SQL and get the result
+            try:
+                with self.engine.connect() as conn:
+                    result = conn.execute(text(sql_response.content))
+                    rows = result.fetchall()
+                    column_names = result.keys()
 
-        # Cache successful responses
-        if result['success'] and self.cache_manager:
-            self.cache_manager.cache_response(
-                question, result['response']
+                    # Format the results into a readable response
+                    formatted_response = self._format_results(
+                        rows, column_names)
+            except Exception as e:
+                logger.error(f"Error executing SQL: {e}")
+                return {
+                    'success': False,
+                    'error': f"Error executing query: {str(e)}",
+                    'followup_questions': self._get_default_followup_questions()
+                }
+
+            # Analyze the response with context
+            analysis_response = await self.response_analyzer.process(
+                question=question,
+                response=formatted_response,
+                conversation_context=text_context
             )
 
-        # Track performance
-        if self.cache_manager:
-            self.cache_manager.track_query_performance(
-                query=question,
-                was_answered=result['success'],
-                response_time=(datetime.now() - start_time).total_seconds(),
-                error_message=result.get('error'),
-                topic_category=result.get('topic_category', 'unknown')
-            )
-
-        return result
-
-    async def _process_question(self, question: str) -> Dict[str, Any]:
-        """Internal method to process a question through the workflow"""
-        # Generate SQL
-        sql_response = await self.sql_generator.process(
-            question,
-            self.db_context
-        )
-
-        if not sql_response.success:
-            # Analyze error and suggest alternatives
-            analysis = await self.response_analyzer.process(
-                question,
-                None,
-                sql_response.error_message
-            )
+            # Cache successful response if cache manager is available
+            if self.cache_manager and formatted_response:
+                self.cache_manager.cache_response(question, formatted_response)
 
             return {
-                'success': False,
-                'error': sql_response.error_message,
-                'reformulated_question': sql_response.reformulated_question,
-                'followup_questions': analysis.suggested_followup
+                'success': True,
+                'response': formatted_response,
+                'followup_questions': analysis_response.suggested_followup if analysis_response.success else []
             }
 
-        # Execute SQL and get results
-        try:
-            with self.db_inspector.engine.connect() as conn:
-                result = conn.execute(sql_response.content)
-                data = result.fetchall()
         except Exception as e:
-            analysis = await self.response_analyzer.process(
-                question,
-                None,
-                str(e)
-            )
-
+            logger.error(f"Error processing question: {e}")
             return {
                 'success': False,
                 'error': str(e),
-                'reformulated_question': analysis.reformulated_question,
-                'followup_questions': analysis.suggested_followup
+                'followup_questions': self._get_default_followup_questions()
             }
 
-        # Analyze successful response
-        analysis = await self.response_analyzer.process(
-            question,
-            data,
-            None
-        )
+    def _format_results(self, rows: List[Any], column_names: List[str]) -> str:
+        """Format SQL results into a readable response."""
+        if not rows:
+            return "No results found for your query."
 
+        # Convert rows to list of dicts for easier handling
+        results = [dict(zip(column_names, row)) for row in rows]
+
+        # Different formatting based on number of rows
+        if len(results) == 1:
+            return self._format_single_result(results[0])
+        else:
+            return self._format_multiple_results(results)
+
+    def _format_single_result(self, result: Dict[str, Any]) -> str:
+        """Format a single result row."""
+        formatted_parts = []
+        for key, value in result.items():
+            if isinstance(value, (int, float)):
+                formatted_parts.append(
+                    f"{key.replace('_', ' ').title()}: {value:,}")
+            elif isinstance(value, datetime):
+                formatted_parts.append(f"{key.replace('_', ' ').title()}: {
+                                       value.strftime('%Y-%m-%d %H:%M:%S')}")
+            else:
+                formatted_parts.append(
+                    f"{key.replace('_', ' ').title()}: {value}")
+        return "\n".join(formatted_parts)
+
+    def _format_multiple_results(self, results: List[Dict[str, Any]]) -> str:
+        """Format multiple result rows."""
+        # Get total number of results
+        total = len(results)
+
+        # Format each row
+        formatted_rows = []
+        for i, row in enumerate(results, 1):
+            row_parts = []
+            for key, value in row.items():
+                if isinstance(value, (int, float)):
+                    row_parts.append(
+                        f"{key.replace('_', ' ').title()}: {value:,}")
+                elif isinstance(value, datetime):
+                    row_parts.append(f"{key.replace('_', ' ').title()}: {
+                                     value.strftime('%Y-%m-%d %H:%M:%S')}")
+                else:
+                    row_parts.append(
+                        f"{key.replace('_', ' ').title()}: {value}")
+            formatted_rows.append(f"Result {i}:\n" + "\n".join(row_parts))
+
+        # Combine all parts
+        return f"Found {total} results:\n\n" + "\n\n".join(formatted_rows)
+
+    def _get_default_questions(self) -> Dict[str, Dict[str, Any]]:
+        """Provide default initial questions if generation fails."""
         return {
-            'success': True,
-            'response': analysis.content,
-            'data': data,
-            'sql': sql_response.content,
-            'followup_questions': analysis.suggested_followup
+            "Trending Topics": {
+                "description": "Analyze popular discussion topics",
+                "questions": [
+                    "What are the most discussed topics this month?",
+                    "Which topics show increasing trends?",
+                    "What topics are commonly mentioned in positive calls?"
+                ]
+            },
+            "Customer Sentiment": {
+                "description": "Understand customer satisfaction trends",
+                "questions": [
+                    "How has overall sentiment changed over time?",
+                    "What topics generate the most positive feedback?",
+                    "Which issues need immediate attention based on sentiment?"
+                ]
+            },
+            "Performance Analysis": {
+                "description": "Analyze call center performance metrics",
+                "questions": [
+                    "What is the distribution of sentiments across all calls?",
+                    "How do sentiment patterns vary by topic?",
+                    "What are the most common topics in negative feedback?"
+                ]
+            }
         }
 
-    async def get_suggested_questions(self) -> List[str]:
-        """Get suggested questions for analysis"""
-        response = await self.question_generator.process(self.db_context)
-        return response.content if response.success else []
+    def _get_default_followup_questions(self) -> List[str]:
+        """Provide default follow-up questions if generation fails."""
+        return [
+            "What are the most common topics in our calls?",
+            "How has customer sentiment changed over time?",
+            "Can you show me the breakdown of call topics by sentiment?"
+        ]
