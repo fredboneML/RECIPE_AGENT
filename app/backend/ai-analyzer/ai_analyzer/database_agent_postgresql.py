@@ -405,7 +405,6 @@ def add_context_to_query(user_query: str, text_context: Optional[str] = None, co
                     "    - ALWAYS include the complete base_data CTE definition\n"
                     "    - COPY and PASTE the exact base_data CTE structure shown above\n"
                     "22. NEVER execute a DELETE, UPDATE, INSERT, DROP, or any other data modification statements.\n"
-                    "23. Always use the last 2 months as default value when generating the SQL query and only change it if required by the user.\n"
                     f"\nSchema of available tables:\n{available_tables}\n\n")
 
     enhanced_query = user_query
@@ -436,56 +435,94 @@ def add_context_to_query(user_query: str, text_context: Optional[str] = None, co
 def generate_db_response(question: str, text_context: Optional[str] = None, context_obj: Optional[ConversationContext] = None) -> str:
     """Generate new response using OpenAI with context length handling and retry logic"""
     def try_generate_response(attempt: int = 1) -> tuple[Optional[str], Optional[str], int]:
-        """Helper function to attempt query generation and execution"""
         start_time = time.time()
+
+        # Get total word count and cleaned words
+        words = question.lower().split()
+        total_words = len(words)
+        logger.info(f"Total words in question: {total_words}")
+
+        # Count English words
+        english_words = ['what', 'which', 'how', 'where', 'when', 'who', 'why', 'did', 'does', 'has', 'had', 'it', 'there', 'they', 'show',
+                         'is', 'are', 'was', 'were', 'the', 'this', 'that', 'these', 'those', 'our', 'your', 'an', 'a', 'top', 'give', 'do']
+        nb_en = sum(1 for word in words if word in english_words)
+        logger.info(f"English words found: {
+                    [word for word in words if word in english_words]}")
+
+        # Count Dutch words
+        dutch_words = ['kun', 'kunt', 'je', 'jij', 'u', 'bent', 'zijn', 'waar', 'wat', 'wie', 'hoe',
+                       'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
+                       'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet', 'met',
+                       'over', 'door', 'om', 'op', 'voor', 'na', 'bij', 'aan', 'in', 'uit', 'te',
+                       'bedrijf', 'waarom', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal']
+        nb_dutch = sum(1 for word in words if word in dutch_words)
+        logger.info(f"Dutch words found: {
+                    [word for word in words if word in dutch_words]}")
+
+        logger.info(f"number of Dutch words: {
+                    nb_dutch}, number of English words: {nb_en}")
+
+        # Set language based on majority
+        is_dutch = nb_dutch > nb_en
+        is_english = nb_en > nb_dutch
+        logger.info(f"is_dutch: {is_dutch}")
+
         validator = DatabaseAgentValidator()
         db = get_db_connection()
+
         llm = ChatOpenAI(
             temperature=0,
             openai_api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
             model_name='gpt-3.5-turbo'
         )
+
         db_chain = SQLDatabaseSequentialChain.from_llm(
-            llm, db, verbose=True, use_query_checker=True)
+            llm,
+            db,
+            verbose=True,
+            use_query_checker=True
+        )
 
         processed_query = add_context_to_query(
             question, text_context, context_obj)
-        sql_match = re.search(r'SELECT.*?(?=\n|$)',
-                              processed_query, re.IGNORECASE | re.DOTALL)
 
-        if not sql_match:
-            return None, "No valid SQL query found in the response", 0
+        # Add language instruction only for Dutch questions
+        if is_dutch:
+            language_instruction = """
+            BELANGRIJK: Je bent een Nederlandstalige database-assistent. 
+            Geef alle antwoorden volledig in het Nederlands, inclusief:
+            - Nederlandse datum- en tijdnotatie (bijvoorbeeld: 24 december 2024 14:30)
+            - Nederlandse getallen (gebruik punt voor duizendtallen, komma voor decimalen)
+            - Nederlandse bewoordingen voor alle termen (bijvoorbeeld: 'Transcriptie ID' in plaats van 'Transcript ID')
+            """
+            processed_query = language_instruction + "\n" + processed_query
 
-        sql_query = sql_match.group(0)
-        is_valid, error_message = validator.validate_query(sql_query)
+        sql_result = db_chain.run(processed_query)
 
-        if not is_valid:
-            suggested_fix = validator.suggest_query_fix(sql_query)
-            error_response = f"Query validation failed: {error_message}"
-            if suggested_fix:
-                error_response += f"\nSuggested fix: {suggested_fix}"
-            return None, error_response, 0
+        if not sql_result or sql_result.strip() == "":
+            return None, "Empty result", start_time
 
-        try:
-            result = db_chain.run(processed_query)
-            response_time = int((time.time() - start_time) * 1000)
-            return result, None, response_time
-        except Exception as e:
-            error_msg = str(e).lower()
-            response_time = int((time.time() - start_time) * 1000)
+        # Create and log system message for final formatting
+        system_message = {
+            "role": "system",
+            "content": "Je bent een Nederlandse database-assistent. Geef alle antwoorden in correct Nederlands." if is_dutch else "You are a database assistant. Provide answers in English."
+        }
+        user_message = {
+            "role": "user",
+            "content": f"{'Herformuleer deze analyse in duidelijk Nederlands:' if is_dutch else 'Format this analysis:'}\n\n{sql_result}"
+        }
+        logger.info(f"Formatting with system message: {system_message}")
+        logger.info(f"User message for formatting: {user_message}")
 
-            if any(phrase in error_msg for phrase in [
-                "context length", "maximum context length", "too many tokens",
-                "context window", "token limit"
-            ]):
-                return None, "context_length_error", response_time
-            return None, str(e), response_time
+        final_result = llm.predict_messages(
+            [system_message, user_message]).content
+        response_time = int((time.time() - start_time) * 1000)
+        return final_result, None, response_time
 
     # First attempt
     result, error, response_time = try_generate_response(1)
 
     if result:
-        # Track successful query
         cache_manager.track_query_performance(
             query=question,
             was_answered=True,
@@ -495,14 +532,12 @@ def generate_db_response(question: str, text_context: Optional[str] = None, cont
         )
         return result
 
-    # If first attempt failed, log it and retry
     logger.warning(f"First query attempt failed: {error}. Retrying...")
 
     # Second attempt
     result, error, response_time = try_generate_response(2)
 
     if result:
-        # Track successful retry
         cache_manager.track_query_performance(
             query=question,
             was_answered=True,
@@ -512,10 +547,22 @@ def generate_db_response(question: str, text_context: Optional[str] = None, cont
         )
         return result
 
-    # Both attempts failed - track the final failure with specific error message
+    # Get words for Dutch detection in error messages
+    words = question.lower().split()
+    dutch_words = ['kun', 'kunt', 'je', 'jij', 'u', 'bent', 'zijn', 'waar', 'wat', 'wie', 'hoe',
+                   'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
+                   'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet']
+    is_dutch = sum(1 for word in words if word in dutch_words) > 0
+
     if error == "context_length_error":
         error_message = "Context length exceeded - Too much data requested"
         user_message = (
+            "De opgevraagde tijdsperiode bevat te veel data om te verwerken. Probeer:\n"
+            "1. De tijdsperiode te verkleinen (bijvoorbeeld laatste week i.p.v. laatste maand)\n"
+            "2. De zoekcriteria te verfijnen\n"
+            "3. De vraag op te splitsen in kleinere delen\n"
+            "\nBijvoorbeeld, als u naar een jaar aan data vroeg, probeer dan een maand of kwartaal."
+        ) if is_dutch else (
             "The requested time range contains too much data to process. Please try:\n"
             "1. Reducing the time range (e.g., last week instead of last month)\n"
             "2. Narrowing down your search criteria\n"
@@ -524,7 +571,7 @@ def generate_db_response(question: str, text_context: Optional[str] = None, cont
         )
     else:
         error_message = "Invalid SQL query"
-        user_message = "No valid SQL query found in the response"
+        user_message = "Geen geldige SQL-query gevonden" if is_dutch else "No valid SQL query found in the response"
 
     cache_manager.track_query_performance(
         query=question,
