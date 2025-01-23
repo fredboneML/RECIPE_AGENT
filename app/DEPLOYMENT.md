@@ -315,5 +315,4 @@ docker exec -it [container_name] sh
 For additional support or questions:
 1. Check the application documentation
 2. Review Docker and Docker Compose documentation
-3.  Contact the development team
-
+3. Contact the development team
