@@ -405,6 +405,7 @@ def add_context_to_query(user_query: str, text_context: Optional[str] = None, co
                     "    - ALWAYS include the complete base_data CTE definition\n"
                     "    - COPY and PASTE the exact base_data CTE structure shown above\n"
                     "22. NEVER execute a DELETE, UPDATE, INSERT, DROP, or any other data modification statements.\n"
+                    "23. Always use the last 2 months as default value when generating the SQL query and only change it if required by the user.\n"
                     f"\nSchema of available tables:\n{available_tables}\n\n")
 
     enhanced_query = user_query
