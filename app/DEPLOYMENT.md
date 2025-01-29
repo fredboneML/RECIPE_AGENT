@@ -176,6 +176,15 @@ Run deployment
 ./deploy.sh
 ```
 
+chmod +x deploy-infrastructure.sh
+chmod +x deploy-app.sh
+
+# First deploy infrastructure
+# ./deploy-infrastructure.sh
+
+# Once infrastructure is running, deploy the application
+./deploy-app.sh
+
 ## Backup Configuration
 
 ### 1. Create Backup Script

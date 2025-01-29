@@ -20,6 +20,9 @@ import logging
 import hashlib
 import datetime
 from ai_analyzer.config import config, DATA_DIR, DATABASE_URL
+from datetime import datetime as dt
+from datetime import timezone
+from typing import List, Optional
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -35,17 +38,22 @@ class Transcription(Base):
     __tablename__ = 'transcription'
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     transcription_id = Column(String, nullable=False)
-    processingdate = Column(DateTime, nullable=False)
+    # Changed from processingdate
+    processing_date = Column(DateTime, nullable=False)
     transcription = Column(String, nullable=False)
     summary = Column(String)
     topic = Column(String)
     sentiment = Column(String)
+    call_duration_secs = Column(Integer, nullable=True)
+    tenant_code = Column(String, nullable=True)  # Made nullable
+    clid = Column(String, nullable=True)
+    telephone_number = Column(String, nullable=True)
+    call_direction = Column(String, nullable=True)
 
-    # Add a unique constraint on transcription_id and processingdate
     __table_args__ = (
         UniqueConstraint(
             'transcription_id',
-            'processingdate',
+            'processing_date',
             name='unique_company_transcription'
         ),
     )
@@ -85,14 +93,6 @@ class UserMemory(Base):
         # Generate a title from the first query of conversation
         return query[:50] + "..." if len(query) > 50 else query
 
-
-# Company table ORM model
-class Company(Base):
-    __tablename__ = 'company'
-    transcription_id = Column(String, primary_key=True)
-    clid = Column(String)
-    telephone_number = Column(String)
-
 # User table ORM model with role
 
 
@@ -102,9 +102,200 @@ class User(Base):
     username = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default='read_only')
+    tenant_code = Column(String, nullable=False)
 
     def has_write_permission(self):
         return self.role in ['admin', 'write']
+
+
+class RestrictedTable(Base):
+    """
+    Model to track restricted tables that should not be accessible
+    through general queries or analytics
+    """
+    __tablename__ = 'restricted_tables'
+
+    table_name = Column(String, primary_key=True)
+    reason = Column(String, nullable=False)
+    added_at = Column(DateTime, default=lambda: dt.now(timezone.utc))
+    added_by = Column(String, nullable=False)
+
+    def __repr__(self):
+        return f"<RestrictedTable(table_name='{self.table_name}', reason='{self.reason}')>"
+
+
+def populate_restricted_tables(session, added_by="system"):
+    """
+    Populate the restricted_tables table with default restricted tables
+    """
+    try:
+        # Define default restricted tables and their reasons
+        restricted_tables = [
+            {
+                "table_name": "users",
+                "reason": "Contains sensitive user authentication and authorization data"
+            },
+            {
+                "table_name": "query_cache",
+                "reason": "Internal system table for query optimization"
+            },
+            {
+                "table_name": "query_performance",
+                "reason": "Internal system table for performance monitoring"
+            },
+            {
+                "table_name": "user_memory",
+                "reason": "Contains user conversation history and personal data"
+            }
+        ]
+
+        # Add each restricted table
+        for table in restricted_tables:
+            # Check if entry already exists
+            existing = session.query(RestrictedTable).filter_by(
+                table_name=table["table_name"]
+            ).first()
+
+            if not existing:
+                restricted_table = RestrictedTable(
+                    table_name=table["table_name"],
+                    reason=table["reason"],
+                    added_by=added_by,
+                    added_at=dt.now(timezone.utc)
+                )
+                session.add(restricted_table)
+                logger.info(f"Added restricted table: {table['table_name']}")
+            else:
+                logger.info(f"Table {table['table_name']} already restricted")
+
+        session.commit()
+        return True
+
+    except Exception as e:
+        logger.error(f"Error populating restricted tables: {e}")
+        session.rollback()
+        return False
+
+
+def is_table_restricted(session, table_name: str) -> bool:
+    """
+    Check if a table is restricted
+    """
+    try:
+        return session.query(RestrictedTable).filter_by(
+            table_name=table_name
+        ).first() is not None
+    except Exception as e:
+        logger.error(f"Error checking if table is restricted: {e}")
+        return False
+
+
+def get_restricted_tables(session) -> list:
+    """
+    Get list of all restricted table names
+    """
+    try:
+        restricted = session.query(RestrictedTable).all()
+        return [table.table_name for table in restricted]
+    except Exception as e:
+        logger.error(f"Error getting restricted tables: {e}")
+        return []
+
+
+class TenantCode(Base):
+    """
+    Model to manage tenant codes and their aliases
+    """
+    __tablename__ = 'tenant_codes'
+
+    tenant_code = Column(String, primary_key=True)
+    tenant_code_alias = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime, default=lambda: dt.now(timezone.utc))
+
+    def __repr__(self):
+        return f"<TenantCode(tenant_code='{self.tenant_code}', alias='{self.tenant_code_alias}')>"
+
+
+def initialize_default_tenant(session) -> bool:
+    """
+    Initialize the default tenant (tientelecom)
+
+    Args:
+        session: SQLAlchemy session
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Check if default tenant exists
+        existing = session.query(TenantCode).filter_by(
+            tenant_code='tientelecom'
+        ).first()
+
+        if not existing:
+            default_tenant = TenantCode(
+                tenant_code='tientelecom',
+                tenant_code_alias='tientelecom'
+            )
+            session.add(default_tenant)
+            session.commit()
+            logger.info(
+                "Default tenant 'tientelecom' initialized successfully")
+            return True
+        else:
+            logger.info("Default tenant 'tientelecom' already exists")
+            return True
+
+    except Exception as e:
+        logger.error(f"Error initializing default tenant: {e}")
+        session.rollback()
+        return False
+
+
+def get_tenant_codes(session) -> List[dict]:
+    """
+    Get list of all available tenant codes
+
+    Args:
+        session: SQLAlchemy session
+
+    Returns:
+        List[dict]: List of dictionaries containing tenant code information
+    """
+    try:
+        tenants = session.query(TenantCode).all()
+        return [
+            {
+                "tenant_code": tenant.tenant_code,
+                "alias": tenant.tenant_code_alias,
+                "created_at": tenant.created_at
+            }
+            for tenant in tenants
+        ]
+    except Exception as e:
+        logger.error(f"Error retrieving tenant codes: {e}")
+        return []
+
+
+def get_tenant_by_code(session, code: str) -> Optional[TenantCode]:
+    """
+    Get tenant by tenant code or alias
+
+    Args:
+        session: SQLAlchemy session
+        code: Tenant code or alias to look up
+
+    Returns:
+        Optional[TenantCode]: TenantCode object if found, None otherwise
+    """
+    try:
+        return session.query(TenantCode).filter(
+            (TenantCode.tenant_code == code) |
+            (TenantCode.tenant_code_alias == code)
+        ).first()
+    except Exception as e:
+        logger.error(f"Error retrieving tenant by code: {e}")
+        return None
 
 
 # conversation management functions
@@ -233,16 +424,9 @@ def load_data_from_csv():
             if file.startswith('df_transcription__') and file.endswith('.csv')
         ]
 
-        # Check for company files
-        df_company_files = [
-            file for file in os.listdir(data_dir)
-            if file.startswith('df_company__') and file.endswith('.csv')
-        ]
-
         logger.info(f"Found transcription files: {df_transcription_files}")
-        logger.info(f"Found company files: {df_company_files}")
 
-        if not df_transcription_files or not df_company_files:
+        if not df_transcription_files:
             logger.info("No matching data files found. Skipping data import.")
             return pd.DataFrame(), pd.DataFrame()
 
@@ -254,70 +438,21 @@ def load_data_from_csv():
             reverse=True
         )
 
-        df_company_files = sorted(
-            df_company_files,
-            key=lambda x: datetime.datetime.strptime(
-                x.split('__')[1].split('.csv')[0], '%Y-%m-%d'),
-            reverse=True
-        )
-
         # Get the latest files
         latest_transcription = df_transcription_files[0]
-        latest_company = df_company_files[0]
 
         logger.info(f"Loading transcription file: {latest_transcription}")
-        logger.info(f"Loading company file: {latest_company}")
 
         # Load the data
         df_transcription = pd.read_csv(f'{data_dir}/{latest_transcription}')
-        df_company = pd.read_csv(f'{data_dir}/{latest_company}')
 
         logger.info(f"Loaded {len(df_transcription)} transcription records")
-        logger.info(f"Loaded {len(df_company)} company records")
 
-        return df_company, df_transcription
+        return df_transcription
 
     except Exception as e:
         logger.error(f"Error loading CSV files: {str(e)}", exc_info=True)
-        return pd.DataFrame(), pd.DataFrame()
-
-
-# Insert data into the Company table
-def insert_company_data(df_company, session):
-    try:
-        logger.info(f"Starting to import {len(df_company)} company records.")
-
-        # Rename 'id' column to 'transcription_id' if it exists
-        if 'id' in df_company.columns:
-            df_company = df_company.rename(columns={'id': 'transcription_id'})
-
-        for index, row in df_company.iterrows():
-            # Make sure transcription_id exists
-            if 'transcription_id' not in row:
-                logger.error("Missing transcription_id column in company data")
-                continue
-
-            insert_stmt = insert(Company).values(
-                transcription_id=str(row['transcription_id']),
-                clid=str(row['clid']) if pd.notna(row.get('clid')) else None,
-                telephone_number=str(row['telephone_number']) if pd.notna(
-                    row.get('telephone_number')) else None
-            )
-            do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
-                index_elements=['transcription_id'])
-            session.execute(do_nothing_stmt)
-
-            # Commit every 1000 records to avoid memory issues
-            if (index + 1) % 1000 == 0:
-                session.commit()
-                logger.info(f"Imported {index + 1} company records")
-
-        session.commit()
-        logger.info("Completed importing Company data.")
-
-    except Exception as e:
-        logger.error(f"Error importing Company data: {e}")
-        session.rollback()
+        return pd.DataFrame()
 
 
 def insert_transcription_data(df_transcription, session):
@@ -329,35 +464,46 @@ def insert_transcription_data(df_transcription, session):
         logger.info(f"Starting to import {
                     len(df_transcription)} transcription records.")
 
-        # Convert processingdate to datetime
-        df_transcription['processingdate'] = pd.to_datetime(
-            df_transcription['processingdate'])
+        # Convert processingdate to processing_date if needed
+        if 'processingdate' in df_transcription.columns:
+            df_transcription = df_transcription.rename(
+                columns={'processingdate': 'processing_date'})
 
-        # Group by transcription_id and get the latest record for each company
+        # Convert processing_date to datetime
+        df_transcription['processing_date'] = pd.to_datetime(
+            df_transcription['processing_date'])
+
+        # Group by transcription_id and get the latest record
         df_transcription = df_transcription.sort_values(
-            'processingdate', ascending=False)
+            'processing_date', ascending=False)
         df_transcription = df_transcription.drop_duplicates(
             subset=['transcription_id'], keep='first')
-
-        logger.info(f"After removing duplicates: {
-                    len(df_transcription)} unique records")
 
         for index, row in df_transcription.iterrows():
             try:
                 insert_stmt = insert(Transcription).values(
                     id=str(uuid.uuid4()),
                     transcription_id=str(row['transcription_id']),
-                    processingdate=row['processingdate'],
+                    processing_date=row['processing_date'],
                     transcription=str(row['transcription']),
                     summary=str(row['summary']) if pd.notna(
                         row.get('summary')) else None,
                     topic=str(row['topic']) if pd.notna(
                         row.get('topic')) else None,
                     sentiment=str(row['sentiment']) if pd.notna(
-                        row.get('sentiment')) else None
+                        row.get('sentiment')) else None,
+                    tenant_code=str(row.get('tenant_code')) if pd.notna(
+                        row.get('tenant_code')) else None,
+                    call_duration_secs=int(row['call_duration_secs']) if pd.notna(
+                        row.get('call_duration_secs')) else None,
+                    clid=str(row.get('clid')) if pd.notna(
+                        row.get('clid')) else None,
+                    telephone_number=str(row.get('telephone_number')) if pd.notna(
+                        row.get('telephone_number')) else None,
+                    call_direction=str(row.get('call_direction')) if pd.notna(
+                        row.get('call_direction')) else None
                 )
 
-                # Use on_conflict_do_nothing with the unique constraint
                 do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
                     constraint='unique_company_transcription'
                 )
@@ -376,14 +522,9 @@ def insert_transcription_data(df_transcription, session):
         session.commit()
         logger.info("Completed importing Transcription data.")
 
-        count = session.query(Transcription).count()
-        logger.info(
-            f"Total records in Transcription table after import: {count}")
-
     except Exception as e:
         logger.error(f"Error in transcription data import process: {e}")
         session.rollback()
-
 # Hash password
 
 
@@ -392,11 +533,11 @@ def hash_password(password):
 
 
 # Update the create_user function to set role
-def create_user(session, username, password, role='read_only'):
+def create_user(session, username, password, tenant_code, role='read_only'):
     try:
         # Check if the user already exists
         existing_user = session.query(
-            User).filter_by(username=username).first()
+            User).filter_by(username=username, tenant_code=tenant_code).first()
         if existing_user:
             logger.info(
                 f"User '{username}' already exists. Skipping creation.")
@@ -406,6 +547,7 @@ def create_user(session, username, password, role='read_only'):
         hashed_password = hash_password(password)
         new_user = User(
             username=username,
+            tenant_code=tenant_code,
             password_hash=hashed_password,
             role=role
         )
@@ -416,6 +558,23 @@ def create_user(session, username, password, role='read_only'):
     except Exception as e:
         logger.error(f"Error creating user '{username}': {e}")
         session.rollback()
+
+
+def run_create_tables():
+    """Create required tables if they don't exist"""
+    try:
+        engine = create_db_engine()
+
+        try:
+            # Create tables if they don't exist
+            create_tables(engine)
+            return True
+        except Exception as e:
+            logger.error(f"Error in run_create_tables: {str(e)}")
+            return False
+    except Exception as e:
+        logger.error(f"Error in run_create_tables: {str(e)}")
+        return False
 
 
 def run_data_import():
@@ -430,18 +589,14 @@ def run_data_import():
             create_tables(engine)
 
             # Load data
-            df_company, df_transcription = load_data_from_csv()
+            df_transcription = load_data_from_csv()
 
             # Only proceed with import if we have data
-            if not df_company.empty or not df_transcription.empty:
-                logger.info(f"Number of records in df_company: {
-                            len(df_company)}")
+            if not df_transcription.empty:
                 logger.info(f"Number of records in df_transcription: {
                             len(df_transcription)}")
 
-                # Insert company and transcription data
-                if not df_company.empty:
-                    insert_company_data(df_company, session)
+                # Insert transcription data
                 if not df_transcription.empty:
                     insert_transcription_data(df_transcription, session)
             else:
@@ -459,6 +614,7 @@ def run_data_import():
                 session,
                 config.get('ADMIN_USER'),
                 config.get('ADMIN_PASSWORD'),
+                tenant_code=config.get('TENANT_CODE'),
                 role='admin'
             )  # Admin user with write permissions
 
@@ -466,14 +622,19 @@ def run_data_import():
                 session,
                 config.get('READ_USER'),
                 config.get('READ_USER_PASSWORD'),
+                tenant_code=config.get('TENANT_CODE'),
                 role='read_only'
             )  # Regular user with read-only permissions
 
+            # Populate restricted tables
+            populate_restricted_tables(session)
+
+            # Initialize default tenant
+            initialize_default_tenant(session)
+
             # Verify the number of records in the database tables
-            company_count = session.query(Company).count()
             transcription_count = session.query(Transcription).count()
             user_count = session.query(User).count()
-            logger.info(f"Number of records in Company table: {company_count}")
             logger.info(f"Number of records in Transcription table: {
                         transcription_count}")
             logger.info(f"Number of records in User table: {user_count}")
