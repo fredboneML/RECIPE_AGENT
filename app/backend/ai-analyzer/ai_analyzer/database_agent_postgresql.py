@@ -257,7 +257,7 @@ db = get_db_connection()
 
 # List available tables (schema)
 try:
-    available_tables = db.get_table_info(['company', 'transcription'])
+    available_tables = db.get_table_info(['transcription'])
     logger.info("Retrieved specific table information")
 except Exception as e:
     logger.warning(f"Error getting specific table info: {

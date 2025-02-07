@@ -9,9 +9,13 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Text,
+    MetaData,
+    text,
     Boolean,
     UniqueConstraint,
-    Index  # Added Index import
+    Index,
+    DDL,
+    event  # Added Index import
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.dialects.postgresql import insert
@@ -31,32 +35,227 @@ logger = logging.getLogger('data_import_postgresql')
 # Base for ORM models
 Base = declarative_base()
 
-# Transcription table ORM model with composite unique constraint
+# Create initial engine with explicit host and port
+
+
+def get_database_url():
+    """Get database URL with correct host and port"""
+    return f"postgresql://{config['POSTGRES_USER']}:{config['POSTGRES_PASSWORD']}@database:5432/{config['POSTGRES_DB']}"
+
+
+# Create the engine with the correct connection URL
+engine = create_engine(
+    get_database_url(),
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_pre_ping=True
+)
+
+
+def create_db_engine():
+    """Create and verify database engine"""
+    try:
+        new_engine = create_engine(
+            get_database_url(),
+            pool_size=5,
+            max_overflow=10,
+            pool_timeout=30,
+            pool_pre_ping=True
+        )
+        new_engine.connect()
+        logger.info(f"Successfully connected to the database at database:5432")
+        return new_engine
+    except Exception as e:
+        logger.error(f"Error creating database engine: {e}")
+        raise
+
+
+# Create session factories
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Session = sessionmaker(bind=engine)
 
 
 class Transcription(Base):
+    """
+    Transcription model for existing partitioned table.
+    This model is used for querying only, not table creation.
+    """
     __tablename__ = 'transcription'
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    __table_args__ = {
+        'extend_existing': True  # Only use extend_existing
+    }
+
+    id = Column(String, primary_key=True)
     transcription_id = Column(String, nullable=False)
-    # Changed from processingdate
     processing_date = Column(DateTime, nullable=False)
     transcription = Column(String, nullable=False)
     summary = Column(String)
     topic = Column(String)
     sentiment = Column(String)
     call_duration_secs = Column(Integer, nullable=True)
-    tenant_code = Column(String, nullable=True)  # Made nullable
+    tenant_code = Column(String, nullable=False)
     clid = Column(String, nullable=True)
     telephone_number = Column(String, nullable=True)
     call_direction = Column(String, nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint(
-            'transcription_id',
-            'processing_date',
-            name='unique_company_transcription'
-        ),
-    )
+
+def check_user_exists(session, username, tenant_code):
+    """Check if a user already exists"""
+    return session.query(User).filter_by(
+        username=username,
+        tenant_code=tenant_code
+    ).first() is not None
+
+
+def check_tenant_exists(session, tenant_code):
+    """Check if a tenant already exists"""
+    return session.query(TenantCode).filter_by(
+        tenant_code=tenant_code
+    ).first() is not None
+
+
+def check_restricted_tables_populated(session):
+    """Check if restricted tables are already populated"""
+    return session.query(RestrictedTable).count() > 0
+
+
+def create_partition_for_tenant(connection, tenant_code):
+    """Create partition and related objects for a tenant"""
+    try:
+        # First check if partition exists
+        check_sql = text("""
+            SELECT EXISTS (
+                SELECT FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relname = :partition_name
+            );
+        """)
+
+        exists = connection.execute(
+            check_sql,
+            {"partition_name": f"transcription_{tenant_code}"}
+        ).scalar()
+
+        if not exists:
+            # Create partition
+            connection.execute(text(f"""
+                CREATE TABLE transcription_{tenant_code}
+                PARTITION OF transcription
+                FOR VALUES IN ('{tenant_code}');
+
+                CREATE INDEX idx_{tenant_code}_processing_date
+                ON transcription_{tenant_code}(processing_date);
+
+                CREATE INDEX idx_{tenant_code}_topic
+                ON transcription_{tenant_code}(topic);
+
+                CREATE INDEX idx_{tenant_code}_sentiment
+                ON transcription_{tenant_code}(sentiment);
+            """))
+
+            # Create role if not exists
+            connection.execute(text(f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT FROM pg_roles
+                        WHERE rolname = 'tenant_{tenant_code}'
+                    ) THEN
+                        CREATE ROLE tenant_{tenant_code}
+                        LOGIN PASSWORD 'secure_{tenant_code}_password';
+                    END IF;
+                END $$;
+
+                GRANT SELECT ON transcription_{tenant_code}
+                TO tenant_{tenant_code};
+            """))
+
+            logger.info(f"Created partition for tenant: {tenant_code}")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error creating partition for tenant {tenant_code}: {e}")
+        raise e
+
+
+def ensure_tenant_partition(engine, tenant_code):
+    """Ensure partition exists for tenant"""
+    try:
+        with engine.begin() as connection:
+            return create_partition_for_tenant(connection, tenant_code)
+
+    except Exception as e:
+        logger.error(f"Error ensuring partition for tenant {tenant_code}: {e}")
+        raise e
+
+# Modified User model with tenant support
+
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False, default='read_only')
+    tenant_code = Column(String, nullable=False)
+
+    def has_write_permission(self):
+        return self.role in ['admin', 'write']
+
+# Function to create user with tenant role
+
+
+def create_tenant_user(session, username, password, tenant_code, role='read_only'):
+    try:
+        hashed_password = hashlib.sha256(password.encode()).hexdigest()
+
+        # Create tenant role and partition if they don't exist
+        session.execute(f"""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tenant_{tenant_code}') THEN
+                CREATE ROLE tenant_{tenant_code} LOGIN PASSWORD 'secure_{tenant_code}_password';
+                GRANT SELECT ON transcription_{tenant_code} TO tenant_{tenant_code};
+            END IF;
+        END
+        $$;
+        """)
+
+        # Create user
+        new_user = User(
+            username=username,
+            password_hash=hashed_password,
+            role=role,
+            tenant_code=tenant_code
+        )
+        session.add(new_user)
+        session.commit()
+
+        return True
+    except Exception as e:
+        session.rollback()
+        raise e
+
+# Function to authenticate user and set role
+
+
+def authenticate_user(session, username, password, tenant_code):
+    try:
+        user = session.query(User).filter_by(
+            username=username,
+            tenant_code=tenant_code
+        ).first()
+
+        if user and user.password_hash == hashlib.sha256(password.encode()).hexdigest():
+            # Set role to tenant role
+            session.execute(f"SET ROLE tenant_{tenant_code}")
+            return user
+
+        return None
+    except Exception as e:
+        raise e
 
 
 class UserMemory(Base):
@@ -93,20 +292,6 @@ class UserMemory(Base):
         # Generate a title from the first query of conversation
         return query[:50] + "..." if len(query) > 50 else query
 
-# User table ORM model with role
-
-
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    username = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-    role = Column(String, nullable=False, default='read_only')
-    tenant_code = Column(String, nullable=False)
-
-    def has_write_permission(self):
-        return self.role in ['admin', 'write']
-
 
 class RestrictedTable(Base):
     """
@@ -125,11 +310,9 @@ class RestrictedTable(Base):
 
 
 def populate_restricted_tables(session, added_by="system"):
-    """
-    Populate the restricted_tables table with default restricted tables
-    """
+    """Populate the restricted_tables table using existing session"""
     try:
-        # Define default restricted tables and their reasons
+        # Use existing session instead of creating new connection
         restricted_tables = [
             {
                 "table_name": "users",
@@ -149,9 +332,7 @@ def populate_restricted_tables(session, added_by="system"):
             }
         ]
 
-        # Add each restricted table
         for table in restricted_tables:
-            # Check if entry already exists
             existing = session.query(RestrictedTable).filter_by(
                 table_name=table["table_name"]
             ).first()
@@ -217,17 +398,9 @@ class TenantCode(Base):
 
 
 def initialize_default_tenant(session) -> bool:
-    """
-    Initialize the default tenant (tientelecom)
-
-    Args:
-        session: SQLAlchemy session
-
-    Returns:
-        bool: True if successful, False otherwise
-    """
+    """Initialize the default tenant (tientelecom)"""
     try:
-        # Check if default tenant exists
+        # Use existing session instead of creating new connection
         existing = session.query(TenantCode).filter_by(
             tenant_code='tientelecom'
         ).first()
@@ -388,19 +561,104 @@ def cleanup_expired_conversations():
         session.close()
 
 
-# Create a database engine
-def create_db_engine():
-    engine = create_engine(DATABASE_URL)
-    engine.connect()
-    logger.info("Successfully connected to the database.")
-    return engine
-
 # Create all tables
 
 
 def create_tables(engine):
-    Base.metadata.create_all(engine)
-    logger.info("All database tables created successfully.")
+    """Create all tables in the correct order"""
+    try:
+        # First ensure we're in the public schema
+        with engine.begin() as connection:
+            connection.execute(text("SET search_path TO public"))
+
+            # Create a temporary MetaData without the Transcription table
+            temp_metadata = MetaData(schema='public')
+
+            # Create all non-transcription tables first
+            for table in Base.metadata.sorted_tables:
+                if table.name != 'transcription':
+                    table.tometadata(temp_metadata)
+
+            # Create tables
+            temp_metadata.create_all(bind=engine)
+
+            # Create the partitioned transcription table
+            connection.execute(
+                text("DROP TABLE IF EXISTS transcription CASCADE;"))
+
+            # Create partitioned table
+            partition_sql = """
+            CREATE TABLE transcription (
+                id VARCHAR NOT NULL,
+                transcription_id VARCHAR NOT NULL,
+                processing_date TIMESTAMP NOT NULL,
+                transcription TEXT NOT NULL,
+                summary TEXT,
+                topic VARCHAR,
+                sentiment VARCHAR,
+                call_duration_secs INTEGER,
+                tenant_code VARCHAR NOT NULL,
+                clid VARCHAR,
+                telephone_number VARCHAR,
+                call_direction VARCHAR,
+                PRIMARY KEY (id, tenant_code),
+                CONSTRAINT unique_tenant_transcription 
+                    UNIQUE(transcription_id, processing_date, tenant_code)
+            ) PARTITION BY LIST (tenant_code);
+            """
+
+            connection.execute(text(partition_sql))
+
+            # Create initial partition for default tenant
+            initial_tenant_sql = """
+            CREATE TABLE transcription_tientelecom 
+            PARTITION OF transcription
+            FOR VALUES IN ('tientelecom');
+            
+            CREATE INDEX idx_tientelecom_processing_date 
+            ON transcription_tientelecom(processing_date);
+            
+            CREATE INDEX idx_tientelecom_topic 
+            ON transcription_tientelecom(topic);
+            
+            CREATE INDEX idx_tientelecom_sentiment 
+            ON transcription_tientelecom(sentiment);
+            """
+
+            connection.execute(text(initial_tenant_sql))
+
+            # Create role for default tenant
+            role_sql = """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT FROM pg_roles 
+                    WHERE rolname = 'tenant_tientelecom'
+                ) THEN
+                    CREATE ROLE tenant_tientelecom LOGIN PASSWORD 'secure_tientelecom_password';
+                END IF;
+            END $$;
+            
+            GRANT SELECT ON transcription_tientelecom TO tenant_tientelecom;
+            """
+
+            connection.execute(text(role_sql))
+
+            # Verify tables were created
+            verify_sql = """
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public';
+            """
+
+            tables = connection.execute(text(verify_sql)).fetchall()
+            logger.info(f"Created tables: {[t[0] for t in tables]}")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error creating tables: {e}")
+        raise
 
 
 # Create the data directory if it doesn't exist
@@ -455,14 +713,22 @@ def load_data_from_csv():
         return pd.DataFrame()
 
 
-def insert_transcription_data(df_transcription, session):
+# Modified function to insert data with tenant partitioning
+def insert_transcription_data(df_transcription, session, tenant_code):
+    """Insert transcription data with proper tenant isolation and duplicate checking"""
     try:
         if df_transcription.empty:
             logger.warning("No transcription data to import")
             return
 
+        # Ensure partition exists
+        ensure_tenant_partition(session.bind, tenant_code)
+
         logger.info(f"Starting to import {
-                    len(df_transcription)} transcription records.")
+                    len(df_transcription)} transcription records for tenant {tenant_code}")
+
+        # Set tenant_code for all records
+        df_transcription['tenant_code'] = tenant_code
 
         # Convert processingdate to processing_date if needed
         if 'processingdate' in df_transcription.columns:
@@ -473,58 +739,94 @@ def insert_transcription_data(df_transcription, session):
         df_transcription['processing_date'] = pd.to_datetime(
             df_transcription['processing_date'])
 
-        # Group by transcription_id and get the latest record
-        df_transcription = df_transcription.sort_values(
-            'processing_date', ascending=False)
-        df_transcription = df_transcription.drop_duplicates(
-            subset=['transcription_id'], keep='first')
+        # First, get existing records for this tenant to avoid duplicates
+        existing_records = session.query(
+            Transcription.transcription_id,
+            Transcription.processing_date
+        ).filter(
+            Transcription.tenant_code == tenant_code
+        ).all()
 
-        for index, row in df_transcription.iterrows():
-            try:
-                insert_stmt = insert(Transcription).values(
-                    id=str(uuid.uuid4()),
-                    transcription_id=str(row['transcription_id']),
-                    processing_date=row['processing_date'],
-                    transcription=str(row['transcription']),
-                    summary=str(row['summary']) if pd.notna(
-                        row.get('summary')) else None,
-                    topic=str(row['topic']) if pd.notna(
-                        row.get('topic')) else None,
-                    sentiment=str(row['sentiment']) if pd.notna(
-                        row.get('sentiment')) else None,
-                    tenant_code=str(row.get('tenant_code')) if pd.notna(
-                        row.get('tenant_code')) else None,
-                    call_duration_secs=int(row['call_duration_secs']) if pd.notna(
-                        row.get('call_duration_secs')) else None,
-                    clid=str(row.get('clid')) if pd.notna(
-                        row.get('clid')) else None,
-                    telephone_number=str(row.get('telephone_number')) if pd.notna(
-                        row.get('telephone_number')) else None,
-                    call_direction=str(row.get('call_direction')) if pd.notna(
-                        row.get('call_direction')) else None
-                )
+        # Create a set for efficient lookup
+        existing_set = {(str(rec.transcription_id), rec.processing_date)
+                        for rec in existing_records}
 
-                do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
-                    constraint='unique_company_transcription'
-                )
-                session.execute(do_nothing_stmt)
+        # Filter out existing records
+        new_records = []
+        for _, row in df_transcription.iterrows():
+            key = (str(row['transcription_id']), row['processing_date'])
+            if key not in existing_set:
+                new_records.append(row)
 
-                if (index + 1) % 1000 == 0:
+        # Convert to DataFrame
+        new_df = pd.DataFrame(new_records) if new_records else pd.DataFrame()
+
+        if new_df.empty:
+            logger.info(f"No new records to import for tenant {tenant_code}")
+            return True
+
+        logger.info(
+            f"Found {len(new_df)} new records to import for tenant {tenant_code}")
+
+        # Process records in batches
+        batch_size = 100
+        successful_imports = 0
+
+        for batch_start in range(0, len(new_df), batch_size):
+            batch_end = min(batch_start + batch_size, len(new_df))
+            batch = new_df.iloc[batch_start:batch_end]
+
+            with session.begin_nested():  # Create savepoint
+                try:
+                    for _, row in batch.iterrows():
+                        try:
+                            # Prepare values with proper NULL handling
+                            values = {
+                                'id': str(uuid.uuid4()),
+                                'transcription_id': str(row['transcription_id']),
+                                'processing_date': row['processing_date'],
+                                'transcription': str(row['transcription']),
+                                'summary': str(row['summary']) if pd.notna(row.get('summary')) else None,
+                                'topic': str(row['topic']) if pd.notna(row.get('topic')) else None,
+                                'sentiment': str(row['sentiment']) if pd.notna(row.get('sentiment')) else None,
+                                'tenant_code': tenant_code,
+                                'call_duration_secs': int(row['call_duration_secs']) if pd.notna(row.get('call_duration_secs')) else None,
+                                'clid': str(row.get('clid')) if pd.notna(row.get('clid')) else None,
+                                'telephone_number': str(row.get('telephone_number')) if pd.notna(row.get('telephone_number')) else None,
+                                'call_direction': str(row.get('call_direction')) if pd.notna(row.get('call_direction')) else None
+                            }
+
+                            # Insert with ON CONFLICT DO NOTHING as a safety net
+                            insert_stmt = insert(Transcription).values(values)
+                            do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
+                                constraint='unique_tenant_transcription'
+                            )
+                            session.execute(do_nothing_stmt)
+                            successful_imports += 1
+
+                        except Exception as e:
+                            logger.error(f"Error importing record: {e}")
+                            logger.error(f"Problematic row: {row}")
+                            continue
+
                     session.commit()
-                    logger.info(f"Imported {index + 1} transcription records.")
+                    logger.info(f"Successfully imported batch of {
+                                batch_end - batch_start} records")
 
-            except Exception as e:
-                logger.error(
-                    f"Error importing transcription record at index {index}: {e}")
-                logger.error(f"Problematic row: {row}")
-                continue
+                except Exception as batch_error:
+                    logger.error(f"Error processing batch: {batch_error}")
+                    session.rollback()
+                    continue
 
-        session.commit()
-        logger.info("Completed importing Transcription data.")
+        logger.info(f"Import completed. Successfully imported {
+                    successful_imports} new records for tenant {tenant_code}")
+        return True
 
     except Exception as e:
         logger.error(f"Error in transcription data import process: {e}")
         session.rollback()
+        return False
+
 # Hash password
 
 
@@ -560,33 +862,95 @@ def create_user(session, username, password, tenant_code, role='read_only'):
         session.rollback()
 
 
+# Modified run_create_tables function
 def run_create_tables():
     """Create required tables if they don't exist"""
     try:
-        engine = create_db_engine()
+        engine = create_engine(DATABASE_URL)
 
-        try:
-            # Create tables if they don't exist
-            create_tables(engine)
-            return True
-        except Exception as e:
-            logger.error(f"Error in run_create_tables: {str(e)}")
-            return False
+        # Create all tables with the new ordering
+        create_tables(engine)
+
+        return True
+
     except Exception as e:
         logger.error(f"Error in run_create_tables: {str(e)}")
+        return False
+
+# Initialize the database
+
+
+def init_db():
+    """Initialize the database with proper table creation order"""
+    try:
+        # Use get_database_url() for consistent connection settings
+        connection_url = get_database_url()
+        logger.info(f"Connecting to database at database:5432")
+
+        engine = create_engine(
+            connection_url,
+            pool_size=5,
+            max_overflow=10,
+            pool_timeout=30,
+            pool_pre_ping=True
+        )
+
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        try:
+            # Use single session for all operations
+            initialize_default_tenant(session)
+            populate_restricted_tables(session)
+
+            create_user(
+                session,
+                config.get('ADMIN_USER'),
+                config.get('ADMIN_PASSWORD'),
+                tenant_code='tientelecom',
+                role='admin'
+            )
+
+            create_user(
+                session,
+                config.get('READ_USER'),
+                config.get('READ_USER_PASSWORD'),
+                tenant_code='tientelecom',
+                role='read_only'
+            )
+
+            logger.info("Database initialized successfully")
+            return True
+
+        finally:
+            session.close()
+
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
         return False
 
 
 def run_data_import():
     """Run the data import process with proper error handling"""
     try:
-        engine = create_db_engine()
+
+        # Use get_database_url() for consistent connection settings
+        engine = create_engine(
+            get_database_url(),
+            pool_size=5,
+            max_overflow=10,
+            pool_timeout=30,
+            pool_pre_ping=True
+        )
         Session = sessionmaker(bind=engine)
         session = Session()
 
+        logger.info(
+            "Created database session with explicit connection parameters")
+
         try:
             # Create tables if they don't exist
-            create_tables(engine)
+            # init_db()
 
             # Load data
             df_transcription = load_data_from_csv()
@@ -598,7 +962,8 @@ def run_data_import():
 
                 # Insert transcription data
                 if not df_transcription.empty:
-                    insert_transcription_data(df_transcription, session)
+                    insert_transcription_data(
+                        df_transcription, session, config.get('TENANT_CODE'))
             else:
                 logger.info("No data to import.")
 

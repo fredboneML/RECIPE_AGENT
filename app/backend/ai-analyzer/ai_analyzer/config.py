@@ -4,7 +4,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 import logging
 
-LIMIT = 10000
+# LIMIT = 10000
+LIMIT = 50
 LAST_ID = 0
 DATA_DIR = '/usr/src/app/ai-analyzer/data'
 
@@ -44,14 +45,14 @@ def load_env_once():
         config = {
             'POSTGRES_USER': os.getenv('POSTGRES_USER'),
             'POSTGRES_PASSWORD': os.getenv('POSTGRES_PASSWORD'),
-            'DB_HOST': os.getenv('DB_HOST'),
-            'DB_PORT': os.getenv('DB_PORT'),
+            'DB_HOST': os.getenv('DB_HOST', 'database'),
+            'DB_PORT': os.getenv('DB_PORT', '5432'),
             'POSTGRES_DB': os.getenv('POSTGRES_DB'),
             'AI_ANALYZER_OPENAI_API_KEY': os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
             'URL': os.getenv('URL'),
             'API_KEY': os.getenv('API_KEY'),
             'DATA_DIR': os.getenv('DATA_DIR', 'data'),
-            'LIMIT': int(os.getenv('LIMIT', 1000)),
+            'LIMIT': int(os.getenv('LIMIT', 50)),
             'ADMIN_USER': os.getenv('ADMIN_USER'),
             'ADMIN_PASSWORD': os.getenv('ADMIN_PASSWORD'),
             'READ_USER': os.getenv('READ_USER'),
@@ -79,6 +80,8 @@ def load_env_once():
 # Load configuration once when module is imported
 try:
     config = load_env_once()
+    logger.info(f"Using database host: {
+                config['DB_HOST']} and port: {config['DB_PORT']}")
 
     # Create frequently used configurations
     # f'postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}'
