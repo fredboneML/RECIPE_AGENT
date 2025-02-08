@@ -1,6 +1,10 @@
 -- Add new tenant
 INSERT INTO tenant_codes (tenant_code, tenant_code_alias) 
 VALUES ('maccare', 'maccare');
+
+-- Add new tenant
+INSERT INTO tenant_codes (tenant_code, tenant_code_alias) 
+VALUES ('stroevemotorsport', 'stroevemotorsport');
 -- Trigger automatically creates partition, indexes, and role
 
 -- Add new user (minimal)

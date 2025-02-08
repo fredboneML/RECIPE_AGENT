@@ -221,11 +221,15 @@ def setup_permanent_triggers(session):
     try:
         # 1. Set up user management triggers
         session.execute(text("""
-            -- Function to generate random password
+            -- First, create the pgcrypto extension if it doesn't exist
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+            -- Function to generate random password using pgcrypto
             CREATE OR REPLACE FUNCTION generate_default_password()
             RETURNS VARCHAR AS $$
             BEGIN
-                RETURN encode(gen_random_bytes(12), 'hex');
+                -- Use gen_random_uuid() from pgcrypto instead of gen_random_bytes
+                RETURN substr(replace(gen_random_uuid()::text, '-', ''), 1, 12);
             END;
             $$ LANGUAGE plpgsql;
 
@@ -233,7 +237,7 @@ def setup_permanent_triggers(session):
             CREATE OR REPLACE FUNCTION hash_password(password VARCHAR)
             RETURNS VARCHAR AS $$
             BEGIN
-                RETURN encode(sha256(password::bytea), 'hex');
+                RETURN encode(digest(password, 'sha256'), 'hex');
             END;
             $$ LANGUAGE plpgsql;
 
@@ -462,22 +466,103 @@ def insert_transcription_data(df_transcription, session, tenant_code):
         return False
 
 
+def create_tenant_partition(session, tenant_code):
+    """Create partition and role for a specific tenant"""
+    try:
+        # Create partition
+        session.execute(text(f"""
+            CREATE TABLE IF NOT EXISTS transcription_{tenant_code} 
+            PARTITION OF transcription
+            FOR VALUES IN ('{tenant_code}')
+        """))
+
+        # Create indexes
+        session.execute(text(f"""
+            CREATE INDEX IF NOT EXISTS idx_{tenant_code}_processing_date 
+            ON transcription_{tenant_code}(processing_date);
+            
+            CREATE INDEX IF NOT EXISTS idx_{tenant_code}_topic 
+            ON transcription_{tenant_code}(topic);
+            
+            CREATE INDEX IF NOT EXISTS idx_{tenant_code}_sentiment 
+            ON transcription_{tenant_code}(sentiment)
+        """))
+
+        # Create role and grant permissions
+        session.execute(text(f"""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT FROM pg_roles 
+                    WHERE rolname = 'tenant_{tenant_code}'
+                ) THEN
+                    CREATE ROLE tenant_{tenant_code} LOGIN PASSWORD 'secure_{tenant_code}_password';
+                END IF;
+            END $$;
+            
+            GRANT SELECT ON transcription_{tenant_code} TO tenant_{tenant_code}
+        """))
+
+        session.commit()
+        logger.info(
+            f"Successfully created partition for tenant: {tenant_code}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error creating partition for tenant {tenant_code}: {e}")
+        session.rollback()
+        return False
+
+
+def initialize_tenants_from_data(session, df_transcription):
+    """Initialize tenants based on unique tenant codes in the data"""
+    try:
+        if df_transcription.empty:
+            logger.warning("No data provided for tenant initialization")
+            return True
+
+        # Get unique tenant codes from the data
+        unique_tenants = df_transcription['tenant_code'].unique()
+        logger.info(f"Found unique tenant codes in data: {unique_tenants}")
+
+        for tenant_code in unique_tenants:
+            # Add tenant to tenant_codes table
+            session.execute(text("""
+                INSERT INTO tenant_codes (tenant_code, tenant_code_alias)
+                VALUES (:tenant_code, :tenant_code)
+                ON CONFLICT (tenant_code) DO NOTHING
+            """), {"tenant_code": tenant_code})
+
+            # Create partition for the tenant
+            create_tenant_partition(session, tenant_code)
+
+        session.commit()
+        return True
+
+    except Exception as e:
+        logger.error(f"Error initializing tenants from data: {e}")
+        session.rollback()
+        return False
+
+
 def import_initial_data(session):
-    """Import initial data if provided"""
+    """Import initial data with multi-tenant support"""
     try:
         # Load data
         df_transcription = load_data_from_csv()
 
-        # Only proceed with import if we have data
         if not df_transcription.empty:
             logger.info(
                 f"Number of records in df_transcription: {len(df_transcription)}")
 
-            # Insert transcription data
-            if not df_transcription.empty:
-                insert_transcription_data(
-                    df_transcription, session, config.get('TENANT_CODE')
-                )
+            # Initialize tenants from the data
+            initialize_tenants_from_data(session, df_transcription)
+
+            # Group data by tenant_code and insert into respective partitions
+            for tenant_code, tenant_data in df_transcription.groupby('tenant_code'):
+                logger.info(
+                    f"Importing {len(tenant_data)} records for tenant: {tenant_code}")
+                insert_transcription_data(tenant_data, session, tenant_code)
         else:
             logger.info("No data to import.")
 
@@ -489,30 +574,32 @@ def import_initial_data(session):
 
 
 def main():
-    # Get database configuration from environment
-    config = {
-        'POSTGRES_USER': os.getenv('POSTGRES_USER'),
-        'POSTGRES_PASSWORD': os.getenv('POSTGRES_PASSWORD'),
-        'POSTGRES_DB': os.getenv('POSTGRES_DB'),
-        'DB_HOST': os.getenv('DB_HOST', 'database'),
-        'DB_PORT': os.getenv('DB_PORT', '5432'),
-        'ADMIN_USER': os.getenv('ADMIN_USER'),
-        'ADMIN_PASSWORD': os.getenv('ADMIN_PASSWORD'),
-        'READ_USER': os.getenv('READ_USER'),
-        'READ_USER_PASSWORD': os.getenv('READ_USER_PASSWORD'),
-        'TENANT_CODE': os.getenv('TENANT_CODE', 'tientelecom'),
-    }
-
-    # Create database URL
-    db_url = f"postgresql://{config['POSTGRES_USER']}:{config['POSTGRES_PASSWORD']}@{config['DB_HOST']}:{config['DB_PORT']}/{config['POSTGRES_DB']}"
-
-    # Create engine
-    engine = create_engine(db_url)
-
-    # Wait for database to be ready
-    wait_for_db(engine)
-
+    """Main function to initialize the database"""
     try:
+        # Get database configuration from environment
+        db_config = {
+            'POSTGRES_USER': os.getenv('POSTGRES_USER'),
+            'POSTGRES_PASSWORD': os.getenv('POSTGRES_PASSWORD'),
+            'POSTGRES_DB': os.getenv('POSTGRES_DB'),
+            'DB_HOST': os.getenv('DB_HOST', 'database'),
+            'DB_PORT': os.getenv('DB_PORT', '5432'),
+            'ADMIN_USER': os.getenv('ADMIN_USER'),
+            'ADMIN_PASSWORD': os.getenv('ADMIN_PASSWORD'),
+            'READ_USER': os.getenv('READ_USER'),
+            'READ_USER_PASSWORD': os.getenv('READ_USER_PASSWORD'),
+            'TENANT_CODE': os.getenv('TENANT_CODE', 'tientelecom'),
+        }
+
+        # Create database URL
+        db_url = f"postgresql://{db_config['POSTGRES_USER']}:{db_config['POSTGRES_PASSWORD']}@{db_config['DB_HOST']}:{db_config['DB_PORT']}/{db_config['POSTGRES_DB']}"
+
+        # Create engine
+        engine = create_engine(db_url)
+
+        # Wait for database to be ready
+        wait_for_db(engine)
+
+        # Create session factory
         Session = sessionmaker(bind=engine)
         session = Session()
 
@@ -527,12 +614,12 @@ def main():
             populate_restricted_tables(session)
 
             # Create users
-            create_users(session, config)
+            create_users(session, db_config)
 
             # Set up permanent triggers
             setup_permanent_triggers(session)
 
-            # Import initial data if available
+            # Import initial data with multi-tenant support
             import_initial_data(session)
 
             logger.info("Database initialization completed successfully!")
