@@ -23,11 +23,11 @@ services:
     networks:
       - app-network
 
-  cron_app:
+  db_init:
     build:
       context: ./backend
-      dockerfile: Dockerfile.cron
-    container_name: cron_app
+      dockerfile: Dockerfile
+    container_name: db_init
     depends_on:
       database:
         condition: service_healthy
@@ -35,8 +35,33 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
-      - DB_HOST=database # This is crucial
-      - DB_PORT=5433
+      - DB_HOST=database
+      - DB_PORT=5432
+      - ADMIN_USER=${ADMIN_USER}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - READ_USER=${READ_USER}
+      - READ_USER_PASSWORD=${READ_USER_PASSWORD}
+    volumes:
+      - ./backend:/usr/src/app:delegated
+      - ./backend/init_db.py:/usr/src/app/init_db.py:ro
+    command: ["python", "/usr/src/app/init_db.py"]
+    networks:
+      - app-network
+
+  cron_app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.cron
+    container_name: cron_app
+    depends_on:
+      db_init:
+        condition: service_completed_successfully
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - DB_HOST=database
+      - DB_PORT=5432
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
       - URL=${URL}

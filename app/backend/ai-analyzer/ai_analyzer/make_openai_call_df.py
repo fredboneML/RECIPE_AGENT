@@ -17,6 +17,7 @@ PROMPT_TEMPLATE_PATH = os.path.join(
     'prompt_template_sentiment_topic.txt'
 )
 
+
 def debug_paths():
     """Print debug information about paths"""
     print(f"DATA_DIR: {DATA_DIR}")
@@ -24,9 +25,11 @@ def debug_paths():
     print(f"Current working directory: {os.getcwd()}")
     print(f"Script directory: {os.path.dirname(__file__)}")
     print(f"Parent directory: {os.path.dirname(os.path.dirname(__file__))}")
-    print(f"File exists at PROMPT_TEMPLATE_PATH: {os.path.exists(PROMPT_TEMPLATE_PATH)}")
+    print(
+        f"File exists at PROMPT_TEMPLATE_PATH: {os.path.exists(PROMPT_TEMPLATE_PATH)}")
     if os.path.exists(os.path.dirname(PROMPT_TEMPLATE_PATH)):
-        print(f"Directory contents of {os.path.dirname(PROMPT_TEMPLATE_PATH)}: {os.listdir(os.path.dirname(PROMPT_TEMPLATE_PATH))}")
+        print(
+            f"Directory contents of {os.path.dirname(PROMPT_TEMPLATE_PATH)}: {os.listdir(os.path.dirname(PROMPT_TEMPLATE_PATH))}")
     else:
         print(f"Directory not found: {os.path.dirname(PROMPT_TEMPLATE_PATH)}")
 
@@ -34,7 +37,7 @@ def debug_paths():
 def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
     # Print debug information
     debug_paths()
-    
+
     if not os.path.exists(PROMPT_TEMPLATE_PATH):
         raise FileNotFoundError(
             f"Prompt template not found at: {PROMPT_TEMPLATE_PATH}\n"
@@ -47,12 +50,12 @@ def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
 
     # Ensure data directory exists
     os.makedirs(DATA_DIR, exist_ok=True)
-    
+
     start_time = time.time()
-        
+
     df_n = df.iloc[:n].copy().rename(columns={'summary': 'summary_old'})
     result_df = pd.DataFrame(columns=['summary', 'topic', 'sentiment', 'cost'])
-    
+
     for i in range(len(df_n)):
         if i % 500 == 0:
             print(f'{i} rows from {len(df_n)} processed')
@@ -71,26 +74,35 @@ def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
         result = make_openai_call(**kwargs_2)
         result_df_temp = pd.DataFrame([result])
         result_df = pd.concat([result_df, result_df_temp], axis=0)
-    
+
     result_df = result_df.reset_index(drop=True)
     result_df = pd.concat([df_n, result_df], axis=1)
-    
+
     elapsed_time = time.time() - start_time
     print(f"Total Elapsed time to process {n} rows: {elapsed_time} seconds")
-    
+# In make_openai_call_df.py, modify the column filtering and renaming:
     result_df = (result_df
                  .filter(items=[
                      'id',
-                     'processingdate',
+                     'processing_date',
                      'transcription',
                      'summary',
                      'topic',
-                     'sentiment'
+                     'sentiment',
+                     'call_duration_secs',
+                     'tenant_code',
+                     'clid',
+                     'telephone_number',
+                     'call_direction'
                  ])
-                 .rename(columns={'id': 'transcription_id'})
-                )
+                 # Change this rename to match database column names
+                 .rename(columns={
+                     'id': 'transcription_id'
+                 })
+                 )
 
-    output_path = os.path.join(DATA_DIR, f'df_transcription__{current_date}.csv')
+    output_path = os.path.join(
+        DATA_DIR, f'df_transcription__{current_date}.csv')
     result_df.to_csv(output_path, index=False)
 
     return result_df
