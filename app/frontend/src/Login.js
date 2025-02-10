@@ -5,6 +5,7 @@ import './Login.css';
 function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [tenantCode, setTenantCode] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
@@ -36,7 +37,8 @@ function Login() {
         },
         body: JSON.stringify({ 
           username: username.trim(), 
-          password: password 
+          password: password,
+          tenant_code: tenantCode.trim()
         }),
       });
 
@@ -45,9 +47,10 @@ function Login() {
       if (response.ok && data.success) {
         localStorage.setItem('token', data.token || 'dummy-token');
         localStorage.setItem('userName', username.trim());
+        localStorage.setItem('tenantCode', tenantCode.trim());
         navigate('/');
       } else {
-        setError(data.detail || 'Invalid username or password');
+        setError(data.detail || 'Invalid credentials');
       }
     } catch (err) {
       console.error('Login error:', err);
@@ -65,12 +68,23 @@ function Login() {
         </div>
         <form onSubmit={handleSubmit}>
           <div className="input-group">
+            <label>Tenant Code</label>
+            <input
+              type="text"
+              value={tenantCode}
+              onChange={(e) => setTenantCode(e.target.value)}
+              required
+              placeholder="Enter your tenant code"
+            />
+          </div>
+          <div className="input-group">
             <label>Username</label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
+              placeholder="Enter your username"
             />
           </div>
           <div className="input-group">
@@ -80,6 +94,7 @@ function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              placeholder="Enter your password"
             />
           </div>
           {error && <p className="error">{error}</p>}

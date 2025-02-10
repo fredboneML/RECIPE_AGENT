@@ -1,7 +1,7 @@
 # ai_analyzer/main.py
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, text, func, and_
+from sqlalchemy import create_engine, Column, Integer, String, text, func, and_, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import OperationalError
@@ -78,9 +78,16 @@ def wait_for_db(max_retries=10, delay=10):
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
-    username = Column(String, unique=True, nullable=False)
+    username = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default='read_only')
+    tenant_code = Column(String, nullable=False)
+
+    # Username should be unique per tenant
+    __table_args__ = (
+        UniqueConstraint('username', 'tenant_code',
+                         name='uix_username_tenant'),
+    )
 
     def has_write_permission(self):
         return self.role in ['admin', 'write']
@@ -202,22 +209,75 @@ async def login(request: Request, db: Session = Depends(get_db)):
         data = await request.json()
         username = data['username']
         password = data['password']
+        tenant_code = data['tenant_code']
 
-        user = db.query(User).filter(User.username == username).first()
-        if user and user.password_hash == hash_password(password):
-            return {
-                "success": True,
-                "role": user.role,
-                "username": user.username,
-                "permissions": {
-                    "canWrite": user.has_write_permission()
-                }
+        # First check if the tenant exists
+        tenant_exists = db.execute(
+            text(
+                "SELECT EXISTS(SELECT 1 FROM tenant_codes WHERE tenant_code = :tenant_code)"),
+            {"tenant_code": tenant_code}
+        ).scalar()
+
+        if not tenant_exists:
+            logger.warning(
+                f"Login attempt with non-existent tenant code: {tenant_code}")
+            raise HTTPException(
+                status_code=401,
+                detail="Username, password or tenant code incorrect"
+            )
+
+        # Then check user credentials with tenant code
+        user = db.query(User).filter(
+            and_(
+                User.username == username,
+                User.tenant_code == tenant_code
+            )
+        ).first()
+
+        if not user:
+            logger.warning(
+                f"Login attempt with invalid username or tenant code: {username}, {tenant_code}")
+            raise HTTPException(
+                status_code=401,
+                detail="Username, password or tenant code incorrect"
+            )
+
+        # Verify password
+        if user.password_hash != hash_password(password):
+            logger.warning(
+                f"Login attempt with invalid password for user: {username}")
+            raise HTTPException(
+                status_code=401,
+                detail="Username, password or tenant code incorrect"  # Fixed error message
+            )
+
+        # If we get here, authentication is successful
+        logger.info(
+            f"Successful login for user {username} with tenant {tenant_code}")
+        return {
+            "success": True,
+            "role": user.role,
+            "username": user.username,
+            "tenant_code": user.tenant_code,
+            "permissions": {
+                "canWrite": user.has_write_permission()
             }
-        else:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+        }
+
+    except HTTPException:
+        raise
+    except KeyError as e:
+        logger.error(f"Missing required field in login request: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail="Username, password or tenant code incorrect"
+        )
     except Exception as e:
         logger.error(f"Login error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(
+            status_code=401,
+            detail="Username, password or tenant code incorrect"
+        )
 
 
 @app.get("/api/conversations")

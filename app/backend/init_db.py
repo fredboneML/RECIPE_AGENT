@@ -169,13 +169,18 @@ def initialize_default_tenant(session):
     session.commit()
 
 
+"get_generated_password", "generated_passwords"
+
+
 def populate_restricted_tables(session):
     """Populate restricted tables"""
     restricted_tables = [
         ("users", "Contains sensitive user authentication data"),
         ("query_cache", "Internal system table for query optimization"),
         ("query_performance", "Internal system table for performance monitoring"),
-        ("user_memory", "Contains user conversation history and personal data")
+        ("user_memory", "Contains user conversation history and personal data"),
+        ("get_generated_password", "Temporally User passwords"),
+        ("generated_passwords", "User passwords")
     ]
 
     for table, reason in restricted_tables:
@@ -221,29 +226,34 @@ def setup_permanent_triggers(session):
     try:
         # 1. Set up user management triggers
         session.execute(text("""
-            -- First, create the pgcrypto extension if it doesn't exist
-            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+            -- Create a table to temporarily store generated passwords
+            CREATE TABLE IF NOT EXISTS generated_passwords (
+                username VARCHAR PRIMARY KEY,
+                password VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
 
-            -- Function to generate random password using pgcrypto
+            -- Updated function to generate random password
             CREATE OR REPLACE FUNCTION generate_default_password()
             RETURNS VARCHAR AS $$
             BEGIN
-                -- Use gen_random_uuid() from pgcrypto instead of gen_random_bytes
                 RETURN substr(replace(gen_random_uuid()::text, '-', ''), 1, 12);
             END;
             $$ LANGUAGE plpgsql;
 
-            -- Function to hash password
+            -- Updated function to hash password
             CREATE OR REPLACE FUNCTION hash_password(password VARCHAR)
             RETURNS VARCHAR AS $$
             BEGIN
-                RETURN encode(digest(password, 'sha256'), 'hex');
+                RETURN encode(sha256(password::bytea), 'hex');
             END;
             $$ LANGUAGE plpgsql;
 
-            -- Function for user management
+            -- Updated user management trigger function
             CREATE OR REPLACE FUNCTION manage_user_fields()
             RETURNS TRIGGER AS $$
+            DECLARE
+                generated_pwd VARCHAR;
             BEGIN
                 -- Set ID if not provided
                 IF NEW.id IS NULL THEN
@@ -257,10 +267,17 @@ def setup_permanent_triggers(session):
                 
                 -- Generate and hash password if not provided
                 IF NEW.password_hash IS NULL THEN
-                    NEW.password_hash = generate_default_password();
-                    RAISE NOTICE 'Generated password for user %: %', 
-                        NEW.username, NEW.password_hash;
-                    NEW.password_hash = hash_password(NEW.password_hash);
+                    -- Generate new password
+                    generated_pwd := generate_default_password();
+                    
+                    -- Store the generated password temporarily
+                    INSERT INTO generated_passwords (username, password)
+                    VALUES (NEW.username, generated_pwd)
+                    ON CONFLICT (username) 
+                    DO UPDATE SET password = EXCLUDED.password, created_at = CURRENT_TIMESTAMP;
+                    
+                    -- Hash the password for storage
+                    NEW.password_hash = hash_password(generated_pwd);
                 ELSE
                     NEW.password_hash = hash_password(NEW.password_hash);
                 END IF;
@@ -269,13 +286,27 @@ def setup_permanent_triggers(session):
             END;
             $$ LANGUAGE plpgsql;
 
-            -- Create user management trigger
+            -- Recreate the trigger
             DROP TRIGGER IF EXISTS user_fields_trigger ON users;
             CREATE TRIGGER user_fields_trigger
                 BEFORE INSERT ON users
                 FOR EACH ROW
-                EXECUTE FUNCTION manage_user_fields()
-        """))
+                EXECUTE FUNCTION manage_user_fields();
+
+            -- Function to get the generated password
+            CREATE OR REPLACE FUNCTION get_generated_password(p_username VARCHAR)
+            RETURNS TABLE (password VARCHAR, created_at TIMESTAMP) AS $$
+            BEGIN
+                RETURN QUERY
+                SELECT gp.password, gp.created_at
+                FROM generated_passwords gp
+                WHERE gp.username = p_username;
+                
+                -- Delete the password after retrieving it
+                DELETE FROM generated_passwords WHERE username = p_username;
+            END;
+            $$ LANGUAGE plpgsql;
+         """))
 
         # 2. Set up tenant management triggers - Fixed version
         session.execute(text("""
