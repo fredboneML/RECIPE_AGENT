@@ -24,9 +24,9 @@ import logging
 import hashlib
 import datetime
 from ai_analyzer.config import config, DATA_DIR, DATABASE_URL
-from datetime import datetime as dt
-from datetime import timezone
 from typing import List, Optional
+from sqlalchemy.dialects.postgresql import JSON
+from datetime import datetime, timedelta, timezone
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -259,6 +259,7 @@ def authenticate_user(session, username, password, tenant_code):
 
 
 class UserMemory(Base):
+    """Model for storing conversation history"""
     __tablename__ = 'user_memory'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -267,29 +268,29 @@ class UserMemory(Base):
     title = Column(String, nullable=False)
     query = Column(Text, nullable=False)
     response = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_active = Column(Boolean, default=True)
-    # To maintain message order within conversation
     message_order = Column(Integer, nullable=False)
-    expires_at = Column(DateTime, nullable=False)  # For 30-day retention
+    expires_at = Column(DateTime, nullable=False)
+    # Using JSON type for followup questions
+    followup_questions = Column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint('conversation_id', 'message_order',
                          name='unique_message_order'),
-        Index('idx_user_conversations', user_id, conversation_id),
     )
 
-    def __init__(self, user_id, conversation_id, query, response, title=None, message_order=0):
+    def __init__(self, user_id, conversation_id, query, response, title=None, message_order=0, followup_questions=None):
         self.user_id = user_id
         self.conversation_id = conversation_id
         self.query = query
         self.response = response
         self.title = title or self._generate_title(query)
         self.message_order = message_order
-        self.expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=30)
+        self.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        self.followup_questions = followup_questions if followup_questions else []
 
     def _generate_title(self, query):
-        # Generate a title from the first query of conversation
         return query[:50] + "..." if len(query) > 50 else query
 
 
@@ -473,8 +474,9 @@ def get_tenant_by_code(session, code: str) -> Optional[TenantCode]:
 
 # conversation management functions
 
-def store_conversation(session, user_id, conversation_id, query, response, title=None, message_order=None):
-    """Store a conversation message"""
+# In main.py and data_import_postgresql.py:
+def store_conversation(session, user_id, conversation_id, query, response, message_order=None, followup_questions=None):
+    """Store a conversation message with followup questions"""
     try:
         if message_order is None:
             # Get the last message order for this conversation
@@ -490,16 +492,22 @@ def store_conversation(session, user_id, conversation_id, query, response, title
             conversation_id=conversation_id,
             query=query,
             response=response,
-            title=title,
-            message_order=message_order
+            title=generate_title(query),
+            message_order=message_order,
+            followup_questions=followup_questions if followup_questions else []
         )
         session.add(memory)
         session.commit()
         return True
     except Exception as e:
         session.rollback()
-        print(f"Error storing conversation: {e}")
+        logger.error(f"Error storing conversation: {e}")
         return False
+
+
+def generate_title(query: str) -> str:
+    """Generate a title from the first query of conversation"""
+    return query[:50] + "..." if len(query) > 50 else query
 
 
 def get_user_conversations(session, user_id, limit=5):

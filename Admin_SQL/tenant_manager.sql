@@ -13,7 +13,7 @@ VALUES ('stroevemotorsport', 'stroevemotorsport');
 -- 1. Insert the new user
 INSERT INTO users (username, tenant_code, role)
 VALUES ('newuser_mcre', 'maccare', 'read_only');
-
+6aff9236a7f7
 -- 2. Immediately get the generated password
 SELECT * FROM get_generated_password('newuser_mcre');
 

@@ -65,6 +65,7 @@ def create_tables(engine):
         """))
 
         # Create user_memory table
+        # Create user_memory table with followup_questions column
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS user_memory (
                 id SERIAL PRIMARY KEY,
@@ -73,12 +74,21 @@ def create_tables(engine):
                 title VARCHAR NOT NULL,
                 query TEXT NOT NULL,
                 response TEXT NOT NULL,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 is_active BOOLEAN DEFAULT TRUE,
                 message_order INTEGER NOT NULL,
-                expires_at TIMESTAMP NOT NULL,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                followup_questions JSONB,
                 CONSTRAINT unique_message_order UNIQUE(conversation_id, message_order)
             )
+        """))
+
+        connection.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_user_conversations 
+            ON user_memory(user_id, conversation_id);
+            
+            CREATE INDEX IF NOT EXISTS idx_conversation_order
+            ON user_memory(conversation_id, message_order);
         """))
 
         # Create restricted_tables table

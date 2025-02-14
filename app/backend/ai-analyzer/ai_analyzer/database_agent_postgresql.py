@@ -20,6 +20,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class DatabaseAgentValidator:
+    def validate_query(self, query: str, tenant_code: str) -> tuple[bool, Optional[str]]:
+        """Enhanced query validation with tenant isolation checks"""
+        if not query or not tenant_code:
+            return False, "Empty query or missing tenant code"
+
+        query = query.strip().upper()
+
+        # Check for tenant isolation
+        if 'TENANT_CODE = :TENANT_CODE' not in query:
+            return False, "Query must include tenant isolation"
+
+        # Check for date filtering
+        if 'CURRENT_DATE - INTERVAL' not in query:
+            return False, "Query must include date filtering"
+
+        # Rest of the validation logic...
+        return True, None
+
+
 class ConversationContext:
     def __init__(self):
         self.topics = {}  # Store mentioned topics and their occurrences
