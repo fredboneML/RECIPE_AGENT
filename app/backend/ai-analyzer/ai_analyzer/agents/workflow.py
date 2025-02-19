@@ -31,9 +31,10 @@ class CallAnalysisWorkflow:
         self.db_url = db_url
         self.db_inspector = DatabaseInspectorAgent(db_url)
         self.cache_manager = cache_manager
-        # Initialize conversation history with more structure
-        # {conversation_id: [{"question": str, "sql": str, "result": str}]}
-        self.conversation_history = {}
+        # Initialize conversation history with tenant isolation
+        # {tenant_code: {conversation_id: [{"question": str, "sql": str, "result": str}]}}
+        self.conversation_history: Dict[str,
+                                        Dict[str, List[Dict[str, str]]]] = {}
         self.base_context = base_context
 
         # Create enhanced context
@@ -135,9 +136,9 @@ class CallAnalysisWorkflow:
         - Customer satisfaction is measured by positive sentiment rate
         """
 
-    def _get_conversation_context(self, conversation_id: str) -> str:
-        """Create context string from conversation history"""
-        if not self.conversation_history.get(conversation_id):
+    def _get_conversation_context(self, conversation_id: str, tenant_code: str) -> str:
+        """Create context string from conversation history with tenant isolation"""
+        if tenant_code not in self.conversation_history or conversation_id not in self.conversation_history[tenant_code]:
             # For new conversations, start with example context
             return f"""
             Initial Analysis Context:
@@ -152,7 +153,7 @@ class CallAnalysisWorkflow:
         context += f"\nInitial Context:\n{self.example_queries['result']}\n"
 
         # Last 3 interactions
-        for interaction in self.conversation_history[conversation_id][-3:]:
+        for interaction in self.conversation_history[tenant_code][conversation_id][-3:]:
             context += f"\nQuestion: {interaction['question']}\n"
             context += f"Findings: {interaction['result']}\n"
         return context
@@ -163,15 +164,20 @@ class CallAnalysisWorkflow:
             if not tenant_code:
                 raise ValueError("Tenant code is required")
 
+            # Initialize tenant conversation history if needed
+            if tenant_code not in self.conversation_history:
+                self.conversation_history[tenant_code] = {}
+
             # Initialize conversation history if needed
-            if conversation_id not in self.conversation_history:
-                self.conversation_history[conversation_id] = []
+            if conversation_id not in self.conversation_history[tenant_code]:
+                self.conversation_history[tenant_code][conversation_id] = []
                 # Add example queries as first entry for new conversations
-                self.conversation_history[conversation_id].append(
+                self.conversation_history[tenant_code][conversation_id].append(
                     self.example_queries)
 
             # Get previous context for this conversation
-            previous_context = self._get_conversation_context(conversation_id)
+            previous_context = self._get_conversation_context(
+                conversation_id, tenant_code)
 
             try:
                 # Generate SQL with conversation context
@@ -205,7 +211,7 @@ class CallAnalysisWorkflow:
 
             # Store this interaction in conversation history
             try:
-                self.conversation_history[conversation_id].append({
+                self.conversation_history[tenant_code][conversation_id].append({
                     "question": question,
                     "sql": sql,
                     "result": result
@@ -218,7 +224,8 @@ class CallAnalysisWorkflow:
             followup_questions = self._generate_followup_questions(
                 question,
                 result,
-                conversation_id
+                conversation_id,
+                tenant_code  # Add tenant_code parameter
             )
 
             return {
@@ -323,12 +330,12 @@ class CallAnalysisWorkflow:
             logger.error(f"Error getting initial questions: {e}")
             return {}
 
-    def _generate_followup_questions(self, question: str, response: str, conversation_id: str) -> List[str]:
+    def _generate_followup_questions(self, question: str, response: str, conversation_id: str, tenant_code: str) -> List[str]:
         """Generate dynamic followup questions based on conversation context and call analysis patterns"""
         try:
             # Get last 3 interactions for context
             recent_interactions = self.conversation_history.get(
-                conversation_id, [])[-3:]
+                tenant_code, {}).get(conversation_id, [])[-3:]
 
             # Analyze current response content
             response_lower = response.lower()

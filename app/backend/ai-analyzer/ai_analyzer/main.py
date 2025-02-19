@@ -651,13 +651,19 @@ async def process_query(
 
 
 @app.get("/api/conversations")
-async def get_conversations(db: Session = Depends(get_db)):
+async def get_conversations(request: Request, db: Session = Depends(get_db)):
     try:
-        # Get recent conversations for current user
+        # Get tenant code from headers
+        tenant_code = request.headers.get('X-Tenant-Code')
+        if not tenant_code:
+            raise HTTPException(status_code=401, detail="Tenant code required")
+
+        # Get recent conversations for current tenant
         conversations = db.query(UserMemory)\
             .filter(
                 UserMemory.is_active == True,
-                UserMemory.expires_at > datetime.utcnow()
+                UserMemory.expires_at > datetime.utcnow(),
+                UserMemory.user_id == tenant_code  # Add tenant isolation
         )\
             .order_by(UserMemory.timestamp.desc())\
             .limit(10)\
@@ -718,33 +724,51 @@ async def get_initial_questions(request: Request, db: Session = Depends(get_db))
 @app.get("/api/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     try:
+        # Get tenant code from headers
+        tenant_code = request.headers.get('X-Tenant-Code')
+        if not tenant_code:
+            raise HTTPException(status_code=401, detail="Tenant code required")
+
+        # Get messages for conversation with tenant isolation
         messages = db.query(UserMemory)\
             .filter(
                 UserMemory.conversation_id == conversation_id,
-                UserMemory.is_active == True,
-                UserMemory.expires_at > datetime.utcnow()
+                UserMemory.user_id == tenant_code,  # Add tenant isolation
+                UserMemory.is_active == True
         )\
-            .order_by(UserMemory.message_order)\
+            .order_by(UserMemory.timestamp.asc())\
             .all()
 
         if not messages:
-            return []  # Return empty list instead of 404
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found or access denied"
+            )
 
         return [
             {
+                "id": msg.id,
+                "conversation_id": msg.conversation_id,
                 "query": msg.query,
                 "response": msg.response,
                 "timestamp": msg.timestamp.isoformat(),
-                "followup_questions": msg.followup_questions if hasattr(msg, 'followup_questions') else []
+                "followup_questions": msg.followup_questions
             }
             for msg in messages
         ]
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving conversation messages: {e}")
-        return []  # Return empty list instead of error
+        logger.error(f"Error retrieving conversation: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve conversation"
+        )
 
 
 # Optional: API to add a new user
