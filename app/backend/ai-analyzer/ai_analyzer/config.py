@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import logging
 
 # LIMIT = 10000
-LIMIT = 50
+LIMIT = 500
 LAST_ID = 0
 DATA_DIR = '/usr/src/app/ai-analyzer/data'
 
