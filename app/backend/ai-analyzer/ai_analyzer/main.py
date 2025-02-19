@@ -19,14 +19,19 @@ from ai_analyzer.config import config, DATABASE_URL
 from ai_analyzer.data_import_postgresql import (
     run_data_import,
     User,
-    UserMemory,
+    UserMemory,  # Add this import
     store_conversation,
     get_user_conversations,
     get_conversation_messages
 )
-from ai_analyzer.cache_manager import DatabaseCacheManager
-from ai_analyzer.agents.workflow import CallAnalysisWorkflow
-import os
+from ai_analyzer.fetch_data_from_api import fetch_data_from_api
+from ai_analyzer.make_openai_call_df import make_openai_call_df
+import time
+import logging
+from psycopg2 import connect
+from ai_analyzer.config import config, DATABASE_URL, DATA_DIR
+import uuid
+from datetime import datetime
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -297,8 +302,8 @@ def wait_for_db(max_retries=10, delay=10):
 
             return True
         except Exception as e:
-            logger.error(f"Database connection attempt {
-                         i + 1}/{max_retries} failed: {str(e)}")
+            logger.error(
+                f"Database connection attempt {i + 1}/{max_retries} failed: {str(e)}")
             if i < max_retries - 1:  # Don't sleep on the last attempt
                 time.sleep(delay)
     return False
@@ -824,6 +829,31 @@ async def get_conversation(conversation_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/api/query")
+async def query(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
+    question = data['query']
+    conversation_id = data.get('conversation_id', str(uuid.uuid4()))
+
+    try:
+        answer = answer_question(question)
+
+        # Store the conversation
+        store_conversation(
+            db,
+            user_id="current_user",  # Replace with actual user ID from auth
+            conversation_id=conversation_id,
+            query=question,
+            response=answer
+        )
+
+        return {
+            "result": answer,
+            "conversation_id": conversation_id
+        }
+    except Exception as e:
+        return {"error": True, "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
