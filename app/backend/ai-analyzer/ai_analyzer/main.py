@@ -1,5 +1,5 @@
 # ai_analyzer/main.py
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, text, func, and_, UniqueConstraint, Boolean
 from sqlalchemy.ext.declarative import declarative_base
@@ -11,6 +11,8 @@ import logging
 import uuid
 from datetime import datetime
 from psycopg2 import connect
+from typing import List
+from pydantic import BaseModel
 
 # Update internal imports
 from ai_analyzer.config import config, DATABASE_URL
@@ -42,8 +44,55 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Initialize workflow with base context
-base_context = """ 
+
+def get_restricted_tables(db_session):
+    """Get list of restricted table names from database"""
+    try:
+        result = db_session.execute(text("""
+            SELECT table_name 
+            FROM restricted_tables 
+            WHERE added_by = 'system'
+        """))
+        return [row[0] for row in result]
+    except Exception as e:
+        logger.error(f"Error fetching restricted tables: {e}")
+        # Fallback to minimum set of restricted tables
+        return ['users', 'user_memory', 'query_cache', 'query_performance']
+
+
+def get_initial_restricted_tables():
+    """Get initial restricted tables with proper session handling"""
+    db = SessionLocal()
+    try:
+        return get_restricted_tables(db)
+    finally:
+        db.close()
+
+
+# Initialize FastAPI app
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize cache manager once
+cache_manager = DatabaseCacheManager(engine)
+
+# Get initial restricted tables
+restricted_tables = get_initial_restricted_tables()
+
+# Create workflow instance per tenant
+workflow_instances = {}
+
+
+def create_base_context(tenant_code: str) -> str:
+    return f""" 
     1. NEVER use the 'users' table or any user-related information.
     2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.
     3. Only use SELECT statements for reading data.
@@ -76,9 +125,9 @@ base_context = """
                 t.clid,
                 t.telephone_number,
                 t.call_direction
-            FROM transcription t
-            WHERE t.processing_date >= CURRENT_DATE - INTERVAL '60 days'
-            AND t.tenant_code = :tenant_code  -- THIS LINE IS MANDATORY AND MUST BE EXACTLY AS SHOWN
+            FROM transcription_{tenant_code} t
+            WHERE t.processing_date >= CURRENT_DATE - INTERVAL '300 days'
+            AND t.tenant_code = :tenant_code
         )
 
     10. For topic analysis, your complete query should look like this:
@@ -120,7 +169,7 @@ base_context = """
                     WHEN processing_date >= CURRENT_DATE - INTERVAL '60 days' THEN 'Previous Month'
                 END AS time_period
             FROM base_data
-            WHERE processing_date >= CURRENT_DATE - INTERVAL '60 days'
+            WHERE processing_date >= CURRENT_DATE - INTERVAL '300 days'
         )
         SELECT * FROM time_based_data ...
 
@@ -149,7 +198,7 @@ base_context = """
         - Any tenant-related columns or filters (handled automatically)
 
     17. ALWAYS include proper ordering:
-        ORDER BY [columns] {ASC|DESC} NULLS LAST
+        ORDER BY [columns] {{"ASC" | "DESC"}} NULLS LAST
 
     18. For limiting results:
         LIMIT [number]
@@ -189,49 +238,38 @@ base_context = """
         - User access or permissions
         - Data partitioning
         - System administration
-"""
-
-# Create function to get restricted tables
+    """
 
 
-def get_restricted_tables(db_session):
-    """Get list of restricted table names from database"""
+def get_workflow_for_tenant(tenant_code: str) -> CallAnalysisWorkflow:
+    """Get or create workflow instance for tenant"""
     try:
-        result = db_session.execute(text("""
-            SELECT table_name 
-            FROM restricted_tables 
-            WHERE added_by = 'system'
-        """))
-        return [row[0] for row in result]
+        if tenant_code not in workflow_instances:
+            logger.info(
+                f"Creating new workflow instance for tenant: {tenant_code}")
+            workflow_instances[tenant_code] = CallAnalysisWorkflow(
+                db_url=DATABASE_URL,
+                model_provider="openai",
+                model_name=os.getenv('MODEL_NAME', 'gpt-4'),
+                api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
+                restricted_tables=restricted_tables,
+                base_context=create_base_context(tenant_code),
+                cache_manager=cache_manager
+            )
+            logger.info(
+                f"Successfully created workflow instance for tenant: {tenant_code}")
+        else:
+            logger.info(
+                f"Using existing workflow instance for tenant: {tenant_code}")
+
+        return workflow_instances[tenant_code]
     except Exception as e:
-        logger.error(f"Error fetching restricted tables: {e}")
-        # Fallback to minimum set of restricted tables
-        return ['users', 'user_memory', 'query_cache', 'query_performance']
-
-
-# Get session
-db = SessionLocal()
-try:
-    # Get restricted tables from database
-    restricted_tables = get_restricted_tables(db)
-    logger.info(
-        f"Fetched restricted tables from database: {restricted_tables}")
-
-    # Initialize the workflow with all configurations
-    workflow = CallAnalysisWorkflow(
-        db_url=DATABASE_URL,
-        model_provider="openai",
-        model_name=os.getenv('MODEL_NAME'),
-        api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
-        restricted_tables=restricted_tables,
-        base_context=base_context,
-        cache_manager=DatabaseCacheManager(engine)
-    )
-except Exception as e:
-    logger.error(f"Error initializing workflow: {e}")
-    raise
-finally:
-    db.close()
+        logger.error(
+            f"Error getting workflow for tenant {tenant_code}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error initializing workflow for tenant {tenant_code}"
+        )
 
 
 def wait_for_db(max_retries=10, delay=10):
@@ -289,24 +327,6 @@ class User(Base):
 
 # Create tables
 Base.metadata.create_all(bind=engine)
-
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://37.97.226.251:3000",
-        "http://192.168.2.132:3000",
-        "http://172.21.0.4:3000",
-        "http://172.21.0.3:3000",
-        "http://frontend_app:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
 
 # Dependency to get the database session
 
@@ -439,37 +459,15 @@ async def login(request: Request, db: Session = Depends(get_db)):
         data = await request.json()
         username = data['username']
         password = data['password']
-        tenant_code = data['tenant_code']
 
-        # First check if the tenant exists
-        tenant_exists = db.execute(
-            text(
-                "SELECT EXISTS(SELECT 1 FROM tenant_codes WHERE tenant_code = :tenant_code)"),
-            {"tenant_code": tenant_code}
-        ).scalar()
-
-        if not tenant_exists:
-            logger.warning(
-                f"Login attempt with non-existent tenant code: {tenant_code}")
-            raise HTTPException(
-                status_code=401,
-                detail="Username, password or tenant code incorrect"
-            )
-
-        # Then check user credentials with tenant code
-        user = db.query(User).filter(
-            and_(
-                User.username == username,
-                User.tenant_code == tenant_code
-            )
-        ).first()
+        # Find user and their tenant code
+        user = db.query(User).filter(User.username == username).first()
 
         if not user:
-            logger.warning(
-                f"Login attempt with invalid username or tenant code: {username}, {tenant_code}")
+            logger.warning(f"Login attempt with invalid username: {username}")
             raise HTTPException(
                 status_code=401,
-                detail="Username, password or tenant code incorrect"
+                detail="Invalid credentials"
             )
 
         # Verify password
@@ -478,17 +476,17 @@ async def login(request: Request, db: Session = Depends(get_db)):
                 f"Login attempt with invalid password for user: {username}")
             raise HTTPException(
                 status_code=401,
-                detail="Username, password or tenant code incorrect"
+                detail="Invalid credentials"
             )
 
         # If we get here, authentication is successful
         logger.info(
-            f"Successful login for user {username} with tenant {tenant_code}")
+            f"Successful login for user {username} with tenant {user.tenant_code}")
         return {
             "success": True,
             "role": user.role,
             "username": user.username,
-            "tenant_code": tenant_code,
+            "tenant_code": user.tenant_code,  # Return tenant_code from user record
             "permissions": {
                 "canWrite": user.has_write_permission()
             }
@@ -501,35 +499,98 @@ async def login(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
-# In main.py:
-# In main.py, update the query endpoint:
+# Add this function near the top with other utility functions
+def get_default_followup_questions() -> List[str]:
+    """Get default followup questions when error occurs"""
+    return [
+        "What are the most common topics in our calls?",
+        "How has customer sentiment changed over time?",
+        "Can you show me the breakdown of call topics by sentiment?"
+    ]
+
+
+# Update the QueryRequest model to handle both 'query' and 'question'
+class QueryRequest(BaseModel):
+    # Allow either 'query' or 'question' field
+    query: str | None = None
+    question: str | None = None
+    conversation_id: str | None = None
+
+    # Add validation to ensure at least one of query/question is present
+    @property
+    def get_question(self) -> str:
+        return self.question or self.query or ""
+
+    # Add validation
+    def model_post_init(self, _):
+        if not self.question and not self.query:
+            raise ValueError("Either 'question' or 'query' field is required")
+        # If question is not set but query is, use query as question
+        if not self.question and self.query:
+            self.question = self.query
+
+    # Add example for documentation
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "What are the most common topics?",  # Old format
+                "question": "What are the most common topics?",  # New format
+                "conversation_id": "optional-uuid-here"
+            }
+        }
+
 
 @app.post("/api/query")
-async def query(request: Request, db: Session = Depends(get_db)):
-    """Process user queries with tenant isolation"""
+async def process_query(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Process a user query"""
     try:
         # Get tenant code from headers
         tenant_code = request.headers.get('X-Tenant-Code')
         if not tenant_code:
             raise HTTPException(status_code=401, detail="Tenant code required")
 
+        # Get or create workflow for tenant
+        workflow = get_workflow_for_tenant(tenant_code)
+
+        # Parse request body
+        try:
+            body = await request.json()
+            # Validate with Pydantic model
+            query_request = QueryRequest(**body)
+        except Exception as e:
+            logger.error(f"Error parsing request body: {e}")
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid request format. Required fields: either 'query' or 'question' (string), optional: 'conversation_id' (string)"
+            )
+
+        # Use validated request data
+        question = query_request.get_question
+        conversation_id = query_request.conversation_id or str(uuid.uuid4())
+
         logger.info(f"Processing query for tenant: {tenant_code}")
-
-        # Get request data
-        data = await request.json()
-        question = data['query']
-        conversation_id = data.get('conversation_id', str(uuid.uuid4()))
-
         logger.info(f"Question: {question}")
         logger.info(f"Conversation ID: {conversation_id}")
 
-        # Process query through workflow with tenant context
+        # Process query through workflow
         result = await workflow.process_user_question(
             question=question,
             conversation_id=conversation_id,
             db_session=db,
-            tenant_code=tenant_code  # Pass tenant_code to workflow
+            tenant_code=tenant_code
         )
+
+        if not result['success'] and result.get('context_exceeded'):
+            # Special handling for context length exceeded
+            return {
+                "success": False,
+                "error": result['error'],
+                "context_exceeded": True,
+                "followup_questions": result['followup_questions']
+            }
 
         logger.info(f"Workflow result: {result}")
 
@@ -557,11 +618,8 @@ async def query(request: Request, db: Session = Depends(get_db)):
         else:
             error_msg = result.get('error', 'Unknown error occurred')
             reformulated = result.get('reformulated_question', '')
-            followup = result.get('followup_questions', [
-                "What are the most common topics in our calls?",
-                "How has customer sentiment changed over time?",
-                "Can you show me the breakdown of call topics by sentiment?"
-            ])
+            followup = result.get('followup_questions',
+                                  get_default_followup_questions())
 
             # Store the error response
             store_conversation(
@@ -584,16 +642,11 @@ async def query(request: Request, db: Session = Depends(get_db)):
             }
 
     except Exception as e:
-        logger.error(f"Error processing query: {e}", exc_info=True)
+        logger.error(f"Error processing query: {e}")
         return {
             "success": False,
-            "error": "An error occurred processing your request",
-            "followup_questions": [
-                "What are the most common topics in our calls?",
-                "How has customer sentiment changed over time?",
-                "Can you show me the breakdown of call topics by sentiment?"
-            ],
-            "conversation_id": conversation_id if 'conversation_id' in locals() else str(uuid.uuid4())
+            "error": str(e),
+            "followup_questions": get_default_followup_questions()
         }
 
 
@@ -627,34 +680,35 @@ async def get_conversations(db: Session = Depends(get_db)):
 
 
 @app.get("/api/initial-questions")
-async def get_initial_questions():
-    """Get initial questions grouped by category"""
+async def get_initial_questions(request: Request, db: Session = Depends(get_db)):
+    """Get initial suggested questions"""
     try:
-        questions = await workflow.get_initial_questions()
+        # Get tenant code from headers
+        tenant_code = request.headers.get('X-Tenant-Code')
+        if not tenant_code:
+            raise HTTPException(status_code=401, detail="Tenant code required")
+
+        # Get or create workflow for tenant
+        workflow = get_workflow_for_tenant(tenant_code)
+
+        # Get initial questions from workflow
+        initial_questions = await workflow.get_initial_questions()
+
         return {
             "success": True,
-            "categories": questions
+            "categories": initial_questions
         }
     except Exception as e:
         logger.error(f"Error getting initial questions: {e}")
-        # Return default categories instead of error
         return {
-            "success": True,
+            "success": False,
             "categories": {
-                "Trending Topics": {
-                    "description": "Analyze popular discussion topics",
+                "General Analysis": {
+                    "description": "Basic analysis questions",
                     "questions": [
-                        "What are the most discussed topics this month?",
-                        "Which topics show increasing trends?",
-                        "What topics are commonly mentioned in positive calls?"
-                    ]
-                },
-                "Customer Sentiment": {
-                    "description": "Understand customer satisfaction trends",
-                    "questions": [
-                        "How has overall sentiment changed over time?",
-                        "What topics generate the most positive feedback?",
-                        "Which issues need immediate attention based on sentiment?"
+                        "What are the most common topics in our calls?",
+                        "How has customer sentiment changed over time?",
+                        "Show me the breakdown of call topics by sentiment"
                     ]
                 }
             }

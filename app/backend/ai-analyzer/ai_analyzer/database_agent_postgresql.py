@@ -393,7 +393,7 @@ def add_context_to_query(user_query: str, text_context: Optional[str] = None, co
                     "                WHEN processingdate >= CURRENT_DATE - INTERVAL '60 days' THEN 'Previous Month'\n"
                     "            END AS time_period\n"
                     "        FROM base_data\n"
-                    "        WHERE processingdate >= CURRENT_DATE - INTERVAL '60 days'\n"
+                    "        WHERE processingdate >= CURRENT_DATE - INTERVAL '300 days'\n"
                     "    )\n"
                     "    SELECT * FROM time_based_data ...\n"
                     "13. For text comparisons, ALWAYS use these patterns:\n"

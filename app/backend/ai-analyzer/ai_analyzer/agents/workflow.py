@@ -28,15 +28,18 @@ class CallAnalysisWorkflow:
     def __init__(self, db_url: str, model_provider: str, model_name: str, api_key: Optional[str] = None,
                  restricted_tables: Optional[List[str]] = None, base_context: Optional[str] = None,
                  cache_manager=None):
-        self.engine = create_engine(db_url)
+        self.db_url = db_url
         self.db_inspector = DatabaseInspectorAgent(db_url)
         self.cache_manager = cache_manager
-        self.conversation_history = {}  # Track questions per conversation
+        # Initialize conversation history with more structure
+        # {conversation_id: [{"question": str, "sql": str, "result": str}]}
+        self.conversation_history = {}
+        self.base_context = base_context
 
         # Create enhanced context
         enhanced_context = self._create_enhanced_context(base_context)
 
-        # Initialize specialized agents with correct parameters
+        # Initialize SQL generator with all required parameters
         self.sql_generator = SQLGeneratorAgent(
             model_provider=model_provider,
             model_name=model_name,
@@ -50,6 +53,13 @@ class CallAnalysisWorkflow:
             model_name=model_name,
             api_key=api_key
         )
+
+        # Add example queries to conversation history template
+        self.example_queries = {
+            "question": "Initial example queries",
+            "sql": self._get_example_queries(),
+            "result": self._get_example_results()
+        }
 
     def _create_enhanced_context(self, base_context: Optional[str]) -> str:
         """Create enhanced context with mandatory tenant filtering"""
@@ -77,13 +87,8 @@ class CallAnalysisWorkflow:
                 t.telephone_number,
                 t.call_direction
             FROM transcription t
-            WHERE t.processing_date >= CURRENT_DATE - INTERVAL '60 days'
+            WHERE t.processing_date >= CURRENT_DATE - INTERVAL '300 days'
             AND t.tenant_code = :tenant_code
-        )
-
-        2. For trending topics analysis, use this pattern:
-        WITH base_data AS (
-            -- Base CTE with tenant filtering as shown above
         ),
         topic_trends AS (
             SELECT 
@@ -105,48 +110,140 @@ class CallAnalysisWorkflow:
         )
         """
 
+    def _get_example_queries(self) -> str:
+        """Get example queries for initial context"""
+        return """
+        Example 1 - Topics in positive calls:
+        WITH base_data AS (...)
+        SELECT clean_topic, COUNT(*) as mentions, 
+        COUNT(*) FILTER (WHERE clean_sentiment = 'positief') as positive_count
+        FROM base_data GROUP BY clean_topic;
+
+        Example 2 - Sentiment trends:
+        WITH base_data AS (...)
+        SELECT clean_topic, clean_sentiment, COUNT(*) 
+        FROM base_data GROUP BY clean_topic, clean_sentiment;
+        """
+
+    def _get_example_results(self) -> str:
+        """Get example results for initial context"""
+        return """
+        Common patterns in our analysis:
+        - Topics are grouped by frequency and sentiment
+        - Sentiment is analyzed across time periods
+        - Call durations are tracked per topic
+        - Customer satisfaction is measured by positive sentiment rate
+        """
+
+    def _get_conversation_context(self, conversation_id: str) -> str:
+        """Create context string from conversation history"""
+        if not self.conversation_history.get(conversation_id):
+            # For new conversations, start with example context
+            return f"""
+            Initial Analysis Context:
+            {self.example_queries['result']}
+            
+            Example Queries:
+            {self.example_queries['sql']}
+            """
+
+        context = "Previous questions and findings:\n"
+        # Include example context for reference
+        context += f"\nInitial Context:\n{self.example_queries['result']}\n"
+
+        # Last 3 interactions
+        for interaction in self.conversation_history[conversation_id][-3:]:
+            context += f"\nQuestion: {interaction['question']}\n"
+            context += f"Findings: {interaction['result']}\n"
+        return context
+
     async def process_user_question(self, question: str, conversation_id: str, db_session: Session, tenant_code: str):
-        """Process user question with mandatory tenant isolation"""
+        """Process user question with conversation history"""
         try:
-            # Initialize or update conversation history
+            if not tenant_code:
+                raise ValueError("Tenant code is required")
+
+            # Initialize conversation history if needed
             if conversation_id not in self.conversation_history:
                 self.conversation_history[conversation_id] = []
-            self.conversation_history[conversation_id].append(question)
+                # Add example queries as first entry for new conversations
+                self.conversation_history[conversation_id].append(
+                    self.example_queries)
 
-            # Generate SQL with tenant context
-            sql = self.sql_generator.generate_sql_query(question, tenant_code)
+            # Get previous context for this conversation
+            previous_context = self._get_conversation_context(conversation_id)
 
-            # Double-check tenant filtering is present
-            if "WITH base_data AS" not in sql or "t.tenant_code = :tenant_code" not in sql:
-                return {
-                    'success': False,
-                    'error': 'Generated SQL missing required tenant filtering',
-                    'reformulated_question': f"Can you show me {question.lower().rstrip('?')}? from the last 60 days, ordered by recent activity?",
-                    # Use default questions here
-                    'followup_questions': self._get_default_followup_questions()
-                }
+            try:
+                # Generate SQL with conversation context
+                sql = self.sql_generator.generate_sql_query(
+                    question=question,
+                    tenant_code=tenant_code,
+                    conversation_context=previous_context
+                )
+            except Exception as e:
+                error_str = str(e).lower()
+                if 'context length' in error_str and 'exceed' in error_str:
+                    return {
+                        'success': False,
+                        'error': 'Conversation context limit reached. Please start a new conversation to continue analysis.',
+                        'context_exceeded': True,  # Flag to indicate context length issue
+                        'followup_questions': [
+                            "Start a new conversation to analyze recent trends",
+                            "Begin fresh analysis of key metrics",
+                            "Initiate new topic analysis"
+                        ]
+                    }
+                raise  # Re-raise other exceptions
 
-            # Execute query with tenant parameter
-            params = {'tenant_code': tenant_code}
-            result = await self.execute_query(sql, params, db_session)
+            # Execute query and get results
+            try:
+                result = await self.execute_query(sql, {"tenant_code": tenant_code}, db_session)
+            except Exception as e:
+                logger.error(f"Query execution error: {str(e)}")
+                db_session.rollback()  # Rollback failed transaction
+                raise
+
+            # Store this interaction in conversation history
+            try:
+                self.conversation_history[conversation_id].append({
+                    "question": question,
+                    "sql": sql,
+                    "result": result
+                })
+            except Exception as e:
+                logger.error(f"Error storing conversation history: {str(e)}")
+                # Continue even if history storage fails
+
+            # Generate followup questions with context
+            followup_questions = self._generate_followup_questions(
+                question,
+                result,
+                conversation_id
+            )
 
             return {
                 'success': True,
                 'response': result,
-                'followup_questions': self._generate_followup_questions(
-                    question,
-                    result,
-                    conversation_id
-                )
+                'followup_questions': followup_questions
             }
 
         except Exception as e:
             logger.error(f"Error in workflow: {str(e)}")
+            error_str = str(e).lower()
+            if 'context length' in error_str and 'exceed' in error_str:
+                return {
+                    'success': False,
+                    'error': 'Conversation context limit reached. Please start a new conversation to continue analysis.',
+                    'context_exceeded': True,
+                    'followup_questions': [
+                        "Start a new conversation to analyze recent trends",
+                        "Begin fresh analysis of key metrics",
+                        "Initiate new topic analysis"
+                    ]
+                }
             return {
                 'success': False,
                 'error': str(e),
-                'reformulated_question': f"Can you show me {question.lower().rstrip('?')}? from the last 60 days, ordered by recent activity?",
-                # Use default questions here
                 'followup_questions': self._get_default_followup_questions()
             }
 
@@ -227,118 +324,119 @@ class CallAnalysisWorkflow:
             return {}
 
     def _generate_followup_questions(self, question: str, response: str, conversation_id: str) -> List[str]:
-        """Generate context-aware followup questions based on query results and conversation history"""
-        question_lower = question.lower()
-        response_lower = response.lower()
+        """Generate dynamic followup questions based on conversation context and call analysis patterns"""
+        try:
+            # Get last 3 interactions for context
+            recent_interactions = self.conversation_history.get(
+                conversation_id, [])[-3:]
 
-        # Get conversation history
-        previous_questions = self.conversation_history.get(conversation_id, [])
-        asked_topics = set()
-        for prev_q in previous_questions:
-            # Extract topics from previous questions
-            if "topic" in prev_q.lower():
-                topic_match = re.search(r"'([^']*)'", prev_q)
-                if topic_match:
-                    asked_topics.add(topic_match.group(1))
+            # Analyze current response content
+            response_lower = response.lower()
+            current_q = question.lower()
 
-        # Extract current topics from response
-        topics_mentioned = []
-        for line in response.split('\n'):
-            if 'topic:' in line.lower():
-                topic = line.split('topic:')[1].split(',')[0].strip()
-                topics_mentioned.append(topic)
+            # Extract current topics from response
+            topics_mentioned = []
+            for line in response.split('\n'):
+                if 'topic:' in line.lower():
+                    topic = line.split('topic:')[1].split(',')[0].strip()
+                    topics_mentioned.append(topic)
 
-        # Filter out previously discussed topics
-        new_topics = [t for t in topics_mentioned if t not in asked_topics]
+            # Track key metrics and topics from response
+            metrics = {
+                'sentiment_mentioned': any(x in response_lower for x in ['sentiment', 'positief', 'negatief', 'satisfaction']),
+                'topics_mentioned': any(x in response_lower for x in ['topic', 'onderwerp']),
+                'time_mentioned': any(x in response_lower for x in ['time', 'period', 'week', 'month', 'recent']),
+                'volume_mentioned': any(x in response_lower for x in ['count', 'mentions', 'calls']),
+                'trends_mentioned': 'trend' in response_lower,
+                'technical_support': any(x in response_lower for x in ['technische ondersteuning', 'technical support']),
+                'customer_service': any(x in response_lower for x in ['klantenservice', 'customer service']),
+                'positive_rate': any(x in response_lower for x in ['positive_rate', 'satisfaction_rate'])
+            }
 
-        # Duration related questions
-        if "duration" in question_lower or "call_duration" in response_lower:
-            if not any("sentiment" in q.lower() for q in previous_questions):
+            # If we have specific topics in the response, prioritize topic-based questions
+            if topics_mentioned:
+                main_topic = topics_mentioned[0]
+                if not any("sentiment" in interaction.get('question', '').lower() for interaction in recent_interactions):
+                    return [
+                        f"How has the sentiment changed for '{main_topic}'?",
+                        f"What are the common patterns in calls about '{main_topic}'?",
+                        "Which other topics are frequently mentioned together with these?"
+                    ]
                 return [
-                    "Is there a correlation between call duration and sentiment?",
-                    "What time of day do we see longer calls?",
-                    "Which topics consistently have longer durations?"
+                    f"What time patterns do we see for '{main_topic}'?",
+                    f"How does '{main_topic}' relate to other topics?",
+                    "What are the emerging subtopics in these conversations?"
                 ]
-            return [
-                "How do call durations vary by time of day?",
-                "What patterns do we see in call duration trends?",
-                "Which topics need attention based on call duration?"
-            ]
 
-        # Topic related questions with new topics
-        if new_topics:
-            main_topic = new_topics[0]
-            if not any("sentiment" in q.lower() for q in previous_questions):
+            # If response shows concerning metrics
+            if 'negative' in response_lower or 'negatief' in response_lower:
                 return [
-                    f"How has the sentiment changed for '{main_topic}'?",
-                    f"What are the common patterns in calls about '{main_topic}'?",
-                    "Which other topics are frequently mentioned together with these?"
+                    "What specific issues are causing negative sentiment?",
+                    "When do these negative interactions typically occur?",
+                    "Which agents handle these challenging calls?"
                 ]
-            return [
-                f"What time patterns do we see for '{main_topic}'?",
-                f"How does '{main_topic}' relate to other topics?",
-                "What are the emerging subtopics in these conversations?"
-            ]
 
-        # Sentiment questions considering history
-        if "sentiment" in question_lower:
-            if not any("duration" in q.lower() for q in previous_questions):
+            # If response shows positive trends
+            if 'positive_rate: 100.00' in response_lower or 'positief' in response_lower:
                 return [
-                    "Is there a correlation between sentiment and call duration?",
-                    "What times of day show the best sentiment?",
-                    "Which topics need attention based on sentiment trends?"
+                    "What best practices can we identify from these successful interactions?",
+                    "Which team members are handling these positive calls?",
+                    "How can we apply these successful approaches to other areas?"
                 ]
-            return [
-                "What patterns emerge in positive interactions?",
-                "How can we improve sentiment scores?",
-                "Which areas show improving sentiment trends?"
-            ]
 
-        # Trend questions with history context
-        if any(word in question_lower for word in ["trend", "change", "pattern", "emerging"]):
-            if not any("sentiment" in q.lower() for q in previous_questions):
+            # If looking at technical support
+            if metrics['technical_support']:
                 return [
-                    "How does sentiment relate to these trends?",
-                    "Which trending topics need attention?",
-                    "What new patterns are emerging in customer interactions?"
+                    "What are the most common technical issues being resolved?",
+                    "How do resolution times vary by issue type?",
+                    "Which technical issues lead to follow-up calls?"
                 ]
+
+            # If analyzing customer service
+            if metrics['customer_service']:
+                return [
+                    "What patterns emerge in customer escalations?",
+                    "How do different handling approaches affect outcomes?",
+                    "Which customer service scenarios need additional training?"
+                ]
+
+            # If analyzing trends
+            if metrics['trends_mentioned']:
+                return [
+                    "What factors are driving these trend changes?",
+                    "How do these trends compare to our targets?",
+                    "Which areas show the most significant shifts?"
+                ]
+
+            # If looking at specific topics
+            if metrics['topics_mentioned']:
+                return [
+                    "How do handling times vary across these topics?",
+                    "Which topics most often lead to escalations?",
+                    "What training needs do these topics suggest?"
+                ]
+
+            # Default questions based on call analysis patterns
             return [
-                "What factors drive these trends?",
-                "How can we capitalize on positive trends?",
-                "Which areas need intervention based on trends?"
+                "How do these patterns affect our service quality?",
+                "What operational changes could improve these metrics?",
+                "Which areas need additional agent training?"
             ]
 
-        # Default questions considering history
-        asked_categories = set()
-        for q in previous_questions:
-            if "sentiment" in q.lower():
-                asked_categories.add("sentiment")
-            if "duration" in q.lower():
-                asked_categories.add("duration")
-            if "trend" in q.lower():
-                asked_categories.add("trend")
-
-        if "sentiment" not in asked_categories:
+        except Exception as e:
+            logger.error(f"Error generating follow-up questions: {e}")
             return [
-                "How has sentiment changed across topics?",
-                "Which topics show the best satisfaction rates?",
-                "What patterns emerge in customer sentiment?"
+                "What other call patterns should we investigate?",
+                "How can we improve our handling of these calls?",
+                "What additional training might be helpful?"
             ]
-        if "duration" not in asked_categories:
-            return [
-                "What patterns do we see in call durations?",
-                "Which topics have concerning duration trends?",
-                "How can we optimize call handling time?"
-            ]
-        return [
-            "What new patterns are emerging?",
-            "Which areas need immediate attention?",
-            "How can we improve our performance metrics?"
-        ]
 
     async def execute_query(self, sql: str, params: dict, db_session: Session) -> str:
         """Execute SQL query and format results"""
         try:
+            # Log query execution
+            logger.info(f"Executing SQL with params {params}:\n{sql}")
+
             # Execute query
             result = db_session.execute(text(sql), params)
             rows = result.fetchall()
@@ -346,10 +444,14 @@ class CallAnalysisWorkflow:
 
             # Format results into readable text
             if not rows:
+                logger.info("Query returned no results")
                 return "No results found for your query."
 
             # Convert rows to list of dicts for easier handling
             results = [dict(zip(column_names, row)) for row in rows]
+
+            # Log result count
+            logger.info(f"Query returned {len(results)} rows")
 
             # Format output based on number of rows
             if len(results) == 1:

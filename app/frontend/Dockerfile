@@ -14,21 +14,21 @@ ARG GROUP_ID=1000
 RUN \
     # Check if group exists and use it, otherwise create new
     if getent group ${GROUP_ID} > /dev/null 2>&1; then \
-        existing_group=$(getent group ${GROUP_ID} | cut -d: -f1) && \
-        echo "Group ${GROUP_ID} exists as ${existing_group}, using it" ; \
+    existing_group=$(getent group ${GROUP_ID} | cut -d: -f1) && \
+    echo "Group ${GROUP_ID} exists as ${existing_group}, using it" ; \
     else \
-        addgroup -g ${GROUP_ID} -S appgroup && \
-        echo "Created new group appgroup with ID ${GROUP_ID}" && \
-        existing_group="appgroup" ; \
+    addgroup -g ${GROUP_ID} -S appgroup && \
+    echo "Created new group appgroup with ID ${GROUP_ID}" && \
+    existing_group="appgroup" ; \
     fi && \
     # Check if user exists and use it, otherwise create new
     if getent passwd ${USER_ID} > /dev/null 2>&1; then \
-        existing_user=$(getent passwd ${USER_ID} | cut -d: -f1) && \
-        echo "User ${USER_ID} exists as ${existing_user}, using it" ; \
+    existing_user=$(getent passwd ${USER_ID} | cut -d: -f1) && \
+    echo "User ${USER_ID} exists as ${existing_user}, using it" ; \
     else \
-        adduser -u ${USER_ID} -S appuser -G ${existing_group} -h /home/appuser && \
-        echo "Created new user appuser with ID ${USER_ID}" && \
-        existing_user="appuser" ; \
+    adduser -u ${USER_ID} -S appuser -G ${existing_group} -h /home/appuser && \
+    echo "Created new user appuser with ID ${USER_ID}" && \
+    existing_user="appuser" ; \
     fi && \
     # Create necessary directories regardless of user/group scenario
     mkdir -p /home/${existing_user}/.npm /home/${existing_user}/.npm-global && \
@@ -53,6 +53,9 @@ RUN chown -R ${USER_ID}:${GROUP_ID} /usr/src/app && \
 
 # Copy the rest of the application
 COPY --chown=${USER_ID}:${GROUP_ID} . .
+
+# Add this line after the WORKDIR command
+RUN npm install axios
 
 # Switch to appropriate user
 USER ${USER_ID}:${GROUP_ID}
