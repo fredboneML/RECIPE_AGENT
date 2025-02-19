@@ -20,6 +20,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class DatabaseAgentValidator:
+    def validate_query(self, query: str, tenant_code: str) -> tuple[bool, Optional[str]]:
+        """Enhanced query validation with tenant isolation checks"""
+        if not query or not tenant_code:
+            return False, "Empty query or missing tenant code"
+
+        query = query.strip().upper()
+
+        # Check for tenant isolation
+        if 'TENANT_CODE = :TENANT_CODE' not in query:
+            return False, "Query must include tenant isolation"
+
+        # Check for date filtering
+        if 'CURRENT_DATE - INTERVAL' not in query:
+            return False, "Query must include date filtering"
+
+        # Rest of the validation logic...
+        return True, None
+
+
 class ConversationContext:
     def __init__(self):
         self.topics = {}  # Store mentioned topics and their occurrences
@@ -257,7 +277,7 @@ db = get_db_connection()
 
 # List available tables (schema)
 try:
-    available_tables = db.get_table_info(['company', 'transcription'])
+    available_tables = db.get_table_info(['transcription'])
     logger.info("Retrieved specific table information")
 except Exception as e:
     logger.warning(f"Error getting specific table info: {
@@ -373,7 +393,7 @@ def add_context_to_query(user_query: str, text_context: Optional[str] = None, co
                     "                WHEN processingdate >= CURRENT_DATE - INTERVAL '60 days' THEN 'Previous Month'\n"
                     "            END AS time_period\n"
                     "        FROM base_data\n"
-                    "        WHERE processingdate >= CURRENT_DATE - INTERVAL '60 days'\n"
+                    "        WHERE processingdate >= CURRENT_DATE - INTERVAL '300 days'\n"
                     "    )\n"
                     "    SELECT * FROM time_based_data ...\n"
                     "13. For text comparisons, ALWAYS use these patterns:\n"
@@ -405,6 +425,7 @@ def add_context_to_query(user_query: str, text_context: Optional[str] = None, co
                     "    - ALWAYS include the complete base_data CTE definition\n"
                     "    - COPY and PASTE the exact base_data CTE structure shown above\n"
                     "22. NEVER execute a DELETE, UPDATE, INSERT, DROP, or any other data modification statements.\n"
+                    "23. Always use the last 2 months as default value when generating the SQL query and only change it if required by the user.\n"
                     f"\nSchema of available tables:\n{available_tables}\n\n")
 
     enhanced_query = user_query
