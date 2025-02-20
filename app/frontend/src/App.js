@@ -14,6 +14,9 @@ function App() {
   const [showPopup, setShowPopup] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRequestCanceled, setIsRequestCanceled] = useState(false);
+  const [categories, setCategories] = useState({});
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
+  
   const navigate = useNavigate();
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
@@ -22,13 +25,6 @@ function App() {
   const backendUrl = window.location.hostname === 'localhost' 
     ? 'http://localhost:8000'
     : `http://${window.location.hostname}:8000`;
-
-  const commonQuestions = [
-    "Top 10 topics",
-    "How does the sentiment of calls last week compare to the previous week?",
-    "Top 10 topics leading to higher customer satisfaction",
-    "Top 10 Companies showing an increasing trend in negative call sentiments"
-  ];
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -146,11 +142,13 @@ const fetchInitialQuestions = async () => {
       });
       if (response.ok) {
         const data = await response.json();
-        // Transform the data to include both query and response in each message
         const transformedMessages = data.map(item => ({
           query: item.query,
           response: item.response,
-          timestamp: new Date(item.timestamp)
+          timestamp: new Date(item.timestamp),
+          followup_questions: item.followup_questions,
+          error: item.error,
+          reformulated_question: item.reformulated_question
         }));
         setMessages(transformedMessages);
         scrollToBottom();
@@ -187,23 +185,24 @@ const fetchInitialQuestions = async () => {
       
       if (!isRequestCanceled) {
         if (data.error) {
-          console.error("Query error:", data.message);
+          setMessages(prev => [...prev, { 
+            query,
+            error: data.error,
+            reformulated_question: data.reformulated_question,
+            followup_questions: data.followup_questions,
+            timestamp: new Date() 
+          }]);
         } else {
           setResult(data.result);
-          const lastMessage = messages[messages.length - 1];
-          // Update the last message to include both query and response
-          if (lastMessage && lastMessage.query === query) {
-            setMessages(prev => [
-              ...prev.slice(0, -1),
-              { ...lastMessage, response: data.result }
-            ]);
-          } else {
-            setMessages(prev => [...prev, { 
-              query,
-              response: data.result, 
-              timestamp: new Date() 
-            }]);
-          }
+          const newMessage = {
+            query,
+            response: data.result,
+            followup_questions: data.followup_questions,
+            timestamp: new Date()
+          };
+          
+          setMessages(prev => [...prev, newMessage]);
+          
           if (!currentConversation) {
             setCurrentConversation({ id: data.conversation_id });
             fetchConversations();
@@ -309,17 +308,29 @@ const fetchInitialQuestions = async () => {
           {!currentConversation && !messages.length && (
             <>
               <img src="/logo.png" alt="Company Logo" className="large-logo" />
-              <div className="common-questions">
-                {commonQuestions.map((question, index) => (
-                  <div
-                    key={index}
-                    className="question-box"
-                    onClick={() => handleQuestionClick(question)}
-                  >
-                    {question}
-                  </div>
-                ))}
-              </div>
+              {isLoadingQuestions ? (
+                <div className="loading-questions">Loading suggestions...</div>
+              ) : (
+                <div className="question-categories">
+                  {Object.entries(categories).map(([category, data]) => (
+                    <div key={category} className="category-section">
+                      <h3 className="category-title">{category}</h3>
+                      <p className="category-description">{data.description}</p>
+                      <div className="common-questions">
+                        {data.questions.map((question, index) => (
+                          <div
+                            key={index}
+                            className="question-box"
+                            onClick={() => handleQuestionClick(question)}
+                          >
+                            {question}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
@@ -338,6 +349,51 @@ const fetchInitialQuestions = async () => {
                     <div className="message-content assistant-message">
                       {message.response}
                     </div>
+                    {message.followup_questions && message.followup_questions.length > 0 && (
+                      <div className="followup-suggestions">
+                        <h4>Follow-up Questions:</h4>
+                        <div className="common-questions">
+                          {message.followup_questions.map((question, idx) => (
+                            <div
+                              key={idx}
+                              className="question-box"
+                              onClick={() => handleQuestionClick(question)}
+                            >
+                              {question}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {message.error && (
+                  <div className="error-suggestion">
+                    <h4>Query Suggestion:</h4>
+                    {message.reformulated_question && (
+                      <div
+                        className="question-box"
+                        onClick={() => handleQuestionClick(message.reformulated_question)}
+                      >
+                        {message.reformulated_question}
+                      </div>
+                    )}
+                    {message.followup_questions && message.followup_questions.length > 0 && (
+                      <div className="followup-suggestions">
+                        <h4>Try these instead:</h4>
+                        <div className="common-questions">
+                          {message.followup_questions.map((question, idx) => (
+                            <div
+                              key={idx}
+                              className="question-box"
+                              onClick={() => handleQuestionClick(question)}
+                            >
+                              {question}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
