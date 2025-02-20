@@ -1,10 +1,5 @@
 
 
-
--- Add new tenant
-INSERT INTO tenant_codes (tenant_code, tenant_code_alias) 
-VALUES ('maccare', 'maccare');
-
 -- Add new tenant
 INSERT INTO tenant_codes (tenant_code, tenant_code_alias) 
 VALUES ('stroevemotorsport', 'stroevemotorsport');
@@ -13,7 +8,7 @@ VALUES ('stroevemotorsport', 'stroevemotorsport');
 -- 1. Insert the new user
 INSERT INTO users (username, tenant_code, role)
 VALUES ('newuser_mcre', 'maccare', 'read_only');
-6aff9236a7f7
+37f966eff069
 -- 2. Immediately get the generated password
 SELECT * FROM get_generated_password('newuser_mcre');
 
