@@ -164,6 +164,10 @@ class CallAnalysisWorkflow:
             if not tenant_code:
                 raise ValueError("Tenant code is required")
 
+            # Detect language (Dutch vs English)
+            is_dutch = any(dutch_word in question.lower() for dutch_word in
+                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
+
             # Initialize tenant conversation history if needed
             if tenant_code not in self.conversation_history:
                 self.conversation_history[tenant_code] = {}
@@ -189,14 +193,15 @@ class CallAnalysisWorkflow:
             except Exception as e:
                 error_str = str(e).lower()
                 if 'context length' in error_str and 'exceed' in error_str:
+                    error_msg = "Conversation context limit reached. Please start a new conversation to continue analysis." if not is_dutch else "Limiet van gesprekscontext bereikt. Start een nieuw gesprek om de analyse voort te zetten."
                     return {
                         'success': False,
-                        'error': 'Conversation context limit reached. Please start a new conversation to continue analysis.',
+                        'error': error_msg,
                         'context_exceeded': True,  # Flag to indicate context length issue
                         'followup_questions': [
-                            "Start a new conversation to analyze recent trends",
-                            "Begin fresh analysis of key metrics",
-                            "Initiate new topic analysis"
+                            "Start een nieuw gesprek om recente trends te analyseren" if is_dutch else "Start a new conversation to analyze recent trends",
+                            "Begin een nieuwe analyse van belangrijke metrieken" if is_dutch else "Begin fresh analysis of key metrics",
+                            "Start een nieuwe topic-analyse" if is_dutch else "Initiate new topic analysis"
                         ]
                     }
                 raise  # Re-raise other exceptions
@@ -207,7 +212,29 @@ class CallAnalysisWorkflow:
             except Exception as e:
                 logger.error(f"Query execution error: {str(e)}")
                 db_session.rollback()  # Rollback failed transaction
-                raise
+
+                # Provide error message in appropriate language
+                error_msg = str(e)
+                if is_dutch:
+                    # Translate common error messages to Dutch
+                    if "missing FROM-clause" in error_msg:
+                        error_msg = "SQL-fout: ontbrekende FROM-clausule in de query"
+                    elif "syntax error" in error_msg:
+                        error_msg = "SQL-syntaxfout in de query"
+                    elif "column" in error_msg and "does not exist" in error_msg:
+                        error_msg = "SQL-fout: een kolom in de query bestaat niet"
+                    else:
+                        error_msg = f"Fout bij het uitvoeren van de query: {error_msg}"
+
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'followup_questions': [
+                        "Wat zijn de meest voorkomende onderwerpen in onze gesprekken van de afgelopen maand?" if is_dutch else "What are the most common topics in our calls from the last month?",
+                        "Hoe is het klantsentiment in de loop van de tijd veranderd?" if is_dutch else "How has customer sentiment changed over time?",
+                        "Kunt u mij de verdeling van gespreksonderwerpen per sentiment tonen?" if is_dutch else "Can you show me the breakdown of call topics by sentiment?"
+                    ]
+                }
 
             # Store this interaction in conversation history
             try:
@@ -225,7 +252,7 @@ class CallAnalysisWorkflow:
                 question,
                 result,
                 conversation_id,
-                tenant_code  # Add tenant_code parameter
+                tenant_code
             )
 
             return {
@@ -236,177 +263,57 @@ class CallAnalysisWorkflow:
 
         except Exception as e:
             logger.error(f"Error in workflow: {str(e)}")
-            error_str = str(e).lower()
-            if 'context length' in error_str and 'exceed' in error_str:
-                return {
-                    'success': False,
-                    'error': 'Conversation context limit reached. Please start a new conversation to continue analysis.',
-                    'context_exceeded': True,
-                    'followup_questions': [
-                        "Start a new conversation to analyze recent trends",
-                        "Begin fresh analysis of key metrics",
-                        "Initiate new topic analysis"
-                    ]
-                }
+
+            # Provide error message in appropriate language
+            error_msg = str(e)
+            if is_dutch:
+                error_msg = f"Fout bij het verwerken van uw vraag: {error_msg}"
+
             return {
                 'success': False,
-                'error': str(e),
-                'followup_questions': self._get_default_followup_questions()
+                'error': error_msg,
+                'followup_questions': [
+                    "Wat zijn de meest voorkomende onderwerpen in onze gesprekken?" if is_dutch else "What are the most common topics in our calls?",
+                    "Hoe is het klantsentiment in de loop van de tijd veranderd?" if is_dutch else "How has customer sentiment changed over time?",
+                    "Kunt u mij de verdeling van gespreksonderwerpen per sentiment tonen?" if is_dutch else "Can you show me the breakdown of call topics by sentiment?"
+                ]
             }
 
     async def execute_query(self, sql: str, params: dict, db_session: Session) -> str:
-        """Execute SQL query and format results with enhanced readability and insight-focused presentation"""
+        """Execute SQL query and format results"""
         try:
-            # Log query execution
-            logger.info(f"Executing SQL with params {params}:\n{sql}")
-
             # Execute query
+            logger.info(f"Executing SQL with params {params}:\n{sql}")
             result = db_session.execute(text(sql), params)
             rows = result.fetchall()
             column_names = result.keys()
 
+            # Log result count
+            row_count = len(rows)
+            logger.info(f"Query returned {row_count} rows")
+
             # Format results into readable text
             if not rows:
-                logger.info("Query returned no results")
                 return "No results found for your query."
 
-            # Convert rows to list of dicts for easier handling
-            results = [dict(zip(column_names, row)) for row in rows]
-
-            # Log result count
-            logger.info(f"Query returned {len(results)} rows")
-
-            # Detect potential value columns for better formatting
-            numeric_columns = []
-            date_columns = []
-            topic_columns = []
-            sentiment_columns = []
-            percentage_columns = []
-
-            # Identify column types for better formatting
-            for col in column_names:
-                col_lower = col.lower()
-                # Check first row value type when available
-                if results and col in results[0]:
-                    value = results[0][col]
-
-                    # Identify topic columns
-                    if 'topic' in col_lower:
-                        topic_columns.append(col)
-
-                    # Identify sentiment columns
-                    elif 'sentiment' in col_lower:
-                        sentiment_columns.append(col)
-
-                    # Identify date columns
-                    elif isinstance(value, datetime):
-                        date_columns.append(col)
-
-                    # Identify percentage columns
-                    elif 'percent' in col_lower or 'rate' in col_lower or '%' in col_lower:
-                        percentage_columns.append(col)
-
-                    # Identify numeric columns
-                    elif isinstance(value, (int, float)) or (isinstance(value, str) and value.replace('.', '', 1).isdigit()):
-                        numeric_columns.append(col)
-
-            # Format output based on number of rows and column types
-            if len(results) == 1:
-                # Single row result - format for readability
-                formatted_items = []
-                for k, v in results[0].items():
-                    formatted_value = v
-                    # Format percentages
-                    if k in percentage_columns and isinstance(v, (int, float)):
-                        formatted_value = f"{v:.2f}%"
-                    # Format dates
-                    elif k in date_columns and v:
-                        if isinstance(v, datetime):
-                            formatted_value = v.strftime("%Y-%m-%d")
-                    # Format numbers
-                    elif k in numeric_columns and v:
-                        if isinstance(v, (int, float)) and v > 1000:
-                            formatted_value = f"{v:,}"
-
-                    formatted_items.append(f"{k}: {formatted_value}")
-                return "\n".join(formatted_items)
-
+            # Format output based on number of rows
+            if len(rows) == 1:
+                # Single row result
+                return "\n".join(f"{k}: {v}" for k, v in zip(column_names, rows[0]))
             else:
-                # Multiple row result - prioritize important information
-                # Check if this is a topic-based result set
-                has_topic = any(col in topic_columns for col in column_names)
-                has_sentiment = any(
-                    col in sentiment_columns for col in column_names)
-
-                # Sort results if meaningful
-                if has_topic and any(col in numeric_columns for col in column_names):
-                    # Find the most relevant numeric column to sort by
-                    sort_col = next((col for col in column_names if 'count' in col.lower() or 'mentions' in col.lower()),
-                                    next((col for col in numeric_columns), None))
-                    if sort_col:
-                        results = sorted(results, key=lambda x: x.get(sort_col, 0) if x.get(
-                            sort_col) is not None else 0, reverse=True)
-
-                # Limit to top 10 if there are too many results
-                if len(results) > 10:
-                    extra_count = len(results) - 10
-                    results = results[:10]
-
-                # Format each row
+                # Multiple row result with row numbers
                 output = []
-                for i, row in enumerate(results):
-                    # Enhanced row formatting
-                    row_parts = []
+                # Show first 10 rows with numbers
+                for i, row in enumerate(rows[:10], 1):
+                    row_str = ", ".join(
+                        f"{k}: {v}" for k, v in zip(column_names, row))
+                    output.append(f"{i}. {row_str}")
 
-                    # Always include topic first if available
-                    for topic_col in topic_columns:
-                        if topic_col in row:
-                            row_parts.append(f"{topic_col}: {row[topic_col]}")
-
-                    # Then include sentiment if available
-                    for sentiment_col in sentiment_columns:
-                        if sentiment_col in row:
-                            row_parts.append(
-                                f"{sentiment_col}: {row[sentiment_col]}")
-
-                    # Format percentages
-                    for k in percentage_columns:
-                        if k in row and row[k] is not None:
-                            if isinstance(row[k], (int, float)):
-                                row_parts.append(f"{k}: {row[k]:.2f}%")
-                            else:
-                                row_parts.append(f"{k}: {row[k]}")
-
-                    # Format other numeric values
-                    for k in numeric_columns:
-                        if k in row and k not in percentage_columns and row[k] is not None:
-                            if isinstance(row[k], (int, float)) and row[k] > 1000:
-                                row_parts.append(f"{k}: {row[k]:,}")
-                            else:
-                                row_parts.append(f"{k}: {row[k]}")
-
-                    # Format dates
-                    for k in date_columns:
-                        if k in row and row[k] is not None:
-                            if isinstance(row[k], datetime):
-                                row_parts.append(
-                                    f"{k}: {row[k].strftime('%Y-%m-%d')}")
-                            else:
-                                row_parts.append(f"{k}: {row[k]}")
-
-                    # Include any remaining columns
-                    for k, v in row.items():
-                        if k not in topic_columns and k not in sentiment_columns and \
-                                k not in percentage_columns and k not in numeric_columns and k not in date_columns:
-                            row_parts.append(f"{k}: {v}")
-
-                    # Combine parts into a single row
-                    output.append(f"{i+1}. {', '.join(row_parts)}")
-
-                # Add note about additional results
-                if len(results) == 10 and extra_count > 0:
+                # Add note if there are more rows
+                if len(rows) > 10:
+                    extra_count = len(rows) - 10
                     output.append(
-                        f"\n(Showing top 10 results of {10 + extra_count} total)")
+                        f"\n(Showing top 10 results of {len(rows)} total)")
 
                 return "\n".join(output)
 
@@ -507,6 +414,10 @@ class CallAnalysisWorkflow:
             response_lower = response.lower()
             current_q = question.lower()
 
+            # Detect language (Dutch vs English)
+            is_dutch = any(dutch_word in current_q for dutch_word in
+                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
+
             # Extract numerical values for aggregation insights
             numeric_values = {}
             for line in response.split('\n'):
@@ -556,10 +467,6 @@ class CallAnalysisWorkflow:
                 'has_numbers': bool(numeric_values),
                 'has_issues': bool(issues_mentioned)
             }
-
-            # Detect language (Dutch vs English)
-            is_dutch = any(dutch_word in current_q.lower() for dutch_word in
-                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
 
             # If we have specific topics in the response with issues, prioritize issue-focused questions
             if topics_mentioned and metrics['has_issues']:
