@@ -160,6 +160,12 @@ class CallAnalysisWorkflow:
 
     async def process_user_question(self, question: str, conversation_id: str, db_session: Session, tenant_code: str):
         """Process user question with conversation history"""
+        start_time = datetime.utcnow()
+        was_answered = False
+        error_message = None
+        tokens_used = 0
+        topic_category = None
+
         try:
             if not tenant_code:
                 raise ValueError("Tenant code is required")
@@ -179,6 +185,64 @@ class CallAnalysisWorkflow:
                 self.conversation_history[tenant_code][conversation_id].append(
                     self.example_queries)
 
+            # Check cache for this exact question in this tenant
+            if self.cache_manager:
+                try:
+                    # Pass conversation_id to get_query_result
+                    cached_result = self.cache_manager.get_query_result(
+                        question, tenant_code, conversation_id)
+                    if cached_result:
+                        logger.info(f"Cache hit for question: {question}")
+
+                        # Store this interaction in conversation history
+                        try:
+                            self.conversation_history[tenant_code][conversation_id].append({
+                                "question": question,
+                                "sql": cached_result.get("sql", ""),
+                                "result": cached_result.get("result", "")
+                            })
+                        except Exception as e:
+                            logger.error(
+                                f"Error storing cached result in conversation history: {str(e)}")
+
+                        # Generate followup questions with context
+                        followup_questions = self._generate_followup_questions(
+                            question,
+                            cached_result.get("result", ""),
+                            conversation_id,
+                            tenant_code
+                        )
+
+                        # Record performance data for cached query
+                        was_answered = True
+                        end_time = datetime.utcnow()
+                        response_time = int(
+                            (end_time - start_time).total_seconds() * 1000)
+
+                        # Try to extract topic category from the question
+                        topic_category = self._extract_topic_category(question)
+
+                        self._record_query_performance(
+                            db_session,
+                            question,
+                            was_answered,
+                            None,
+                            response_time,
+                            topic_category,
+                            tokens_used,
+                            True  # is_cached
+                        )
+
+                        return {
+                            'success': True,
+                            'response': cached_result.get("result", ""),
+                            'followup_questions': followup_questions,
+                            'cached': True
+                        }
+                except Exception as e:
+                    logger.warning(f"Cache lookup failed: {str(e)}")
+                    # Continue with normal processing if cache lookup fails
+
             # Get previous context for this conversation
             previous_context = self._get_conversation_context(
                 conversation_id, tenant_code)
@@ -190,8 +254,27 @@ class CallAnalysisWorkflow:
                     tenant_code=tenant_code,
                     conversation_context=previous_context
                 )
+                # Estimate tokens used for the SQL generation
+                tokens_used += len(question) // 4 + len(previous_context) // 4
             except Exception as e:
                 error_str = str(e).lower()
+                error_message = error_str
+
+                end_time = datetime.utcnow()
+                response_time = int(
+                    (end_time - start_time).total_seconds() * 1000)
+                topic_category = self._extract_topic_category(question)
+
+                self._record_query_performance(
+                    db_session,
+                    question,
+                    False,
+                    error_message,
+                    response_time,
+                    topic_category,
+                    tokens_used
+                )
+
                 if 'context length' in error_str and 'exceed' in error_str:
                     error_msg = "Conversation context limit reached. Please start a new conversation to continue analysis." if not is_dutch else "Limiet van gesprekscontext bereikt. Start een nieuw gesprek om de analyse voort te zetten."
                     return {
@@ -209,26 +292,60 @@ class CallAnalysisWorkflow:
             # Execute query and get results
             try:
                 result = await self.execute_query(sql, {"tenant_code": tenant_code}, db_session)
+                was_answered = True
+
+                # Try to extract topic category from the result
+                if not topic_category:
+                    topic_category = self._extract_topic_category(result)
+
+                # Cache the successful result
+                if self.cache_manager:
+                    try:
+                        # Use the existing store_query_result method instead of cache_query
+                        self.cache_manager.store_query_result(
+                            question=question,
+                            sql=sql,
+                            result=result,
+                            tenant_code=tenant_code
+                        )
+                        logger.info(f"Cached result for question: {question}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cache result: {str(e)}")
+
             except Exception as e:
                 logger.error(f"Query execution error: {str(e)}")
                 db_session.rollback()  # Rollback failed transaction
 
+                error_message = str(e)
+                end_time = datetime.utcnow()
+                response_time = int(
+                    (end_time - start_time).total_seconds() * 1000)
+
+                self._record_query_performance(
+                    db_session,
+                    question,
+                    False,
+                    error_message,
+                    response_time,
+                    topic_category,
+                    tokens_used
+                )
+
                 # Provide error message in appropriate language
-                error_msg = str(e)
                 if is_dutch:
                     # Translate common error messages to Dutch
-                    if "missing FROM-clause" in error_msg:
-                        error_msg = "SQL-fout: ontbrekende FROM-clausule in de query"
-                    elif "syntax error" in error_msg:
-                        error_msg = "SQL-syntaxfout in de query"
-                    elif "column" in error_msg and "does not exist" in error_msg:
-                        error_msg = "SQL-fout: een kolom in de query bestaat niet"
+                    if "missing FROM-clause" in error_message:
+                        error_message = "SQL-fout: ontbrekende FROM-clausule in de query"
+                    elif "syntax error" in error_message:
+                        error_message = "SQL-syntaxfout in de query"
+                    elif "column" in error_message and "does not exist" in error_message:
+                        error_message = "SQL-fout: een kolom in de query bestaat niet"
                     else:
-                        error_msg = f"Fout bij het uitvoeren van de query: {error_msg}"
+                        error_message = f"Fout bij het uitvoeren van de query: {error_message}"
 
                 return {
                     'success': False,
-                    'error': error_msg,
+                    'error': error_message,
                     'followup_questions': [
                         "Wat zijn de meest voorkomende onderwerpen in onze gesprekken van de afgelopen maand?" if is_dutch else "What are the most common topics in our calls from the last month?",
                         "Hoe is het klantsentiment in de loop van de tijd veranderd?" if is_dutch else "How has customer sentiment changed over time?",
@@ -255,6 +372,20 @@ class CallAnalysisWorkflow:
                 tenant_code
             )
 
+            # Record performance data for successful query
+            end_time = datetime.utcnow()
+            response_time = int((end_time - start_time).total_seconds() * 1000)
+
+            self._record_query_performance(
+                db_session,
+                question,
+                True,
+                None,
+                response_time,
+                topic_category,
+                tokens_used
+            )
+
             return {
                 'success': True,
                 'response': result,
@@ -264,14 +395,32 @@ class CallAnalysisWorkflow:
         except Exception as e:
             logger.error(f"Error in workflow: {str(e)}")
 
+            # Record performance data for failed query
+            end_time = datetime.utcnow()
+            response_time = int((end_time - start_time).total_seconds() * 1000)
+            error_message = str(e)
+
+            try:
+                self._record_query_performance(
+                    db_session,
+                    question,
+                    False,
+                    error_message,
+                    response_time,
+                    topic_category,
+                    tokens_used
+                )
+            except Exception as perf_error:
+                logger.error(
+                    f"Failed to record performance data: {perf_error}")
+
             # Provide error message in appropriate language
-            error_msg = str(e)
             if is_dutch:
-                error_msg = f"Fout bij het verwerken van uw vraag: {error_msg}"
+                error_message = f"Fout bij het verwerken van uw vraag: {error_message}"
 
             return {
                 'success': False,
-                'error': error_msg,
+                'error': error_message,
                 'followup_questions': [
                     "Wat zijn de meest voorkomende onderwerpen in onze gesprekken?" if is_dutch else "What are the most common topics in our calls?",
                     "Hoe is het klantsentiment in de loop van de tijd veranderd?" if is_dutch else "How has customer sentiment changed over time?",
@@ -597,3 +746,55 @@ class CallAnalysisWorkflow:
                 "Which specific issues appear most frequently in customer calls?",
                 "What percentage of calls show positive vs. negative sentiment?"
             ]
+
+    def _record_query_performance(self, db_session, query_text, was_answered, error_message, response_time, topic_category, tokens_used, is_cached=False):
+        """Record query performance metrics"""
+        try:
+            # Add cache indicator to query text if cached
+            query_prefix = "[CACHED] " if is_cached else ""
+
+            stmt = text("""
+                INSERT INTO query_performance 
+                (query_text, was_answered, error_message, response_time, topic_category, tokens_used)
+                VALUES (:query_text, :was_answered, :error_message, :response_time, :topic_category, :tokens_used)
+            """)
+
+            db_session.execute(stmt, {
+                "query_text": f"{query_prefix}{query_text}",
+                "was_answered": was_answered,
+                "error_message": error_message,
+                "response_time": response_time,
+                "topic_category": topic_category,
+                "tokens_used": tokens_used
+            })
+
+            db_session.commit()
+            logger.debug(
+                f"Recorded query performance: {response_time}ms, answered: {was_answered}")
+        except Exception as e:
+            logger.error(f"Failed to record query performance: {e}")
+            # Don't raise the exception to avoid disrupting the main flow
+
+    def _extract_topic_category(self, text):
+        """Extract topic category from text"""
+        try:
+            text_lower = text.lower()
+
+            # Define common categories and their keywords
+            categories = {
+                "technical_support": ["technical", "support", "technische", "ondersteuning", "error", "fout", "bug", "issue"],
+                "customer_service": ["customer", "service", "klantenservice", "klant", "support"],
+                "billing": ["billing", "invoice", "facturering", "factuur", "betaling", "payment"],
+                "product": ["product", "feature", "functie", "kenmerk"],
+                "sentiment": ["sentiment", "positive", "negative", "positief", "negatief", "neutral", "neutraal"],
+                "trend": ["trend", "change", "verandering", "pattern", "patroon"]
+            }
+
+            # Check for category keywords in the text
+            for category, keywords in categories.items():
+                if any(keyword in text_lower for keyword in keywords):
+                    return category
+
+            return None
+        except Exception:
+            return None
