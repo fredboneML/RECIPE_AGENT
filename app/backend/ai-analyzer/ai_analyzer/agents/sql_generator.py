@@ -254,14 +254,24 @@ class SQLGeneratorAgent(BaseAgent):
                     2. The query MUST start with: WITH base_data AS (SELECT
                     3. The table name MUST be exactly: transcription_{tenant_code} t
                     4. The WHERE clause MUST include: t.tenant_code = :tenant_code
-                    5. Do not modify these requirements under any circumstances
+                    5. When referencing columns from base_data in subsequent CTEs, DO NOT use the 't' alias
+                    6. In subsequent CTEs, use column names directly from base_data (e.g., 'summary' not 't.summary')
+                    7. Do not modify these requirements under any circumstances
                     
                     Example of correct format:
                     WITH base_data AS (
                         SELECT t.* 
                         FROM transcription_{tenant_code} t
                         WHERE t.tenant_code = :tenant_code
+                    ),
+                    analysis AS (
+                        SELECT
+                            clean_topic,  -- Correct: no 't.' prefix in second CTE
+                            COUNT(*) as count
+                        FROM base_data
+                        GROUP BY clean_topic
                     )
+                    SELECT * FROM analysis;
                     """},
                 {"role": "user", "content": question}
             ]
@@ -289,6 +299,23 @@ class SQLGeneratorAgent(BaseAgent):
                 generated_sql,
                 flags=re.IGNORECASE
             )
+
+            # Fix common error: using t.column in subsequent CTEs
+            # Find all CTEs after the first one
+            cte_pattern = r'WITH\s+base_data\s+AS\s*\([^)]+\)(,\s*[a-zA-Z0-9_]+\s+AS\s*\([^)]+\))*'
+            cte_match = re.search(
+                cte_pattern, generated_sql, re.DOTALL | re.IGNORECASE)
+
+            if cte_match:
+                cte_text = cte_match.group(0)
+                # Replace t.column with just column in all CTEs after the first one
+                base_cte_end = cte_text.find('),')
+                if base_cte_end > 0:
+                    subsequent_ctes = cte_text[base_cte_end:]
+                    fixed_ctes = re.sub(
+                        r't\.([a-zA-Z0-9_]+)', r'\1', subsequent_ctes, flags=re.IGNORECASE)
+                    generated_sql = generated_sql.replace(
+                        subsequent_ctes, fixed_ctes)
 
             # Validate the SQL
             if not self._validate_tenant_filtering(generated_sql, tenant_code):
