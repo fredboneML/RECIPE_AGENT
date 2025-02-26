@@ -254,6 +254,166 @@ class CallAnalysisWorkflow:
                 'followup_questions': self._get_default_followup_questions()
             }
 
+    async def execute_query(self, sql: str, params: dict, db_session: Session) -> str:
+        """Execute SQL query and format results with enhanced readability and insight-focused presentation"""
+        try:
+            # Log query execution
+            logger.info(f"Executing SQL with params {params}:\n{sql}")
+
+            # Execute query
+            result = db_session.execute(text(sql), params)
+            rows = result.fetchall()
+            column_names = result.keys()
+
+            # Format results into readable text
+            if not rows:
+                logger.info("Query returned no results")
+                return "No results found for your query."
+
+            # Convert rows to list of dicts for easier handling
+            results = [dict(zip(column_names, row)) for row in rows]
+
+            # Log result count
+            logger.info(f"Query returned {len(results)} rows")
+
+            # Detect potential value columns for better formatting
+            numeric_columns = []
+            date_columns = []
+            topic_columns = []
+            sentiment_columns = []
+            percentage_columns = []
+
+            # Identify column types for better formatting
+            for col in column_names:
+                col_lower = col.lower()
+                # Check first row value type when available
+                if results and col in results[0]:
+                    value = results[0][col]
+
+                    # Identify topic columns
+                    if 'topic' in col_lower:
+                        topic_columns.append(col)
+
+                    # Identify sentiment columns
+                    elif 'sentiment' in col_lower:
+                        sentiment_columns.append(col)
+
+                    # Identify date columns
+                    elif isinstance(value, datetime):
+                        date_columns.append(col)
+
+                    # Identify percentage columns
+                    elif 'percent' in col_lower or 'rate' in col_lower or '%' in col_lower:
+                        percentage_columns.append(col)
+
+                    # Identify numeric columns
+                    elif isinstance(value, (int, float)) or (isinstance(value, str) and value.replace('.', '', 1).isdigit()):
+                        numeric_columns.append(col)
+
+            # Format output based on number of rows and column types
+            if len(results) == 1:
+                # Single row result - format for readability
+                formatted_items = []
+                for k, v in results[0].items():
+                    formatted_value = v
+                    # Format percentages
+                    if k in percentage_columns and isinstance(v, (int, float)):
+                        formatted_value = f"{v:.2f}%"
+                    # Format dates
+                    elif k in date_columns and v:
+                        if isinstance(v, datetime):
+                            formatted_value = v.strftime("%Y-%m-%d")
+                    # Format numbers
+                    elif k in numeric_columns and v:
+                        if isinstance(v, (int, float)) and v > 1000:
+                            formatted_value = f"{v:,}"
+
+                    formatted_items.append(f"{k}: {formatted_value}")
+                return "\n".join(formatted_items)
+
+            else:
+                # Multiple row result - prioritize important information
+                # Check if this is a topic-based result set
+                has_topic = any(col in topic_columns for col in column_names)
+                has_sentiment = any(
+                    col in sentiment_columns for col in column_names)
+
+                # Sort results if meaningful
+                if has_topic and any(col in numeric_columns for col in column_names):
+                    # Find the most relevant numeric column to sort by
+                    sort_col = next((col for col in column_names if 'count' in col.lower() or 'mentions' in col.lower()),
+                                    next((col for col in numeric_columns), None))
+                    if sort_col:
+                        results = sorted(results, key=lambda x: x.get(sort_col, 0) if x.get(
+                            sort_col) is not None else 0, reverse=True)
+
+                # Limit to top 10 if there are too many results
+                if len(results) > 10:
+                    extra_count = len(results) - 10
+                    results = results[:10]
+
+                # Format each row
+                output = []
+                for i, row in enumerate(results):
+                    # Enhanced row formatting
+                    row_parts = []
+
+                    # Always include topic first if available
+                    for topic_col in topic_columns:
+                        if topic_col in row:
+                            row_parts.append(f"{topic_col}: {row[topic_col]}")
+
+                    # Then include sentiment if available
+                    for sentiment_col in sentiment_columns:
+                        if sentiment_col in row:
+                            row_parts.append(
+                                f"{sentiment_col}: {row[sentiment_col]}")
+
+                    # Format percentages
+                    for k in percentage_columns:
+                        if k in row and row[k] is not None:
+                            if isinstance(row[k], (int, float)):
+                                row_parts.append(f"{k}: {row[k]:.2f}%")
+                            else:
+                                row_parts.append(f"{k}: {row[k]}")
+
+                    # Format other numeric values
+                    for k in numeric_columns:
+                        if k in row and k not in percentage_columns and row[k] is not None:
+                            if isinstance(row[k], (int, float)) and row[k] > 1000:
+                                row_parts.append(f"{k}: {row[k]:,}")
+                            else:
+                                row_parts.append(f"{k}: {row[k]}")
+
+                    # Format dates
+                    for k in date_columns:
+                        if k in row and row[k] is not None:
+                            if isinstance(row[k], datetime):
+                                row_parts.append(
+                                    f"{k}: {row[k].strftime('%Y-%m-%d')}")
+                            else:
+                                row_parts.append(f"{k}: {row[k]}")
+
+                    # Include any remaining columns
+                    for k, v in row.items():
+                        if k not in topic_columns and k not in sentiment_columns and \
+                                k not in percentage_columns and k not in numeric_columns and k not in date_columns:
+                            row_parts.append(f"{k}: {v}")
+
+                    # Combine parts into a single row
+                    output.append(f"{i+1}. {', '.join(row_parts)}")
+
+                # Add note about additional results
+                if len(results) == 10 and extra_count > 0:
+                    output.append(
+                        f"\n(Showing top 10 results of {10 + extra_count} total)")
+
+                return "\n".join(output)
+
+        except Exception as e:
+            logger.error(f"Error executing query: {e}")
+            raise ValueError(f"Error executing query: {str(e)}")
+
     def _get_default_followup_questions(self) -> List[str]:
         return [
             "What are the most common topics in our calls from the last month?",
@@ -333,22 +493,57 @@ class CallAnalysisWorkflow:
     def _generate_followup_questions(self, question: str, response: str, conversation_id: str, tenant_code: str) -> List[str]:
         """Generate dynamic followup questions based on conversation context and call analysis patterns"""
         try:
-            # Get last 3 interactions for context
+            # Get last 3 interactions for enhanced context
             recent_interactions = self.conversation_history.get(
                 tenant_code, {}).get(conversation_id, [])[-3:]
+
+            # Build conversation history for context awareness
+            conversation_context = ""
+            for interaction in recent_interactions:
+                if 'question' in interaction and 'result' in interaction:
+                    conversation_context += f"Q: {interaction['question']}\nA: {interaction['result']}\n\n"
 
             # Analyze current response content
             response_lower = response.lower()
             current_q = question.lower()
 
-            # Extract current topics from response
-            topics_mentioned = []
+            # Extract numerical values for aggregation insights
+            numeric_values = {}
             for line in response.split('\n'):
-                if 'topic:' in line.lower():
-                    topic = line.split('topic:')[1].split(',')[0].strip()
-                    topics_mentioned.append(topic)
+                line_lower = line.lower()
+                # Look for percentages, counts, and other metrics
+                if '%' in line or any(metric in line_lower for metric in ['count', 'rate', 'average', 'total', 'mentions']):
+                    parts = line.split(':')
+                    if len(parts) == 2:
+                        key = parts[0].strip()
+                        value = parts[1].strip()
+                        numeric_values[key] = value
 
-            # Track key metrics and topics from response
+            # Extract current topics from response with more detailed parsing
+            topics_mentioned = []
+            issues_mentioned = []
+            for line in response.split('\n'):
+                line_lower = line.lower()
+                # Extract topics
+                if 'topic:' in line_lower or 'onderwerp:' in line_lower:
+                    try:
+                        parts = line.split(':')
+                        if len(parts) > 1:
+                            topic_part = parts[1].strip()
+                            # Clean up topic by removing trailing commas and metrics
+                            if ',' in topic_part:
+                                topic = topic_part.split(',')[0].strip()
+                            else:
+                                topic = topic_part
+                            topics_mentioned.append(topic)
+                    except Exception:
+                        continue
+
+                # Extract potential issues
+                if any(issue_word in line_lower for issue_word in ['issue', 'problem', 'complaint', 'negative', 'negatief', 'klacht', 'probleem']):
+                    issues_mentioned.append(line)
+
+            # Track key metrics and analysis dimensions from response
             metrics = {
                 'sentiment_mentioned': any(x in response_lower for x in ['sentiment', 'positief', 'negatief', 'satisfaction']),
                 'topics_mentioned': any(x in response_lower for x in ['topic', 'onderwerp']),
@@ -357,121 +552,141 @@ class CallAnalysisWorkflow:
                 'trends_mentioned': 'trend' in response_lower,
                 'technical_support': any(x in response_lower for x in ['technische ondersteuning', 'technical support']),
                 'customer_service': any(x in response_lower for x in ['klantenservice', 'customer service']),
-                'positive_rate': any(x in response_lower for x in ['positive_rate', 'satisfaction_rate'])
+                'positive_rate': any(x in response_lower for x in ['positive_rate', 'satisfaction_rate']),
+                'has_numbers': bool(numeric_values),
+                'has_issues': bool(issues_mentioned)
             }
 
-            # If we have specific topics in the response, prioritize topic-based questions
+            # Detect language (Dutch vs English)
+            is_dutch = any(dutch_word in current_q.lower() for dutch_word in
+                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
+
+            # If we have specific topics in the response with issues, prioritize issue-focused questions
+            if topics_mentioned and metrics['has_issues']:
+                main_topic = topics_mentioned[0]
+                if is_dutch:
+                    return [
+                        f"Wat zijn de top 3 specifieke problemen binnen het onderwerp '{main_topic}'?",
+                        f"Hoeveel klanten hebben deze problemen gemeld en wat is het percentage ten opzichte van het totaal?",
+                        f"Wat is de trend van deze problemen in vergelijking met vorige maand?"
+                    ]
+                else:
+                    return [
+                        f"What are the top 3 specific issues within the '{main_topic}' topic?",
+                        f"How many customers reported these issues and what percentage of total calls do they represent?",
+                        f"What is the trend of these issues compared to last month?"
+                    ]
+
+            # If we have specific topics in the response, prioritize topic insights with aggregates
             if topics_mentioned:
                 main_topic = topics_mentioned[0]
-                if not any("sentiment" in interaction.get('question', '').lower() for interaction in recent_interactions):
+                if is_dutch:
                     return [
-                        f"How has the sentiment changed for '{main_topic}'?",
-                        f"What are the common patterns in calls about '{main_topic}'?",
-                        "Which other topics are frequently mentioned together with these?"
+                        f"Wat zijn de belangrijkste klantproblemen binnen '{main_topic}' en hoe vaak komen deze voor?",
+                        f"Hoe is de verdeling van positieve vs. negatieve gesprekken over '{main_topic}'?",
+                        f"Welke subtopics komen het meest voor samen met '{main_topic}' in recente gesprekken?"
                     ]
-                return [
-                    f"What time patterns do we see for '{main_topic}'?",
-                    f"How does '{main_topic}' relate to other topics?",
-                    "What are the emerging subtopics in these conversations?"
-                ]
+                else:
+                    return [
+                        f"What are the key customer issues within '{main_topic}' and how frequently do they occur?",
+                        f"What's the distribution of positive vs. negative calls about '{main_topic}'?",
+                        f"Which subtopics most frequently appear with '{main_topic}' in recent conversations?"
+                    ]
 
-            # If response shows concerning metrics
+            # If response shows concerning metrics or negative sentiment
             if 'negative' in response_lower or 'negatief' in response_lower:
-                return [
-                    "What specific issues are causing negative sentiment?",
-                    "When do these negative interactions typically occur?",
-                    "Which agents handle these challenging calls?"
-                ]
+                if is_dutch:
+                    return [
+                        "Wat zijn de top 5 onderwerpen die negatief sentiment veroorzaken?",
+                        "Welke specifieke problemen leiden tot de meeste negatieve reacties?",
+                        "Is er een patroon in tijdstip of datum waarop deze negatieve gesprekken plaatsvinden?"
+                    ]
+                else:
+                    return [
+                        "What are the top 5 topics causing negative sentiment?",
+                        "Which specific issues lead to the most negative reactions?",
+                        "Is there a pattern in time or date when these negative conversations occur?"
+                    ]
 
-            # If response shows positive trends
-            if 'positive_rate: 100.00' in response_lower or 'positief' in response_lower:
-                return [
-                    "What best practices can we identify from these successful interactions?",
-                    "Which team members are handling these positive calls?",
-                    "How can we apply these successful approaches to other areas?"
-                ]
+            # If response shows positive trends with numerical insights
+            if (metrics['positive_rate'] or 'positief' in response_lower) and metrics['has_numbers']:
+                if is_dutch:
+                    return [
+                        "Welke onderwerpen hebben de hoogste klanttevredenheid en wat zijn de percentages?",
+                        "Wat is de trend van positieve gesprekken in de afgelopen 30 dagen?",
+                        "Welke best practices kunnen we identificeren uit deze positieve interacties?"
+                    ]
+                else:
+                    return [
+                        "Which topics have the highest customer satisfaction and what are the percentages?",
+                        "What is the trend of positive conversations over the past 30 days?",
+                        "What best practices can we identify from these positive interactions?"
+                    ]
 
-            # If looking at technical support
-            if metrics['technical_support']:
-                return [
-                    "What are the most common technical issues being resolved?",
-                    "How do resolution times vary by issue type?",
-                    "Which technical issues lead to follow-up calls?"
-                ]
+            # If analyzing trends with time context
+            if metrics['trends_mentioned'] and metrics['time_mentioned']:
+                if is_dutch:
+                    return [
+                        "Wat zijn de belangrijkste veranderingen in onderwerpen ten opzichte van vorige maand?",
+                        "Welke onderwerpen laten een stijgende trend zien en met hoeveel procent?",
+                        "Zijn er opkomende onderwerpen die extra aandacht nodig hebben?"
+                    ]
+                else:
+                    return [
+                        "What are the key topic changes compared to last month?",
+                        "Which topics show an increasing trend and by what percentage?",
+                        "Are there emerging topics that need additional attention?"
+                    ]
 
-            # If analyzing customer service
-            if metrics['customer_service']:
-                return [
-                    "What patterns emerge in customer escalations?",
-                    "How do different handling approaches affect outcomes?",
-                    "Which customer service scenarios need additional training?"
-                ]
+            # If looking at technical support with aggregates
+            if metrics['technical_support'] and metrics['has_numbers']:
+                if is_dutch:
+                    return [
+                        "Wat zijn de top 3 technische problemen en hun frequentie?",
+                        "Hoe verschilt de gemiddelde gespreksduur tussen verschillende technische problemen?",
+                        "Welke technische problemen worden het meest herhaald in vervolgoproepen?"
+                    ]
+                else:
+                    return [
+                        "What are the top 3 technical issues and their frequency?",
+                        "How does average call duration differ between technical issues?",
+                        "Which technical issues are most repeated in follow-up calls?"
+                    ]
 
-            # If analyzing trends
-            if metrics['trends_mentioned']:
-                return [
-                    "What factors are driving these trend changes?",
-                    "How do these trends compare to our targets?",
-                    "Which areas show the most significant shifts?"
-                ]
+            # If analyzing customer service with volume metrics
+            if metrics['customer_service'] and metrics['volume_mentioned']:
+                if is_dutch:
+                    return [
+                        "Wat zijn de meest voorkomende klantenservice-onderwerpen en hun volumeverdeling?",
+                        "Welke klantenservice-problemen leiden tot de langste gesprekken?",
+                        "Hoe verandert het gespreksvolume van klantenservice gedurende de dag?"
+                    ]
+                else:
+                    return [
+                        "What are the most common customer service topics and their volume distribution?",
+                        "Which customer service issues lead to the longest conversations?",
+                        "How does customer service call volume change throughout the day?"
+                    ]
 
-            # If looking at specific topics
-            if metrics['topics_mentioned']:
+            # Default questions based on aggregated insights for call analysis
+            if is_dutch:
                 return [
-                    "How do handling times vary across these topics?",
-                    "Which topics most often lead to escalations?",
-                    "What training needs do these topics suggest?"
+                    "Wat zijn de top 5 meest besproken onderwerpen en hun relatieve percentages?",
+                    "Welke gesprekstrends hebben we gezien in de afgelopen twee weken?",
+                    "Hoe is de verdeling van positieve, neutrale en negatieve gesprekken per onderwerp?"
                 ]
-
-            # Default questions based on call analysis patterns
-            return [
-                "How do these patterns affect our service quality?",
-                "What operational changes could improve these metrics?",
-                "Which areas need additional agent training?"
-            ]
+            else:
+                return [
+                    "What are the top 5 most discussed topics and their relative percentages?",
+                    "What call trends have we seen over the past two weeks?",
+                    "How is the distribution of positive, neutral, and negative calls per topic?"
+                ]
 
         except Exception as e:
             logger.error(f"Error generating follow-up questions: {e}")
+            # Default fallback questions
             return [
-                "What other call patterns should we investigate?",
-                "How can we improve our handling of these calls?",
-                "What additional training might be helpful?"
+                "What are the most common topics in our calls from the last month?",
+                "Which specific issues appear most frequently in customer calls?",
+                "What percentage of calls show positive vs. negative sentiment?"
             ]
-
-    async def execute_query(self, sql: str, params: dict, db_session: Session) -> str:
-        """Execute SQL query and format results"""
-        try:
-            # Log query execution
-            logger.info(f"Executing SQL with params {params}:\n{sql}")
-
-            # Execute query
-            result = db_session.execute(text(sql), params)
-            rows = result.fetchall()
-            column_names = result.keys()
-
-            # Format results into readable text
-            if not rows:
-                logger.info("Query returned no results")
-                return "No results found for your query."
-
-            # Convert rows to list of dicts for easier handling
-            results = [dict(zip(column_names, row)) for row in rows]
-
-            # Log result count
-            logger.info(f"Query returned {len(results)} rows")
-
-            # Format output based on number of rows
-            if len(results) == 1:
-                # Single row result
-                return "\n".join(f"{k}: {v}" for k, v in results[0].items())
-            else:
-                # Multiple row result
-                output = []
-                for row in results:
-                    row_str = ", ".join(f"{k}: {v}" for k, v in row.items())
-                    output.append(f"- {row_str}")
-                return "\n".join(output)
-
-        except Exception as e:
-            logger.error(f"Error executing query: {e}")
-            raise ValueError(f"Error executing query: {str(e)}")

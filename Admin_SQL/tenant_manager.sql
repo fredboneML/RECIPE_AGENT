@@ -8,7 +8,7 @@ VALUES ('stroevemotorsport', 'stroevemotorsport');
 -- 1. Insert the new user
 INSERT INTO users (username, tenant_code, role)
 VALUES ('newuser_mcre', 'maccare', 'read_only');
-37f966eff069
+
 -- 2. Immediately get the generated password
 SELECT * FROM get_generated_password('newuser_mcre');
 
@@ -21,3 +21,7 @@ VALUES ('newuser', 'newtenant');
 INSERT INTO users (username, tenant_code, role) 
 VALUES ('poweruser', 'newtenant', 'admin');
 -- Trigger handles id and password generation
+
+37f966eff069
+
+d1dbface5d2b #debian

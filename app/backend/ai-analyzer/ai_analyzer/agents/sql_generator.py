@@ -48,9 +48,9 @@ class SQLGeneratorAgent(BaseAgent):
                     content=None
                 )
 
-            # Create the prompt with explicit tenant context
+            # Create the prompt with explicit tenant context and enhanced aggregation instructions
             prompt = ChatPromptTemplate.from_template("""
-                You are a database query generator for a multi-tenant system.
+                You are a database query generator for a multi-tenant system specialized in call center analysis.
                 Current tenant: {tenant_code}
 
                 {base_context}
@@ -79,7 +79,7 @@ class SQLGeneratorAgent(BaseAgent):
                     AND t.tenant_code = :tenant_code
                 )
 
-                2. For trending topics, always use this pattern:
+                2. For trending topics with issue analysis, always use this pattern:
                 WITH base_data AS (
                     -- Base CTE as shown above
                 ),
@@ -89,16 +89,59 @@ class SQLGeneratorAgent(BaseAgent):
                         COUNT(*) as mention_count,
                         COUNT(*) FILTER (WHERE processing_date >= CURRENT_DATE - INTERVAL '7 days') as recent_mentions,
                         COUNT(*) FILTER (WHERE clean_sentiment = 'positief') as positive_mentions,
+                        COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') as negative_mentions,
+                        COUNT(*) FILTER (WHERE clean_sentiment = 'neutral') as neutral_mentions,
+                        ROUND(COUNT(*) FILTER (WHERE clean_sentiment = 'positief') * 100.0 / NULLIF(COUNT(*), 0), 2) as positive_percentage,
+                        ROUND(COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') * 100.0 / NULLIF(COUNT(*), 0), 2) as negative_percentage,
                         ROUND(AVG(CASE 
                             WHEN clean_sentiment = 'positief' THEN 1
                             WHEN clean_sentiment = 'negatief' THEN -1
                             ELSE 0 
-                        END)::numeric, 2) as sentiment_score
+                        END)::numeric, 2) as sentiment_score,
+                        AVG(call_duration_secs) as avg_call_duration,
+                        MIN(processing_date) as first_occurrence,
+                        MAX(processing_date) as last_occurrence
                     FROM base_data
                     WHERE clean_topic IS NOT NULL
                     GROUP BY clean_topic
                     HAVING COUNT(*) > 5
                     ORDER BY recent_mentions DESC, mention_count DESC
+                )
+
+                3. For time-based analysis, include percentage changes:
+                WITH base_data AS (
+                    -- Base CTE as shown above
+                ),
+                time_periods AS (
+                    SELECT
+                        clean_topic,
+                        clean_sentiment,
+                        CASE
+                            WHEN processing_date >= CURRENT_DATE - INTERVAL '7 days' THEN 'current_week'
+                            WHEN processing_date >= CURRENT_DATE - INTERVAL '14 days' THEN 'previous_week'
+                            WHEN processing_date >= CURRENT_DATE - INTERVAL '30 days' THEN 'current_month'
+                            WHEN processing_date >= CURRENT_DATE - INTERVAL '60 days' THEN 'previous_month'
+                            ELSE 'older'
+                        END as time_period,
+                        COUNT(*) as period_count
+                    FROM base_data
+                    GROUP BY clean_topic, clean_sentiment, time_period
+                ),
+                period_comparisons AS (
+                    SELECT
+                        clean_topic,
+                        clean_sentiment,
+                        SUM(CASE WHEN time_period = 'current_week' THEN period_count ELSE 0 END) as current_week_count,
+                        SUM(CASE WHEN time_period = 'previous_week' THEN period_count ELSE 0 END) as previous_week_count,
+                        CASE 
+                            WHEN SUM(CASE WHEN time_period = 'previous_week' THEN period_count ELSE 0 END) > 0 
+                            THEN ROUND((SUM(CASE WHEN time_period = 'current_week' THEN period_count ELSE 0 END) - 
+                                      SUM(CASE WHEN time_period = 'previous_week' THEN period_count ELSE 0 END)) * 100.0 / 
+                                      NULLIF(SUM(CASE WHEN time_period = 'previous_week' THEN period_count ELSE 0 END), 0), 2)
+                            ELSE NULL
+                        END as weekly_percentage_change
+                    FROM time_periods
+                    GROUP BY clean_topic, clean_sentiment
                 )
 
                 Available tables: {table_info}
@@ -108,7 +151,10 @@ class SQLGeneratorAgent(BaseAgent):
                 1. MUST start with the exact base_data CTE shown above
                 2. MUST keep the tenant_code filter exactly as shown
                 3. MUST use clean_topic and clean_sentiment for consistency
-                4. Should limit results appropriately (e.g., TOP N, LIMIT)
+                4. INCLUDE percentages, aggregated metrics, and counts whenever possible
+                5. Include insights about specific issues within topics when relevant
+                6. ALWAYS include trend comparisons or time-based patterns when possible
+                7. Limit results appropriately (e.g., TOP N, LIMIT)
 
                 Return only the SQL query, nothing else.
             """)
