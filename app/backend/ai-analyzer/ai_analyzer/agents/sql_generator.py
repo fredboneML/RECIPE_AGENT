@@ -172,7 +172,7 @@ class SQLGeneratorAgent(BaseAgent):
 
             # Extract and validate SQL
             sql = result.content if hasattr(result, 'content') else str(result)
-            if not self._validate_tenant_filtering(sql, tenant_code):
+            if not self.validate_sql(sql, tenant_code):
                 return AgentResponse(
                     success=False,
                     content=None,
@@ -193,45 +193,73 @@ class SQLGeneratorAgent(BaseAgent):
                 error_message=str(e)
             )
 
-    def _validate_tenant_filtering(self, sql: str, tenant_code: str) -> bool:
-        """Strictly validate tenant filtering in SQL"""
+    def validate_sql(self, sql, tenant_code):
+        """Validate SQL for security and correctness"""
         try:
-            # Convert to uppercase for case-insensitive matching
-            sql_upper = sql.upper()
+            # Check for basic SQL injection patterns
+            if any(pattern in sql.lower() for pattern in [
+                "drop table", "drop database", "truncate table",
+                "delete from", "update ", "insert into", "alter table"
+            ]):
+                return False, "SQL contains disallowed modification statements"
 
-            # Define required patterns with simpler tenant filter pattern
-            required_patterns = [
-                r"WITH\s+BASE_DATA\s+AS\s*\(",  # Base CTE
-                r"T\.TENANT_CODE\s*=\s*:TENANT_CODE",  # Simplified tenant filtering
-                f"FROM\s+TRANSCRIPTION_{tenant_code.upper()}\s+T"  # Table name
-            ]
+            # Check for tenant isolation
+            tenant_filter_pattern = r"T\.TENANT_CODE\s*=\s*:TENANT_CODE"
+            has_tenant_filter = bool(
+                re.search(tenant_filter_pattern, sql, re.IGNORECASE))
 
-            # Check each pattern and collect results
-            validations = [bool(re.search(pattern, sql_upper))
-                           for pattern in required_patterns]
+            # Check for base CTE pattern
+            has_base_cte = "WITH base_data AS (" in sql
 
-            # Log validation details with more context
-            logger.info(f"""SQL Validation Details:
-                Base CTE present: {validations[0]}
-                Tenant filter present: {validations[1]} (pattern: {required_patterns[1]})
-                Correct table name: {validations[2]}
-                SQL Being Validated:
-                {sql}
-            """)
+            # Check for correct table name
+            table_name = f"transcription_{tenant_code}"
+            has_correct_table = table_name in sql
 
-            if not all(validations):
-                logger.error(f"""Validation failed:
-                    Failed patterns:
-                    {[pattern for i, pattern in enumerate(required_patterns) if not validations[i]]}
-                    SQL:
-                    {sql}
-                """)
+            # Check for column errors and fix them
+            column_errors = []
 
-            return all(validations)
+            # Make sure clid is included in the base_data CTE if it's used later
+            if "clid" in sql and "clid" not in sql.split("base_data AS (")[1].split(")")[0]:
+                # Add clid to the base_data CTE
+                base_cte_pattern = r"(WITH\s+base_data\s+AS\s*\(\s*SELECT\s+[^)]+)"
+                base_cte_match = re.search(
+                    base_cte_pattern, sql, re.IGNORECASE | re.DOTALL)
+
+                if base_cte_match:
+                    # Check if we need to add t.clid to the SELECT list
+                    select_part = base_cte_match.group(1)
+                    if "t.clid" not in select_part:
+                        # Find the last column in the SELECT list
+                        if "," in select_part:
+                            # Add t.clid after the last column
+                            modified_select = select_part.rstrip() + ",\n        t.clid"
+                            sql = sql.replace(select_part, modified_select)
+                            column_errors.append(
+                                "Added missing column 't.clid' to base_data CTE")
+
+            # Log validation details
+            logger.info(f"SQL Validation Details:\n\
+                    Base CTE present: {has_base_cte}\n\
+                    Tenant filter present: {has_tenant_filter} (pattern: {tenant_filter_pattern})\n\
+                    Correct table name: {has_correct_table}\n\
+                    SQL Being Validated:\n\
+                    {sql}\n\
+                    {column_errors if column_errors else ''}")
+
+            if not has_base_cte:
+                return False, "SQL must use a base_data CTE for consistent tenant isolation"
+
+            if not has_tenant_filter:
+                return False, "SQL must include tenant isolation with t.tenant_code = :tenant_code"
+
+            if not has_correct_table:
+                return False, f"SQL must use the correct table name: {table_name}"
+
+            return True, sql
 
         except Exception as e:
-            logger.error(f"Error in SQL validation: {str(e)}")
-            return False
+            logger.error(f"Error validating SQL: {e}")
+            return False, f"SQL validation error: {str(e)}"
 
     def _suggest_reformulation(self, question: str) -> str:
         """Suggest a reformulation of the question"""
@@ -318,7 +346,7 @@ class SQLGeneratorAgent(BaseAgent):
                         subsequent_ctes, fixed_ctes)
 
             # Validate the SQL
-            if not self._validate_tenant_filtering(generated_sql, tenant_code):
+            if not self.validate_sql(generated_sql, tenant_code):
                 logger.error(
                     f"Invalid SQL generated for tenant {tenant_code}: {generated_sql}")
                 raise ValueError(
