@@ -458,14 +458,13 @@ class CallAnalysisWorkflow:
                         f"{k}: {v}" for k, v in zip(column_names, row))
                     output.append(f"{i}. {row_str}")
 
-                # Add note if there are more rows
-                if len(rows) > 10:
-                    extra_count = len(rows) - 10
-                    output.append(
-                        f"\n(Showing top 10 results of {len(rows)} total)")
+            # Add note if there are more rows
+            if len(rows) > 10:
+                extra_count = len(rows) - 10
+                output.append(
+                    f"\n(Showing top 10 results of {len(rows)} total)")
 
-                return "\n".join(output)
-
+            return "\n".join(output)
         except Exception as e:
             logger.error(f"Error executing query: {e}")
             raise ValueError(f"Error executing query: {str(e)}")

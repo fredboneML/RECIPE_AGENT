@@ -248,6 +248,57 @@ class SQLGeneratorAgent(BaseAgent):
                             column_errors.append(
                                 "Added missing column 't.clid' to base_data CTE")
 
+            # Enhance phone number queries to check both telephone_number and clid
+            if "telephone_number" in sql:
+                # Find phone number equality or LIKE check with more flexible pattern matching
+                phone_patterns = [
+                    r'(telephone_number\s*=\s*[\'"]([^\'"]*)[\'"]\s*(?:OR|AND|;|$|\)))',
+                    r'(telephone_number\s*LIKE\s*[\'"]([^\'"]*)[\'"]\s*(?:OR|AND|;|$|\)))'
+                ]
+
+                for pattern in phone_patterns:
+                    phone_match = re.search(pattern, sql)
+                    if phone_match:
+                        phone_condition = phone_match.group(1)
+                        phone_number = phone_match.group(2)
+
+                        # Clean the phone number by removing special characters
+                        clean_phone = re.sub(r'[/\s-]', '', phone_number)
+
+                        # Replace with OR condition using LIKE with both original and cleaned number
+                        new_condition = f"(telephone_number LIKE '%{phone_number}%' OR clid LIKE '%{phone_number}%' OR telephone_number LIKE '%{clean_phone}%' OR clid LIKE '%{clean_phone}%')"
+
+                        # Make sure we're replacing the exact match
+                        sql = sql.replace(phone_condition, new_condition)
+                        column_errors.append(
+                            f"Enhanced phone search to use LIKE with both telephone_number and clid for '{phone_number}' and cleaned version '{clean_phone}'")
+
+                        # Add call_direction to the output if not already included
+                        if "call_direction" not in sql.split("SELECT")[-1]:
+                            # Find the SELECT statement
+                            select_pattern = r'(SELECT\s+(?:[^;]+))\s+FROM'
+                            select_match = re.search(
+                                select_pattern, sql, re.IGNORECASE)
+
+                            if select_match:
+                                select_clause = select_match.group(1)
+                                if "COUNT(*)" in select_clause:
+                                    # For count queries, add call_direction as a group by
+                                    new_select = select_clause.replace(
+                                        "COUNT(*)", "call_direction, COUNT(*)")
+                                    sql = sql.replace(
+                                        select_clause, new_select)
+
+                                    # Add GROUP BY if not present
+                                    if "GROUP BY" not in sql:
+                                        sql = sql.replace(
+                                            ";", " GROUP BY call_direction;")
+                                    column_errors.append(
+                                        "Added call_direction to phone number query results")
+
+                        # We found and replaced a pattern, so break the loop
+                        break
+
             # Replace transcription with summary in final output
             if "transcription" in sql and "summary" in sql:
                 # Replace transcription with summary in SELECT clauses outside of base_data CTE
