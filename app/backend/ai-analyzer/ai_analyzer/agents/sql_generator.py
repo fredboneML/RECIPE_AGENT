@@ -262,22 +262,65 @@ class SQLGeneratorAgent(BaseAgent):
                             column_errors.append(
                                 "Added filter for NULL or empty topics")
 
-            # Fix HAVING clauses in the final SELECT that reference clean_topic after it's been renamed
-            if "clean_topic as topic" in sql:
-                # Find the final SELECT statement
-                final_select_pos = sql.rfind("SELECT")
-                if final_select_pos > 0:
-                    # Check if there's a HAVING clause in the final SELECT
-                    final_having_pos = sql.rfind("HAVING", final_select_pos)
-                    if final_having_pos > 0:
-                        # Replace clean_topic with topic in the final HAVING clause
-                        sql_before = sql[:final_having_pos]
-                        sql_after = sql[final_having_pos:]
-                        # Only replace clean_topic with topic in the HAVING clause
-                        sql_after = sql_after.replace("clean_topic", "topic")
+            # Fix any HAVING clauses in the final SELECT
+            final_select_pos = sql.rfind("SELECT")
+            if final_select_pos > 0:
+                # Check if there's a HAVING clause in the final SELECT
+                final_having_pos = sql.rfind("HAVING", final_select_pos)
+                if final_having_pos > 0:
+                    # Just remove the entire HAVING clause
+                    sql_before = sql[:final_having_pos]
+                    # Find the end of the HAVING clause (next ORDER BY, LIMIT, or end of string)
+                    having_end_match = re.search(
+                        r'(ORDER BY|LIMIT|;|$)', sql[final_having_pos:], re.IGNORECASE)
+                    if having_end_match:
+                        having_end_pos = final_having_pos + having_end_match.start()
+                        sql_after = sql[having_end_pos:]
                         sql = sql_before + sql_after
                         column_errors.append(
-                            "Fixed column reference in final HAVING clause")
+                            "Removed problematic HAVING clause for compatibility")
+
+            # Add a function to improve topic matching in WHERE clauses
+            def improve_topic_matching(sql):
+                """Replace exact topic matches with LIKE patterns for better results"""
+                # Find WHERE clauses with exact topic matching
+                where_pattern = r"(WHERE\s+clean_topic\s*=\s*'[^']+')"
+                where_matches = re.findall(where_pattern, sql, re.IGNORECASE)
+
+                for match in where_matches:
+                    # Extract the topic value
+                    topic_match = re.search(r"'([^']+)'", match)
+                    if topic_match:
+                        topic = topic_match.group(1)
+                        # Create a LIKE pattern with wildcards
+                        new_where = match.replace(
+                            f"clean_topic = '{topic}'",
+                            f"clean_topic LIKE '%{topic}%'"
+                        )
+                        sql = sql.replace(match, new_where)
+                        column_errors.append(
+                            f"Replaced exact topic match with LIKE pattern for better results"
+                        )
+
+                return sql
+
+            # Add this call in the validate_sql method before returning the validated SQL
+            if "WHERE clean_topic =" in sql:
+                sql = improve_topic_matching(sql)
+                column_errors.append(
+                    "Improved topic matching with LIKE patterns")
+
+            # Fix incorrect AND after FROM clause in final SELECT
+            if re.search(r'SELECT\s+\*\s+FROM\s+\w+\s+AND\s+', sql, re.IGNORECASE):
+                # Replace AND with WHERE
+                sql = re.sub(
+                    r'(SELECT\s+\*\s+FROM\s+\w+)\s+AND\s+',
+                    r'\1 WHERE ',
+                    sql,
+                    flags=re.IGNORECASE
+                )
+                column_errors.append(
+                    "Fixed incorrect AND syntax in final SELECT")
 
             return AgentResponse(
                 success=True,
@@ -577,23 +620,6 @@ class SQLGeneratorAgent(BaseAgent):
                     )
                     column_errors.append(
                         "Renamed 'clean_topic' to 'topic' in output for better readability")
-
-            # Fix HAVING clauses in the final SELECT that reference clean_topic after it's been renamed
-            if "clean_topic as topic" in sql.lower():
-                # Find the final SELECT statement
-                final_select_pos = sql.rfind("SELECT")
-                if final_select_pos > 0:
-                    # Check if there's a HAVING clause in the final SELECT
-                    final_having_pos = sql.rfind("HAVING", final_select_pos)
-                    if final_having_pos > 0:
-                        # Replace clean_topic with topic in the final HAVING clause
-                        sql_before = sql[:final_having_pos]
-                        sql_after = sql[final_having_pos:]
-                        # Only replace clean_topic with topic in the HAVING clause
-                        sql_after = sql_after.replace("clean_topic", "topic")
-                        sql = sql_before + sql_after
-                        column_errors.append(
-                            "Fixed column reference in final HAVING clause")
 
             # Log validation details
             logger.info(f"SQL Validation Details:\n\

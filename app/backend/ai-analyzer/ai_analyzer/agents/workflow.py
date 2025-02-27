@@ -67,11 +67,11 @@ class CallAnalysisWorkflow:
         context = base_context or ""
         return f"""
         {context}
-        
+
         CRITICAL TENANT ISOLATION RULES:
         1. EVERY query MUST use this exact base CTE structure:
         WITH base_data AS (
-            SELECT 
+            SELECT
                 t.id,
                 t.transcription_id,
                 t.transcription,
@@ -92,16 +92,16 @@ class CallAnalysisWorkflow:
             AND t.tenant_code = :tenant_code
         ),
         topic_trends AS (
-            SELECT 
+            SELECT
                 clean_topic as topic,
                 COUNT(*) as mention_count,
                 COUNT(*) FILTER (WHERE processing_date >= CURRENT_DATE - INTERVAL '7 days') as recent_mentions,
                 COUNT(*) FILTER (WHERE clean_sentiment = 'positief') as positive_mentions,
                 COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') as negative_mentions,
-                ROUND(AVG(CASE 
+                ROUND(AVG(CASE
                     WHEN clean_sentiment = 'positief' THEN 1
                     WHEN clean_sentiment = 'negatief' THEN -1
-                    ELSE 0 
+                    ELSE 0
                 END)::numeric, 2) as sentiment_score
             FROM base_data
             WHERE clean_topic IS NOT NULL
@@ -116,13 +116,13 @@ class CallAnalysisWorkflow:
         return """
         Example 1 - Topics in positive calls:
         WITH base_data AS (...)
-        SELECT clean_topic, COUNT(*) as mentions, 
+        SELECT clean_topic, COUNT(*) as mentions,
         COUNT(*) FILTER (WHERE clean_sentiment = 'positief') as positive_count
         FROM base_data GROUP BY clean_topic;
 
         Example 2 - Sentiment trends:
         WITH base_data AS (...)
-        SELECT clean_topic, clean_sentiment, COUNT(*) 
+        SELECT clean_topic, clean_sentiment, COUNT(*)
         FROM base_data GROUP BY clean_topic, clean_sentiment;
         """
 
@@ -143,7 +143,7 @@ class CallAnalysisWorkflow:
             return f"""
             Initial Analysis Context:
             {self.example_queries['result']}
-            
+
             Example Queries:
             {self.example_queries['sql']}
             """
@@ -170,14 +170,26 @@ class CallAnalysisWorkflow:
             if not tenant_code:
                 raise ValueError("Tenant code is required")
 
-            # Detect language (Dutch vs English)
-            is_dutch = any(dutch_word in question.lower() for dutch_word in
-                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp',
+            # Detect language (Dutch vs English) using word counting
+            words = question.lower().split()
+            total_words = len(words)
+
+            # Count English words
+            english_words = ['what', 'which', 'how', 'where', 'when', 'who', 'why', 'did', 'does', 'has', 'had', 'it', 'there', 'they', 'show',
+                             'is', 'are', 'was', 'were', 'the', 'this', 'that', 'these', 'those', 'our', 'your', 'an', 'a', 'top', 'give', 'do']
+            nb_en = sum(1 for word in words if word in english_words)
+
+            # Count Dutch words
+            dutch_words = ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp',
                            'kun', 'kunt', 'je', 'jij', 'u', 'bent', 'zijn', 'waar', 'wat', 'wie', 'hoe',
-                            'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
-                            'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet', 'met',
-                            'over', 'door', 'om', 'op', 'voor', 'na', 'bij', 'aan', 'in', 'uit', 'te',
-                            'bedrijf', 'waarom', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal'])
+                           'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
+                           'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet', 'met',
+                           'over', 'door', 'om', 'op', 'voor', 'na', 'bij', 'aan', 'in', 'uit', 'te',
+                           'bedrijf', 'waarom', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal']
+            nb_dutch = sum(1 for word in words if word in dutch_words)
+
+            # Set language based on majority
+            is_dutch = nb_dutch > nb_en
 
             # Initialize tenant conversation history if needed
             if tenant_code not in self.conversation_history:
@@ -367,7 +379,7 @@ class CallAnalysisWorkflow:
                 })
             except Exception as e:
                 logger.error(f"Error storing conversation history: {str(e)}")
-                # Continue even if history storage fails
+            # Continue even if history storage fails
 
             # Generate followup questions with context
             followup_questions = self._generate_followup_questions(
@@ -379,7 +391,8 @@ class CallAnalysisWorkflow:
 
             # Record performance data for successful query
             end_time = datetime.utcnow()
-            response_time = int((end_time - start_time).total_seconds() * 1000)
+            response_time = int(
+                (end_time - start_time).total_seconds() * 1000)
 
             self._record_query_performance(
                 db_session,
@@ -402,7 +415,8 @@ class CallAnalysisWorkflow:
 
             # Record performance data for failed query
             end_time = datetime.utcnow()
-            response_time = int((end_time - start_time).total_seconds() * 1000)
+            response_time = int(
+                (end_time - start_time).total_seconds() * 1000)
             error_message = str(e)
 
             try:
@@ -463,13 +477,13 @@ class CallAnalysisWorkflow:
                         f"{k}: {v}" for k, v in zip(column_names, row))
                     output.append(f"{i}. {row_str}")
 
-            # Add note if there are more rows
-            if len(rows) > 10:
-                extra_count = len(rows) - 10
-                output.append(
-                    f"\n(Showing top 10 results of {len(rows)} total)")
+                # Add note if there are more rows
+                if len(rows) > 10:
+                    extra_count = len(rows) - 10
+                    output.append(
+                        f"\n(Showing top 10 results of {len(rows)} total)")
 
-            return "\n".join(output)
+                return "\n".join(output)
         except Exception as e:
             logger.error(f"Error executing query: {e}")
             raise ValueError(f"Error executing query: {str(e)}")
@@ -603,9 +617,9 @@ class CallAnalysisWorkflow:
                     except Exception:
                         continue
 
-                # Extract potential issues
-                if any(issue_word in line_lower for issue_word in ['issue', 'problem', 'complaint', 'negative', 'negatief', 'klacht', 'probleem']):
-                    issues_mentioned.append(line)
+            # Extract potential issues
+            if any(issue_word in line_lower for issue_word in ['issue', 'problem', 'complaint', 'negative', 'negatief', 'klacht', 'probleem']):
+                issues_mentioned.append(line)
 
             # Track key metrics and analysis dimensions from response
             metrics = {
@@ -672,60 +686,60 @@ class CallAnalysisWorkflow:
             if (metrics['positive_rate'] or 'positief' in response_lower) and metrics['has_numbers']:
                 if is_dutch:
                     return [
-                        "Welke onderwerpen hebben de hoogste klanttevredenheid en wat zijn de percentages?",
-                        "Wat is de trend van positieve gesprekken in de afgelopen 30 dagen?",
-                        "Welke best practices kunnen we identificeren uit deze positieve interacties?"
+                        f"Welke onderwerpen hebben de hoogste klanttevredenheid en wat zijn de percentages?",
+                        f"Wat is de trend van positieve gesprekken in de afgelopen 30 dagen?",
+                        f"Welke best practices kunnen we identificeren uit deze positieve interacties?"
                     ]
                 else:
                     return [
-                        "Which topics have the highest customer satisfaction and what are the percentages?",
-                        "What is the trend of positive conversations over the past 30 days?",
-                        "What best practices can we identify from these positive interactions?"
+                        f"Which topics have the highest customer satisfaction and what are the percentages?",
+                        f"What is the trend of positive conversations over the past 30 days?",
+                        f"What best practices can we identify from these positive interactions?"
                     ]
 
             # If analyzing trends with time context
             if metrics['trends_mentioned'] and metrics['time_mentioned']:
                 if is_dutch:
                     return [
-                        "Wat zijn de belangrijkste veranderingen in onderwerpen ten opzichte van vorige maand?",
-                        "Welke onderwerpen laten een stijgende trend zien en met hoeveel procent?",
-                        "Zijn er opkomende onderwerpen die extra aandacht nodig hebben?"
+                        f"Wat zijn de belangrijkste veranderingen in onderwerpen ten opzichte van vorige maand?",
+                        f"Welke onderwerpen laten een stijgende trend zien en met hoeveel procent?",
+                        f"Zijn er opkomende onderwerpen die extra aandacht nodig hebben?"
                     ]
                 else:
                     return [
-                        "What are the key topic changes compared to last month?",
-                        "Which topics show an increasing trend and by what percentage?",
-                        "Are there emerging topics that need additional attention?"
+                        f"What are the key topic changes compared to last month?",
+                        f"Which topics show an increasing trend and by what percentage?",
+                        f"Are there emerging topics that need additional attention?"
                     ]
 
             # If looking at technical support with aggregates
             if metrics['technical_support'] and metrics['has_numbers']:
                 if is_dutch:
                     return [
-                        "Wat zijn de top 3 technische problemen en hun frequentie?",
-                        "Hoe verschilt de gemiddelde gespreksduur tussen verschillende technische problemen?",
-                        "Welke technische problemen worden het meest herhaald in vervolgoproepen?"
+                        f"Wat zijn de top 3 technische problemen en hun frequentie?",
+                        f"Hoe verschilt de gemiddelde gespreksduur tussen verschillende technische problemen?",
+                        f"Welke technische problemen worden het meest herhaald in vervolgoproepen?"
                     ]
                 else:
                     return [
-                        "What are the top 3 technical issues and their frequency?",
-                        "How does average call duration differ between technical issues?",
-                        "Which technical issues are most repeated in follow-up calls?"
+                        f"What are the top 3 technical issues and their frequency?",
+                        f"How does average call duration differ between technical issues?",
+                        f"Which technical issues are most repeated in follow-up calls?"
                     ]
 
             # If analyzing customer service with volume metrics
             if metrics['customer_service'] and metrics['volume_mentioned']:
                 if is_dutch:
                     return [
-                        "Wat zijn de meest voorkomende klantenservice-onderwerpen en hun volumeverdeling?",
-                        "Welke klantenservice-problemen leiden tot de langste gesprekken?",
-                        "Hoe verandert het gespreksvolume van klantenservice gedurende de dag?"
+                        f"Wat zijn de meest voorkomende klantenservice-onderwerpen en hun volumeverdeling?",
+                        f"Welke klantenservice-problemen leiden tot de langste gesprekken?",
+                        f"Hoe verandert het gespreksvolume van klantenservice gedurende de dag?"
                     ]
                 else:
                     return [
-                        "What are the most common customer service topics and their volume distribution?",
-                        "Which customer service issues lead to the longest conversations?",
-                        "How does customer service call volume change throughout the day?"
+                        f"What are the most common customer service topics and their volume distribution?",
+                        f"Which customer service issues lead to the longest conversations?",
+                        f"How does customer service call volume change throughout the day?"
                     ]
 
             # Default questions based on aggregated insights for call analysis
