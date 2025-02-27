@@ -160,9 +160,24 @@ class CallAnalysisWorkflow:
 
     async def process_user_question(self, question: str, conversation_id: str, db_session: Session, tenant_code: str):
         """Process user question with conversation history"""
+        start_time = datetime.utcnow()
+        was_answered = False
+        error_message = None
+        tokens_used = 0
+        topic_category = None
+
         try:
             if not tenant_code:
                 raise ValueError("Tenant code is required")
+
+            # Detect language (Dutch vs English)
+            is_dutch = any(dutch_word in question.lower() for dutch_word in
+                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp',
+                           'kun', 'kunt', 'je', 'jij', 'u', 'bent', 'zijn', 'waar', 'wat', 'wie', 'hoe',
+                            'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
+                            'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet', 'met',
+                            'over', 'door', 'om', 'op', 'voor', 'na', 'bij', 'aan', 'in', 'uit', 'te',
+                            'bedrijf', 'waarom', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal'])
 
             # Initialize tenant conversation history if needed
             if tenant_code not in self.conversation_history:
@@ -175,6 +190,64 @@ class CallAnalysisWorkflow:
                 self.conversation_history[tenant_code][conversation_id].append(
                     self.example_queries)
 
+            # Check cache for this exact question in this tenant
+            if self.cache_manager:
+                try:
+                    # Pass conversation_id to get_query_result
+                    cached_result = self.cache_manager.get_query_result(
+                        question, tenant_code, conversation_id)
+                    if cached_result:
+                        logger.info(f"Cache hit for question: {question}")
+
+                        # Store this interaction in conversation history
+                        try:
+                            self.conversation_history[tenant_code][conversation_id].append({
+                                "question": question,
+                                "sql": cached_result.get("sql", ""),
+                                "result": cached_result.get("result", "")
+                            })
+                        except Exception as e:
+                            logger.error(
+                                f"Error storing cached result in conversation history: {str(e)}")
+
+                        # Generate followup questions with context
+                        followup_questions = self._generate_followup_questions(
+                            question,
+                            cached_result.get("result", ""),
+                            conversation_id,
+                            tenant_code
+                        )
+
+                        # Record performance data for cached query
+                        was_answered = True
+                        end_time = datetime.utcnow()
+                        response_time = int(
+                            (end_time - start_time).total_seconds() * 1000)
+
+                        # Try to extract topic category from the question
+                        topic_category = self._extract_topic_category(question)
+
+                        self._record_query_performance(
+                            db_session,
+                            question,
+                            was_answered,
+                            None,
+                            response_time,
+                            topic_category,
+                            tokens_used,
+                            True  # is_cached
+                        )
+
+                        return {
+                            'success': True,
+                            'response': cached_result.get("result", ""),
+                            'followup_questions': followup_questions,
+                            'cached': True
+                        }
+                except Exception as e:
+                    logger.warning(f"Cache lookup failed: {str(e)}")
+                    # Continue with normal processing if cache lookup fails
+
             # Get previous context for this conversation
             previous_context = self._get_conversation_context(
                 conversation_id, tenant_code)
@@ -186,17 +259,37 @@ class CallAnalysisWorkflow:
                     tenant_code=tenant_code,
                     conversation_context=previous_context
                 )
+                # Estimate tokens used for the SQL generation
+                tokens_used += len(question) // 4 + len(previous_context) // 4
             except Exception as e:
                 error_str = str(e).lower()
+                error_message = error_str
+
+                end_time = datetime.utcnow()
+                response_time = int(
+                    (end_time - start_time).total_seconds() * 1000)
+                topic_category = self._extract_topic_category(question)
+
+                self._record_query_performance(
+                    db_session,
+                    question,
+                    False,
+                    error_message,
+                    response_time,
+                    topic_category,
+                    tokens_used
+                )
+
                 if 'context length' in error_str and 'exceed' in error_str:
+                    error_msg = "Conversation context limit reached. Please start a new conversation to continue analysis." if not is_dutch else "Limiet van gesprekscontext bereikt. Start een nieuw gesprek om de analyse voort te zetten."
                     return {
                         'success': False,
-                        'error': 'Conversation context limit reached. Please start a new conversation to continue analysis.',
+                        'error': error_msg,
                         'context_exceeded': True,  # Flag to indicate context length issue
                         'followup_questions': [
-                            "Start a new conversation to analyze recent trends",
-                            "Begin fresh analysis of key metrics",
-                            "Initiate new topic analysis"
+                            "Start een nieuw gesprek om recente trends te analyseren" if is_dutch else "Start a new conversation to analyze recent trends",
+                            "Begin een nieuwe analyse van belangrijke metrieken" if is_dutch else "Begin fresh analysis of key metrics",
+                            "Start een nieuwe topic-analyse" if is_dutch else "Initiate new topic analysis"
                         ]
                     }
                 raise  # Re-raise other exceptions
@@ -204,10 +297,66 @@ class CallAnalysisWorkflow:
             # Execute query and get results
             try:
                 result = await self.execute_query(sql, {"tenant_code": tenant_code}, db_session)
+                was_answered = True
+
+                # Try to extract topic category from the result
+                if not topic_category:
+                    topic_category = self._extract_topic_category(result)
+
+                # Cache the successful result
+                if self.cache_manager:
+                    try:
+                        # Use the existing store_query_result method instead of cache_query
+                        self.cache_manager.store_query_result(
+                            question=question,
+                            sql=sql,
+                            result=result,
+                            tenant_code=tenant_code
+                        )
+                        logger.info(f"Cached result for question: {question}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cache result: {str(e)}")
+
             except Exception as e:
                 logger.error(f"Query execution error: {str(e)}")
                 db_session.rollback()  # Rollback failed transaction
-                raise
+
+                error_message = str(e)
+                end_time = datetime.utcnow()
+                response_time = int(
+                    (end_time - start_time).total_seconds() * 1000)
+
+                self._record_query_performance(
+                    db_session,
+                    question,
+                    False,
+                    error_message,
+                    response_time,
+                    topic_category,
+                    tokens_used
+                )
+
+                # Provide error message in appropriate language
+                if is_dutch:
+                    # Translate common error messages to Dutch
+                    if "missing FROM-clause" in error_message:
+                        error_message = "SQL-fout: ontbrekende FROM-clausule in de query"
+                    elif "syntax error" in error_message:
+                        error_message = "SQL-syntaxfout in de query"
+                    elif "column" in error_message and "does not exist" in error_message:
+                        error_message = "SQL-fout: een kolom in de query bestaat niet"
+                    else:
+                        error_message = f"Fout bij het uitvoeren van de query: {error_message}"
+
+                return {
+                    'success': False,
+                    'error': error_message,
+                    'followup_questions': [
+                        "Wat zijn de meest voorkomende onderwerpen in onze gesprekken van de afgelopen maand?" if is_dutch else "What are the most common topics in our calls from the last month?",
+                        "Hoe is het klantsentiment in de loop van de tijd veranderd?" if is_dutch else "How has customer sentiment changed over time?",
+                        "Kunt u mij de verdeling van gespreksonderwerpen per sentiment tonen?" if is_dutch else "Can you show me the breakdown of call topics by sentiment?"
+                    ]
+                }
 
             # Store this interaction in conversation history
             try:
@@ -225,7 +374,21 @@ class CallAnalysisWorkflow:
                 question,
                 result,
                 conversation_id,
-                tenant_code  # Add tenant_code parameter
+                tenant_code
+            )
+
+            # Record performance data for successful query
+            end_time = datetime.utcnow()
+            response_time = int((end_time - start_time).total_seconds() * 1000)
+
+            self._record_query_performance(
+                db_session,
+                question,
+                True,
+                None,
+                response_time,
+                topic_category,
+                tokens_used
             )
 
             return {
@@ -236,23 +399,80 @@ class CallAnalysisWorkflow:
 
         except Exception as e:
             logger.error(f"Error in workflow: {str(e)}")
-            error_str = str(e).lower()
-            if 'context length' in error_str and 'exceed' in error_str:
-                return {
-                    'success': False,
-                    'error': 'Conversation context limit reached. Please start a new conversation to continue analysis.',
-                    'context_exceeded': True,
-                    'followup_questions': [
-                        "Start a new conversation to analyze recent trends",
-                        "Begin fresh analysis of key metrics",
-                        "Initiate new topic analysis"
-                    ]
-                }
+
+            # Record performance data for failed query
+            end_time = datetime.utcnow()
+            response_time = int((end_time - start_time).total_seconds() * 1000)
+            error_message = str(e)
+
+            try:
+                self._record_query_performance(
+                    db_session,
+                    question,
+                    False,
+                    error_message,
+                    response_time,
+                    topic_category,
+                    tokens_used
+                )
+            except Exception as perf_error:
+                logger.error(
+                    f"Failed to record performance data: {perf_error}")
+
+            # Provide error message in appropriate language
+            if is_dutch:
+                error_message = f"Fout bij het verwerken van uw vraag: {error_message}"
+
             return {
                 'success': False,
-                'error': str(e),
-                'followup_questions': self._get_default_followup_questions()
+                'error': error_message,
+                'followup_questions': [
+                    "Wat zijn de meest voorkomende onderwerpen in onze gesprekken?" if is_dutch else "What are the most common topics in our calls?",
+                    "Hoe is het klantsentiment in de loop van de tijd veranderd?" if is_dutch else "How has customer sentiment changed over time?",
+                    "Kunt u mij de verdeling van gespreksonderwerpen per sentiment tonen?" if is_dutch else "Can you show me the breakdown of call topics by sentiment?"
+                ]
             }
+
+    async def execute_query(self, sql: str, params: dict, db_session: Session) -> str:
+        """Execute SQL query and format results"""
+        try:
+            # Execute query
+            logger.info(f"Executing SQL with params {params}:\n{sql}")
+            result = db_session.execute(text(sql), params)
+            rows = result.fetchall()
+            column_names = result.keys()
+
+            # Log result count
+            row_count = len(rows)
+            logger.info(f"Query returned {row_count} rows")
+
+            # Format results into readable text
+            if not rows:
+                return "No results found for your query."
+
+            # Format output based on number of rows
+            if len(rows) == 1:
+                # Single row result
+                return "\n".join(f"{k}: {v}" for k, v in zip(column_names, rows[0]))
+            else:
+                # Multiple row result with row numbers
+                output = []
+                # Show first 10 rows with numbers
+                for i, row in enumerate(rows[:10], 1):
+                    row_str = ", ".join(
+                        f"{k}: {v}" for k, v in zip(column_names, row))
+                    output.append(f"{i}. {row_str}")
+
+            # Add note if there are more rows
+            if len(rows) > 10:
+                extra_count = len(rows) - 10
+                output.append(
+                    f"\n(Showing top 10 results of {len(rows)} total)")
+
+            return "\n".join(output)
+        except Exception as e:
+            logger.error(f"Error executing query: {e}")
+            raise ValueError(f"Error executing query: {str(e)}")
 
     def _get_default_followup_questions(self) -> List[str]:
         return [
@@ -333,22 +553,61 @@ class CallAnalysisWorkflow:
     def _generate_followup_questions(self, question: str, response: str, conversation_id: str, tenant_code: str) -> List[str]:
         """Generate dynamic followup questions based on conversation context and call analysis patterns"""
         try:
-            # Get last 3 interactions for context
+            # Get last 3 interactions for enhanced context
             recent_interactions = self.conversation_history.get(
                 tenant_code, {}).get(conversation_id, [])[-3:]
+
+            # Build conversation history for context awareness
+            conversation_context = ""
+            for interaction in recent_interactions:
+                if 'question' in interaction and 'result' in interaction:
+                    conversation_context += f"Q: {interaction['question']}\nA: {interaction['result']}\n\n"
 
             # Analyze current response content
             response_lower = response.lower()
             current_q = question.lower()
 
-            # Extract current topics from response
-            topics_mentioned = []
-            for line in response.split('\n'):
-                if 'topic:' in line.lower():
-                    topic = line.split('topic:')[1].split(',')[0].strip()
-                    topics_mentioned.append(topic)
+            # Detect language (Dutch vs English)
+            is_dutch = any(dutch_word in current_q for dutch_word in
+                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
 
-            # Track key metrics and topics from response
+            # Extract numerical values for aggregation insights
+            numeric_values = {}
+            for line in response.split('\n'):
+                line_lower = line.lower()
+                # Look for percentages, counts, and other metrics
+                if '%' in line or any(metric in line_lower for metric in ['count', 'rate', 'average', 'total', 'mentions']):
+                    parts = line.split(':')
+                    if len(parts) == 2:
+                        key = parts[0].strip()
+                        value = parts[1].strip()
+                        numeric_values[key] = value
+
+            # Extract current topics from response with more detailed parsing
+            topics_mentioned = []
+            issues_mentioned = []
+            for line in response.split('\n'):
+                line_lower = line.lower()
+                # Extract topics
+                if 'topic:' in line_lower or 'onderwerp:' in line_lower:
+                    try:
+                        parts = line.split(':')
+                        if len(parts) > 1:
+                            topic_part = parts[1].strip()
+                            # Clean up topic by removing trailing commas and metrics
+                            if ',' in topic_part:
+                                topic = topic_part.split(',')[0].strip()
+                            else:
+                                topic = topic_part
+                            topics_mentioned.append(topic)
+                    except Exception:
+                        continue
+
+                # Extract potential issues
+                if any(issue_word in line_lower for issue_word in ['issue', 'problem', 'complaint', 'negative', 'negatief', 'klacht', 'probleem']):
+                    issues_mentioned.append(line)
+
+            # Track key metrics and analysis dimensions from response
             metrics = {
                 'sentiment_mentioned': any(x in response_lower for x in ['sentiment', 'positief', 'negatief', 'satisfaction']),
                 'topics_mentioned': any(x in response_lower for x in ['topic', 'onderwerp']),
@@ -357,121 +616,189 @@ class CallAnalysisWorkflow:
                 'trends_mentioned': 'trend' in response_lower,
                 'technical_support': any(x in response_lower for x in ['technische ondersteuning', 'technical support']),
                 'customer_service': any(x in response_lower for x in ['klantenservice', 'customer service']),
-                'positive_rate': any(x in response_lower for x in ['positive_rate', 'satisfaction_rate'])
+                'positive_rate': any(x in response_lower for x in ['positive_rate', 'satisfaction_rate']),
+                'has_numbers': bool(numeric_values),
+                'has_issues': bool(issues_mentioned)
             }
 
-            # If we have specific topics in the response, prioritize topic-based questions
+            # If we have specific topics in the response with issues, prioritize issue-focused questions
+            if topics_mentioned and metrics['has_issues']:
+                main_topic = topics_mentioned[0]
+                if is_dutch:
+                    return [
+                        f"Wat zijn de top 3 specifieke problemen binnen het onderwerp '{main_topic}'?",
+                        f"Hoeveel klanten hebben deze problemen gemeld en wat is het percentage ten opzichte van het totaal?",
+                        f"Wat is de trend van deze problemen in vergelijking met vorige maand?"
+                    ]
+                else:
+                    return [
+                        f"What are the top 3 specific issues within the '{main_topic}' topic?",
+                        f"How many customers reported these issues and what percentage of total calls do they represent?",
+                        f"What is the trend of these issues compared to last month?"
+                    ]
+
+            # If we have specific topics in the response, prioritize topic insights with aggregates
             if topics_mentioned:
                 main_topic = topics_mentioned[0]
-                if not any("sentiment" in interaction.get('question', '').lower() for interaction in recent_interactions):
+                if is_dutch:
                     return [
-                        f"How has the sentiment changed for '{main_topic}'?",
-                        f"What are the common patterns in calls about '{main_topic}'?",
-                        "Which other topics are frequently mentioned together with these?"
+                        f"Wat zijn de belangrijkste klantproblemen binnen '{main_topic}' en hoe vaak komen deze voor?",
+                        f"Hoe is de verdeling van positieve vs. negatieve gesprekken over '{main_topic}'?",
+                        f"Welke subtopics komen het meest voor samen met '{main_topic}' in recente gesprekken?"
                     ]
-                return [
-                    f"What time patterns do we see for '{main_topic}'?",
-                    f"How does '{main_topic}' relate to other topics?",
-                    "What are the emerging subtopics in these conversations?"
-                ]
+                else:
+                    return [
+                        f"What are the key customer issues within '{main_topic}' and how frequently do they occur?",
+                        f"What's the distribution of positive vs. negative calls about '{main_topic}'?",
+                        f"Which subtopics most frequently appear with '{main_topic}' in recent conversations?"
+                    ]
 
-            # If response shows concerning metrics
+            # If response shows concerning metrics or negative sentiment
             if 'negative' in response_lower or 'negatief' in response_lower:
-                return [
-                    "What specific issues are causing negative sentiment?",
-                    "When do these negative interactions typically occur?",
-                    "Which agents handle these challenging calls?"
-                ]
+                if is_dutch:
+                    return [
+                        "Wat zijn de top 5 onderwerpen die negatief sentiment veroorzaken?",
+                        "Welke specifieke problemen leiden tot de meeste negatieve reacties?",
+                        "Is er een patroon in tijdstip of datum waarop deze negatieve gesprekken plaatsvinden?"
+                    ]
+                else:
+                    return [
+                        "What are the top 5 topics causing negative sentiment?",
+                        "Which specific issues lead to the most negative reactions?",
+                        "Is there a pattern in time or date when these negative conversations occur?"
+                    ]
 
-            # If response shows positive trends
-            if 'positive_rate: 100.00' in response_lower or 'positief' in response_lower:
-                return [
-                    "What best practices can we identify from these successful interactions?",
-                    "Which team members are handling these positive calls?",
-                    "How can we apply these successful approaches to other areas?"
-                ]
+            # If response shows positive trends with numerical insights
+            if (metrics['positive_rate'] or 'positief' in response_lower) and metrics['has_numbers']:
+                if is_dutch:
+                    return [
+                        "Welke onderwerpen hebben de hoogste klanttevredenheid en wat zijn de percentages?",
+                        "Wat is de trend van positieve gesprekken in de afgelopen 30 dagen?",
+                        "Welke best practices kunnen we identificeren uit deze positieve interacties?"
+                    ]
+                else:
+                    return [
+                        "Which topics have the highest customer satisfaction and what are the percentages?",
+                        "What is the trend of positive conversations over the past 30 days?",
+                        "What best practices can we identify from these positive interactions?"
+                    ]
 
-            # If looking at technical support
-            if metrics['technical_support']:
-                return [
-                    "What are the most common technical issues being resolved?",
-                    "How do resolution times vary by issue type?",
-                    "Which technical issues lead to follow-up calls?"
-                ]
+            # If analyzing trends with time context
+            if metrics['trends_mentioned'] and metrics['time_mentioned']:
+                if is_dutch:
+                    return [
+                        "Wat zijn de belangrijkste veranderingen in onderwerpen ten opzichte van vorige maand?",
+                        "Welke onderwerpen laten een stijgende trend zien en met hoeveel procent?",
+                        "Zijn er opkomende onderwerpen die extra aandacht nodig hebben?"
+                    ]
+                else:
+                    return [
+                        "What are the key topic changes compared to last month?",
+                        "Which topics show an increasing trend and by what percentage?",
+                        "Are there emerging topics that need additional attention?"
+                    ]
 
-            # If analyzing customer service
-            if metrics['customer_service']:
-                return [
-                    "What patterns emerge in customer escalations?",
-                    "How do different handling approaches affect outcomes?",
-                    "Which customer service scenarios need additional training?"
-                ]
+            # If looking at technical support with aggregates
+            if metrics['technical_support'] and metrics['has_numbers']:
+                if is_dutch:
+                    return [
+                        "Wat zijn de top 3 technische problemen en hun frequentie?",
+                        "Hoe verschilt de gemiddelde gespreksduur tussen verschillende technische problemen?",
+                        "Welke technische problemen worden het meest herhaald in vervolgoproepen?"
+                    ]
+                else:
+                    return [
+                        "What are the top 3 technical issues and their frequency?",
+                        "How does average call duration differ between technical issues?",
+                        "Which technical issues are most repeated in follow-up calls?"
+                    ]
 
-            # If analyzing trends
-            if metrics['trends_mentioned']:
-                return [
-                    "What factors are driving these trend changes?",
-                    "How do these trends compare to our targets?",
-                    "Which areas show the most significant shifts?"
-                ]
+            # If analyzing customer service with volume metrics
+            if metrics['customer_service'] and metrics['volume_mentioned']:
+                if is_dutch:
+                    return [
+                        "Wat zijn de meest voorkomende klantenservice-onderwerpen en hun volumeverdeling?",
+                        "Welke klantenservice-problemen leiden tot de langste gesprekken?",
+                        "Hoe verandert het gespreksvolume van klantenservice gedurende de dag?"
+                    ]
+                else:
+                    return [
+                        "What are the most common customer service topics and their volume distribution?",
+                        "Which customer service issues lead to the longest conversations?",
+                        "How does customer service call volume change throughout the day?"
+                    ]
 
-            # If looking at specific topics
-            if metrics['topics_mentioned']:
+            # Default questions based on aggregated insights for call analysis
+            if is_dutch:
                 return [
-                    "How do handling times vary across these topics?",
-                    "Which topics most often lead to escalations?",
-                    "What training needs do these topics suggest?"
+                    "Wat zijn de top 5 meest besproken onderwerpen en hun relatieve percentages?",
+                    "Welke gesprekstrends hebben we gezien in de afgelopen twee weken?",
+                    "Hoe is de verdeling van positieve, neutrale en negatieve gesprekken per onderwerp?"
                 ]
-
-            # Default questions based on call analysis patterns
-            return [
-                "How do these patterns affect our service quality?",
-                "What operational changes could improve these metrics?",
-                "Which areas need additional agent training?"
-            ]
+            else:
+                return [
+                    "What are the top 5 most discussed topics and their relative percentages?",
+                    "What call trends have we seen over the past two weeks?",
+                    "How is the distribution of positive, neutral, and negative calls per topic?"
+                ]
 
         except Exception as e:
             logger.error(f"Error generating follow-up questions: {e}")
+            # Default fallback questions
             return [
-                "What other call patterns should we investigate?",
-                "How can we improve our handling of these calls?",
-                "What additional training might be helpful?"
+                "What are the most common topics in our calls from the last month?",
+                "Which specific issues appear most frequently in customer calls?",
+                "What percentage of calls show positive vs. negative sentiment?"
             ]
 
-    async def execute_query(self, sql: str, params: dict, db_session: Session) -> str:
-        """Execute SQL query and format results"""
+    def _record_query_performance(self, db_session, query_text, was_answered, error_message, response_time, topic_category, tokens_used, is_cached=False):
+        """Record query performance metrics"""
         try:
-            # Log query execution
-            logger.info(f"Executing SQL with params {params}:\n{sql}")
+            # Add cache indicator to query text if cached
+            query_prefix = "[CACHED] " if is_cached else ""
 
-            # Execute query
-            result = db_session.execute(text(sql), params)
-            rows = result.fetchall()
-            column_names = result.keys()
+            stmt = text("""
+                INSERT INTO query_performance 
+                (query_text, was_answered, error_message, response_time, topic_category, tokens_used)
+                VALUES (:query_text, :was_answered, :error_message, :response_time, :topic_category, :tokens_used)
+            """)
 
-            # Format results into readable text
-            if not rows:
-                logger.info("Query returned no results")
-                return "No results found for your query."
+            db_session.execute(stmt, {
+                "query_text": f"{query_prefix}{query_text}",
+                "was_answered": was_answered,
+                "error_message": error_message,
+                "response_time": response_time,
+                "topic_category": topic_category,
+                "tokens_used": tokens_used
+            })
 
-            # Convert rows to list of dicts for easier handling
-            results = [dict(zip(column_names, row)) for row in rows]
-
-            # Log result count
-            logger.info(f"Query returned {len(results)} rows")
-
-            # Format output based on number of rows
-            if len(results) == 1:
-                # Single row result
-                return "\n".join(f"{k}: {v}" for k, v in results[0].items())
-            else:
-                # Multiple row result
-                output = []
-                for row in results:
-                    row_str = ", ".join(f"{k}: {v}" for k, v in row.items())
-                    output.append(f"- {row_str}")
-                return "\n".join(output)
-
+            db_session.commit()
+            logger.debug(
+                f"Recorded query performance: {response_time}ms, answered: {was_answered}")
         except Exception as e:
-            logger.error(f"Error executing query: {e}")
-            raise ValueError(f"Error executing query: {str(e)}")
+            logger.error(f"Failed to record query performance: {e}")
+            # Don't raise the exception to avoid disrupting the main flow
+
+    def _extract_topic_category(self, text):
+        """Extract topic category from text"""
+        try:
+            text_lower = text.lower()
+
+            # Define common categories and their keywords
+            categories = {
+                "technical_support": ["technical", "support", "technische", "ondersteuning", "error", "fout", "bug", "issue"],
+                "customer_service": ["customer", "service", "klantenservice", "klant", "support"],
+                "billing": ["billing", "invoice", "facturering", "factuur", "betaling", "payment"],
+                "product": ["product", "feature", "functie", "kenmerk"],
+                "sentiment": ["sentiment", "positive", "negative", "positief", "negatief", "neutral", "neutraal"],
+                "trend": ["trend", "change", "verandering", "pattern", "patroon"]
+            }
+
+            # Check for category keywords in the text
+            for category, keywords in categories.items():
+                if any(keyword in text_lower for keyword in keywords):
+                    return category
+
+            return None
+        except Exception:
+            return None

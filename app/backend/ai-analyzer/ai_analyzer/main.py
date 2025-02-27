@@ -13,6 +13,7 @@ from datetime import datetime
 from psycopg2 import connect
 from typing import List
 from pydantic import BaseModel
+import psycopg2
 
 # Update internal imports
 from ai_analyzer.config import config, DATABASE_URL
@@ -82,7 +83,16 @@ app.add_middleware(
 )
 
 # Initialize cache manager once
-cache_manager = DatabaseCacheManager(engine)
+
+
+def get_cache_manager():
+    """Get a properly initialized cache manager with a session"""
+    db = SessionLocal()
+    return DatabaseCacheManager(db)
+
+
+# Initialize cache manager with a session instead of engine
+cache_manager = get_cache_manager()
 
 # Get initial restricted tables
 restricted_tables = get_initial_restricted_tables()
@@ -749,17 +759,36 @@ async def get_conversation(
                 detail="Conversation not found or access denied"
             )
 
-        return [
-            {
+        # Process messages to make errors user-friendly
+        processed_messages = []
+        for msg in messages:
+            # Create a copy of the message data
+            message_data = {
                 "id": msg.id,
                 "conversation_id": msg.conversation_id,
                 "query": msg.query,
-                "response": msg.response,
                 "timestamp": msg.timestamp.isoformat(),
                 "followup_questions": msg.followup_questions
             }
-            for msg in messages
-        ]
+
+            # Check if this is an error response
+            if msg.response and msg.response.startswith("Error") or "error" in msg.response.lower():
+                # Detect language (Dutch vs English)
+                is_dutch = any(dutch_word in msg.query.lower() for dutch_word in
+                               ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
+
+                # Replace error message with user-friendly message
+                if is_dutch:
+                    message_data["response"] = "Er was een probleem bij het beantwoorden van deze vraag. Probeer het opnieuw of stel een andere vraag."
+                else:
+                    message_data["response"] = "There was an issue answering this question. Please try again or ask a different question."
+            else:
+                # Keep the original response
+                message_data["response"] = msg.response
+
+            processed_messages.append(message_data)
+
+        return processed_messages
 
     except HTTPException:
         raise

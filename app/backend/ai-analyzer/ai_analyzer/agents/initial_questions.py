@@ -18,44 +18,76 @@ class InitialQuestionGenerator(BaseAgent):
     async def process(self, db_context: DatabaseContext) -> AgentResponse:
         """Generate relevant questions based on database structure"""
         try:
-            # Create a chat prompt template with properly escaped JSON example
+
+            # Create a chat prompt template with enhanced focus on issues and insights
             prompt = ChatPromptTemplate.from_template("""
-                As a call center data analyst, analyze this database schema:
+                As a call center manager analyzing customer interactions, examine this database schema:
                 {schema}
                 
-                Generate insightful questions for these categories:
-                - Trending Topics: Questions about popular discussion topics and emerging issues
-                - Sentiment Analysis: Questions about customer satisfaction and feedback
-                - Time-based Patterns: Questions about trends and changes over time
-                - Customer Experience: Questions about specific customer interactions
-                - Performance Metrics: Questions about operational effectiveness
+                Generate specific, actionable questions that will reveal key insights about customer issues
+                and call center performance. Focus especially on:
+                
+                1. Key issues within popular topics
+                2. Sentiment patterns and customer satisfaction metrics
+                3. Specific trends and changes that matter to managers
+                4. Opportunities for immediate operational improvements
+                5. Quantifiable metrics that show performance
+                
+                Generate insightful questions for these categories (include percentages and specific metrics):
+                
+                - Topic Issues: Questions about specific problems within popular topics
+                - Sentiment Insights: Questions about customer satisfaction with quantifiable metrics
+                - Trend Analysis: Questions about measurable changes over specific time periods
+                - Customer Experience: Questions about specific pain points in customer interactions
+                - Performance Metrics: Questions about operational effectiveness with clear KPIs
 
                 Return the response in this exact JSON format (keep the exact category names):
                 {{
-                    "Trending Topics": {{
-                        "description": "Analyze popular discussion topics",
-                        "questions": ["Question 1", "Question 2", "Question 3"]
+                    "Topic Issues": {{
+                        "description": "Analyze specific problems within call topics",
+                        "questions": [
+                            "What are the top 5 specific issues mentioned in calls and what percentage of calls mention each?",
+                            "Which issues within technical support have the highest negative sentiment percentage?",
+                            "What specific customer complaints appear most frequently in billing-related calls?"
+                        ]
                     }},
-                    "Sentiment Analysis": {{
-                        "description": "Understand sentiment patterns",
-                        "questions": ["Question 1", "Question 2", "Question 3"]
+                    "Sentiment Insights": {{
+                        "description": "Quantify customer satisfaction patterns",
+                        "questions": [
+                            "What percentage of calls have positive vs. negative sentiment in the last 30 days?",
+                            "Which topics have shown the greatest improvement in sentiment scores over the past month?",
+                            "What are the top 3 topics with the highest negative sentiment rate and their percentages?"
+                        ]
                     }},
-                    "Time-based Patterns": {{
-                        "description": "Track changes over time",
-                        "questions": ["Question 1", "Question 2", "Question 3"]
+                    "Trend Analysis": {{
+                        "description": "Measure important changes over time",
+                        "questions": [
+                            "How have call volumes for our top 5 topics changed compared to last month (show % change)?",
+                            "Which topics have shown the most significant growth in the past two weeks?",
+                            "What's the week-over-week trend in customer satisfaction for billing issues?"
+                        ]
                     }},
                     "Customer Experience": {{
-                        "description": "Analyze customer interactions",
-                        "questions": ["Question 1", "Question 2", "Question 3"]
+                        "description": "Identify key customer pain points",
+                        "questions": [
+                            "What specific issues lead to the longest call durations?",
+                            "Which customer problems are most likely to require multiple callbacks?",
+                            "What percentage of customer complaints relate to product functionality vs. service issues?"
+                        ]
                     }},
                     "Performance Metrics": {{
-                        "description": "Measure operational effectiveness",
-                        "questions": ["Question 1", "Question 2", "Question 3"]
+                        "description": "Analyze operational effectiveness with KPIs",
+                        "questions": [
+                            "What's our average call resolution rate across different topics?",
+                            "Which topics have the highest percentage of calls lasting over 10 minutes?",
+                            "How does the distribution of call sentiment vary by time of day?"
+                        ]
                     }}
                 }}
                 
                 Only use tables: {allowed_tables}
-                Make sure questions are specific and actionable.
+                All questions should be specific, actionable, and focused on revealing insights that a call center manager would need.
+                Questions should be phrased to elicit numerical results and percentages where possible.
                 Return valid JSON only.
             """)
 

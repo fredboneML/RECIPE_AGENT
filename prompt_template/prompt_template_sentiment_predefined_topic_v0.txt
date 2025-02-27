@@ -17,7 +17,6 @@ Example output:
 }
 
 
-A `topic` must only be one of:
 {%- for topic in topics %}
  - `{{topic}}`
 {% endfor %}

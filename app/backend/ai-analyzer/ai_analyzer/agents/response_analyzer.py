@@ -34,32 +34,44 @@ class ResponseAnalyzerAgent(BaseAgent):
                 latest_interaction = conversation_context.split('\n\n')[-2:]
                 context_summary = '\n'.join(latest_interaction)
 
-            # Enhanced prompt to generate better follow-up questions
+            # Enhanced prompt to generate better insights and follow-up questions
             prompt = ChatPromptTemplate.from_messages([
-                ("system", """You are a call center data analyst. Analyze the query results and return the response in exactly this JSON format:
+                ("system", """You are a professional call center data analyst specializing in customer interaction analysis. 
+                Your task is to analyze query results, highlight important patterns, and generate insightful follow-up questions.
+                
+                Return the response in exactly this JSON format:
                 {{
-                    "summary": "A clear analysis of the results, including key findings and trends",
+                    "summary": "A clear, concise analysis of the results that highlights key metrics, trends, and actionable insights",
                     "followup_questions": [
-                        "A question about deeper analysis of the current results",
-                        "A question about related trends or patterns",
-                        "A question that explores a different aspect of the data"
+                        "A specific question about issues within the topics mentioned",
+                        "A question that explores metrics and aggregated values",
+                        "A trend-related question that provides context from previous periods"
                     ],
                     "reformulation": null
                 }}
                 
+                Guidelines for your analysis:
+                - Highlight specific issues within topics mentioned
+                - Emphasize numerical metrics and percentages
+                - Identify trends, patterns, and anomalies
+                - Make clear connections between customer issues and metrics
+                - Format numerical values consistently (e.g., "85.2%" not "85.2 percent")
+                
                 Guidelines for follow-up questions:
-                - Make them specific and related to the current results
-                - Include questions about trends over time
-                - Ask about correlations with other metrics
-                - Explore different aspects of the same topic
-                - Make them actionable for business insights
+                - Focus on specific issues within topics
+                - Include questions about aggregate metrics (percentages, counts, averages)
+                - Ask about comparisons with previous time periods
+                - Make questions highly specific and actionable
+                - Phrase questions as a call center analyst would
+                - Include references to specific values from the results
                 """),
                 ("human",
                  """Previous context: {context}
                  Original question: {question}
                  Results to analyze: {response}
                  
-                 Generate a complete analysis with 3-4 relevant follow-up questions.""")
+                 Generate a comprehensive analysis that highlights key issues and metrics, followed by 3-4 relevant follow-up questions.""")
+
             ])
 
             # Create the chain and invoke

@@ -105,12 +105,19 @@ def create_tables(engine):
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS query_cache (
                 id SERIAL PRIMARY KEY,
-                query_hash VARCHAR UNIQUE NOT NULL,
-                query_text VARCHAR NOT NULL,
-                response VARCHAR NOT NULL,
-                last_record_count INTEGER NOT NULL,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+                question TEXT NOT NULL,
+                sql TEXT NOT NULL,
+                result TEXT NOT NULL,
+                tenant_code VARCHAR(50) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days'),
+                hash_key VARCHAR(64) NOT NULL,
+                execution_time_ms INTEGER,
+                result_count INTEGER,
+                UNIQUE(hash_key, tenant_code)
+            );
+            CREATE INDEX IF NOT EXISTS idx_query_cache_tenant_hash ON query_cache(tenant_code, hash_key);
+            CREATE INDEX IF NOT EXISTS idx_query_cache_expires ON query_cache(expires_at);
         """))
 
         # Create query_performance table
