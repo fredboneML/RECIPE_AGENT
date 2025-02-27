@@ -180,6 +180,105 @@ class SQLGeneratorAgent(BaseAgent):
                     reformulated_question=self._suggest_reformulation(question)
                 )
 
+            # Always remove sensitive fields and standardize output format
+            # This should be one of the last validations to ensure it catches all cases
+            if "SELECT * FROM" in sql or "SELECT *\nFROM" in sql:
+                # Replace SELECT * with specific columns, excluding sensitive ones
+                from_pattern = r'SELECT\s+\*\s+FROM\s+base_data'
+                select_replacement = "SELECT call_direction, clean_topic as topic, clean_sentiment, summary, processing_date, call_duration_secs, telephone_number FROM base_data WHERE clean_topic IS NOT NULL AND clean_topic != '' AND clean_topic != 'None'"
+                sql = re.sub(from_pattern, select_replacement,
+                             sql, flags=re.IGNORECASE)
+                column_errors.append(
+                    "Removed sensitive fields and standardized output format")
+            elif "id" in sql.split("SELECT")[-1] or "transcription_id" in sql.split("SELECT")[-1] or "transcription" in sql.split("SELECT")[-1]:
+                # For other queries, make sure sensitive fields are removed
+                try:
+                    # Find the SELECT statement after base_data
+                    select_pattern = r'(SELECT\s+)([^;]+?)(\s+FROM\s+base_data)'
+                    select_match = re.search(
+                        select_pattern, sql, re.IGNORECASE | re.DOTALL)
+
+                    if select_match:
+                        columns = select_match.group(2)
+                        # Remove id and transcription_id
+                        columns = re.sub(r'\bid\b\s*,?\s*', '', columns)
+                        columns = re.sub(r',\s*\bid\b', '', columns)
+                        columns = re.sub(
+                            r'\btranscription_id\b\s*,?\s*', '', columns)
+                        columns = re.sub(
+                            r',\s*\btranscription_id\b', '', columns)
+
+                        # Replace transcription with summary if present
+                        columns = re.sub(r'\btranscription\b',
+                                         'summary', columns)
+
+                        # Replace clean_topic with topic if not already aliased
+                        if "clean_topic" in columns and "as topic" not in columns.lower():
+                            columns = re.sub(
+                                r'\bclean_topic\b', 'clean_topic as topic', columns)
+
+                        # Update the SELECT clause
+                        new_select = select_match.group(
+                            1) + columns + select_match.group(3)
+                        sql = sql.replace(select_match.group(0), new_select)
+                        column_errors.append(
+                            "Removed sensitive fields and standardized column names")
+                except Exception as e:
+                    logger.error(f"Error removing sensitive fields: {e}")
+                    # If there's an error, use a more aggressive approach
+                    if "SELECT * FROM" in sql:
+                        sql = sql.replace(
+                            "SELECT * FROM", "SELECT call_direction, clean_topic as topic, clean_sentiment, summary, processing_date, call_duration_secs, telephone_number FROM")
+                        column_errors.append(
+                            "Forcibly removed sensitive fields")
+
+            # Filter out NULL or 'None' values from topic results
+            if "topic" in sql.lower() and "GROUP BY" in sql:
+                # Check if there's a HAVING clause
+                if "HAVING" in sql:
+                    # Only add clean_topic conditions if clean_topic is in the GROUP BY clause
+                    if "GROUP BY clean_topic" in sql or "GROUP BY summary, clean_topic" in sql or "GROUP BY clean_topic," in sql:
+                        # Add condition to filter out NULL or 'None' topics
+                        having_pattern = r'(HAVING\s+[^;]+?)(?:ORDER BY|LIMIT|;|$)'
+                        having_match = re.search(
+                            having_pattern, sql, re.IGNORECASE | re.DOTALL)
+                        if having_match:
+                            having_clause = having_match.group(1)
+                            new_having = f"{having_clause} AND clean_topic IS NOT NULL AND clean_topic != '' AND clean_topic != 'None'"
+                            sql = sql.replace(having_clause, new_having)
+                            column_errors.append(
+                                "Filtered out NULL or empty topics")
+                else:
+                    # Only add HAVING clause if clean_topic is in the GROUP BY clause
+                    if "GROUP BY clean_topic" in sql or "GROUP BY summary, clean_topic" in sql or "GROUP BY clean_topic," in sql:
+                        # Add a new HAVING clause before any ORDER BY
+                        order_pattern = r'(GROUP BY\s+[^;]+?)(?:ORDER BY|LIMIT|;|$)'
+                        order_match = re.search(
+                            order_pattern, sql, re.IGNORECASE | re.DOTALL)
+                        if order_match:
+                            group_by_clause = order_match.group(1)
+                            new_group_by = f"{group_by_clause} HAVING clean_topic IS NOT NULL AND clean_topic != '' AND clean_topic != 'None'"
+                            sql = sql.replace(group_by_clause, new_group_by)
+                            column_errors.append(
+                                "Added filter for NULL or empty topics")
+
+            # Fix HAVING clauses in the final SELECT that reference clean_topic after it's been renamed
+            if "clean_topic as topic" in sql:
+                # Find the final SELECT statement
+                final_select_pos = sql.rfind("SELECT")
+                if final_select_pos > 0:
+                    # Check if there's a HAVING clause in the final SELECT
+                    final_having_pos = sql.rfind("HAVING", final_select_pos)
+                    if final_having_pos > 0:
+                        # Replace clean_topic with topic in the final HAVING clause
+                        sql_before = sql[:final_having_pos]
+                        sql_after = sql[final_having_pos:]
+                        # Only replace clean_topic with topic in the HAVING clause
+                        sql_after = sql_after.replace("clean_topic", "topic")
+                        sql = sql_before + sql_after
+                        column_errors.append(
+                            "Fixed column reference in final HAVING clause")
+
             return AgentResponse(
                 success=True,
                 content=sql
@@ -217,6 +316,43 @@ class SQLGeneratorAgent(BaseAgent):
 
             # Check for column errors and fix them
             column_errors = []
+
+            # Fix incorrect TRIM function with multiple arguments
+            if "TRIM(t.topic," in sql:
+                sql = sql.replace(
+                    "LOWER(TRIM(t.topic,", "LOWER(TRIM(t.topic))")
+                sql = sql.replace("t.clid)) as clean_topic", " as clean_topic")
+                column_errors.append("Fixed incorrect TRIM function syntax")
+
+            # Filter out NULL or 'None' values from topic results
+            if "topic" in sql.lower() and "GROUP BY" in sql:
+                # Check if there's a HAVING clause
+                if "HAVING" in sql:
+                    # Only add clean_topic conditions if clean_topic is in the GROUP BY clause
+                    if "GROUP BY clean_topic" in sql or "GROUP BY summary, clean_topic" in sql or "GROUP BY clean_topic," in sql:
+                        # Add condition to filter out NULL or 'None' topics
+                        having_pattern = r'(HAVING\s+[^;]+?)(?:ORDER BY|LIMIT|;|$)'
+                        having_match = re.search(
+                            having_pattern, sql, re.IGNORECASE | re.DOTALL)
+                        if having_match:
+                            having_clause = having_match.group(1)
+                            new_having = f"{having_clause} AND clean_topic IS NOT NULL AND clean_topic != '' AND clean_topic != 'None'"
+                            sql = sql.replace(having_clause, new_having)
+                            column_errors.append(
+                                "Filtered out NULL or empty topics")
+                else:
+                    # Only add HAVING clause if clean_topic is in the GROUP BY clause
+                    if "GROUP BY clean_topic" in sql or "GROUP BY summary, clean_topic" in sql or "GROUP BY clean_topic," in sql:
+                        # Add a new HAVING clause before any ORDER BY
+                        order_pattern = r'(GROUP BY\s+[^;]+?)(?:ORDER BY|LIMIT|;|$)'
+                        order_match = re.search(
+                            order_pattern, sql, re.IGNORECASE | re.DOTALL)
+                        if order_match:
+                            group_by_clause = order_match.group(1)
+                            new_group_by = f"{group_by_clause} HAVING clean_topic IS NOT NULL AND clean_topic != '' AND clean_topic != 'None'"
+                            sql = sql.replace(group_by_clause, new_group_by)
+                            column_errors.append(
+                                "Added filter for NULL or empty topics")
 
             # Fix t.clean_topic reference - this is a derived column that needs to be created
             if "t.clean_topic" in sql and "LOWER(TRIM(t.topic))" not in sql:
@@ -334,60 +470,6 @@ class SQLGeneratorAgent(BaseAgent):
                         # We found and replaced a pattern, so break the loop
                         break
 
-            # Replace transcription with summary in final output
-            if "transcription" in sql and "summary" in sql:
-                # Replace transcription with summary in SELECT clauses outside of base_data CTE
-                base_cte_end = sql.find(
-                    "base_data AS (") + sql[sql.find("base_data AS ("):].find(")") + 1
-                rest_of_sql = sql[base_cte_end:]
-
-                # Replace transcription with summary in the rest of the SQL
-                if "transcription" in rest_of_sql:
-                    rest_of_sql = re.sub(
-                        r'\btranscription\b', 'summary', rest_of_sql)
-                    sql = sql[:base_cte_end] + rest_of_sql
-                    column_errors.append(
-                        "Replaced 'transcription' with 'summary' in output")
-
-            # Rename clean_topic to topic in the final output for better readability
-            final_select = sql.split("SELECT")[-1]
-            if "clean_topic" in final_select and "as topic" not in final_select.lower():
-                # Find if clean_topic is already being aliased
-                if not re.search(r'clean_topic\s+as\s+\w+', final_select, re.IGNORECASE):
-                    # Replace clean_topic with clean_topic as topic in the final SELECT
-                    sql = re.sub(
-                        r'(SELECT\s+(?:.*?,\s*)?)clean_topic(\s*,|\s*FROM|\s*$)',
-                        r'\1clean_topic as topic\2',
-                        sql,
-                        flags=re.IGNORECASE
-                    )
-                    column_errors.append(
-                        "Renamed 'clean_topic' to 'topic' in output for better readability")
-
-            # Remove transcription_id from final output
-            final_select = sql.split("SELECT")[-1]
-            if "transcription_id" in final_select:
-                # Find the final SELECT statement
-                select_pattern = r'SELECT\s+(.*?)\s+FROM'
-                select_match = re.search(
-                    select_pattern, final_select, re.IGNORECASE | re.DOTALL)
-
-                if select_match:
-                    columns = select_match.group(1)
-                    # Remove transcription_id from the column list
-                    if "transcription_id" in columns:
-                        new_columns = re.sub(
-                            r'\btranscription_id\s*,\s*', '', columns)
-                        new_columns = re.sub(
-                            r',\s*\btranscription_id\b', '', new_columns)
-                        new_columns = re.sub(
-                            r'\btranscription_id\b', '', new_columns)
-
-                        # Replace the columns in the final SELECT
-                        sql = sql.replace(columns, new_columns)
-                        column_errors.append(
-                            "Removed 'transcription_id' from output")
-
             # Fix malformed WHERE clauses with phone number conditions
             if "WHERE t.(" in sql:
                 # This is a syntax error - fix it by removing the t. before the parenthesis
@@ -416,34 +498,102 @@ class SQLGeneratorAgent(BaseAgent):
                 column_errors.append(
                     "Added missing AND operators between conditions")
 
-            # Fix queries that should be filtered by phone number but aren't
-            if "0610684074" not in sql and "telephone_number" not in sql and "clid" not in sql:
-                # Check if this is a follow-up query about a specific phone number
-                if "conversation" in sql.lower() or "summary" in sql.lower() or "topic" in sql.lower():
-                    # Add phone number filter to the WHERE clause
-                    if "WHERE" in sql:
-                        # Find the WHERE clause
-                        where_pattern = r'(WHERE\s+[^;]+?)(?:GROUP BY|ORDER BY|LIMIT|;|$)'
-                        where_match = re.search(
-                            where_pattern, sql, re.IGNORECASE | re.DOTALL)
-                        if where_match:
-                            where_clause = where_match.group(1)
-                            # Add phone number condition to the WHERE clause
-                            new_where = f"{where_clause} AND (telephone_number LIKE '%0610684074%' OR clid LIKE '%0610684074%' OR telephone_number LIKE '%0610684074%' OR clid LIKE '%0610684074%')"
-                            sql = sql.replace(where_clause, new_where)
-                            column_errors.append(
-                                "Added phone number filter to follow-up query")
-                    else:
-                        # Add a new WHERE clause before any GROUP BY, ORDER BY, etc.
-                        from_pattern = r'(FROM\s+base_data\s*)(?:GROUP BY|ORDER BY|LIMIT|;|$)'
-                        from_match = re.search(
-                            from_pattern, sql, re.IGNORECASE | re.DOTALL)
-                        if from_match:
-                            from_clause = from_match.group(1)
-                            new_from = f"{from_clause} WHERE (telephone_number LIKE '%0610684074%' OR clid LIKE '%0610684074%' OR telephone_number LIKE '%0610684074%' OR clid LIKE '%0610684074%') "
-                            sql = sql.replace(from_clause, new_from)
-                            column_errors.append(
-                                "Added phone number filter to follow-up query")
+            # NEW: Replace transcription with summary in final output
+            if "transcription" in sql and "summary" in sql:
+                # Replace transcription with summary in SELECT clauses outside of base_data CTE
+                base_cte_end = sql.find(
+                    "base_data AS (") + sql[sql.find("base_data AS ("):].find(")") + 1
+                rest_of_sql = sql[base_cte_end:]
+
+                # Replace transcription with summary in the rest of the SQL
+                if "transcription" in rest_of_sql:
+                    rest_of_sql = re.sub(
+                        r'\btranscription\b', 'summary', rest_of_sql)
+                    sql = sql[:base_cte_end] + rest_of_sql
+                    column_errors.append(
+                        "Replaced 'transcription' with 'summary' in output")
+
+            # NEW: Always remove sensitive fields and standardize output format
+            if "SELECT * FROM" in sql or "SELECT *\nFROM" in sql:
+                # Replace SELECT * with specific columns, excluding sensitive ones
+                from_pattern = r'SELECT\s+\*\s+FROM\s+base_data'
+                select_replacement = "SELECT clean_topic as topic, summary, processing_date, clean_sentiment as sentiment, call_duration_secs, clid, telephone_number, call_direction FROM base_data"
+                sql = re.sub(from_pattern, select_replacement,
+                             sql, flags=re.IGNORECASE)
+                column_errors.append(
+                    "Removed sensitive fields and standardized output format")
+            elif "id" in sql.split("SELECT")[-1] or "transcription_id" in sql.split("SELECT")[-1]:
+                # For other queries, make sure sensitive fields are removed
+                try:
+                    # Find the SELECT statement after base_data
+                    select_pattern = r'(SELECT\s+)([^;]+?)(\s+FROM\s+base_data)'
+                    select_match = re.search(
+                        select_pattern, sql, re.IGNORECASE | re.DOTALL)
+
+                    if select_match:
+                        columns = select_match.group(2)
+                        # Remove id and transcription_id
+                        columns = re.sub(r'\bid\b\s*,?\s*', '', columns)
+                        columns = re.sub(r',\s*\bid\b', '', columns)
+                        columns = re.sub(
+                            r'\btranscription_id\b\s*,?\s*', '', columns)
+                        columns = re.sub(
+                            r',\s*\btranscription_id\b', '', columns)
+
+                        # Replace transcription with summary if present
+                        columns = re.sub(r'\btranscription\b',
+                                         'summary', columns)
+
+                        # Replace clean_topic with topic if not already aliased
+                        if "clean_topic" in columns and "as topic" not in columns.lower():
+                            columns = re.sub(
+                                r'\bclean_topic\b', 'clean_topic as topic', columns)
+
+                        # Update the SELECT clause
+                        new_select = select_match.group(
+                            1) + columns + select_match.group(3)
+                        sql = sql.replace(select_match.group(0), new_select)
+                        column_errors.append(
+                            "Removed sensitive fields and standardized column names")
+                except Exception as e:
+                    logger.error(f"Error removing sensitive fields: {e}")
+                    # If there's an error, use a more aggressive approach
+                    if "SELECT * FROM" in sql:
+                        sql = sql.replace(
+                            "SELECT * FROM", "SELECT clean_topic as topic, clean_sentiment as sentiment, summary, processing_date, call_duration_secs, telephone_number, call_direction FROM")
+                        column_errors.append(
+                            "Forcibly removed sensitive fields")
+
+            # Rename clean_topic to topic in the final output for better readability
+            if "clean_topic" in sql.split("SELECT")[-1] and "as topic" not in sql.split("SELECT")[-1].lower():
+                # Find if clean_topic is already being aliased
+                if not re.search(r'clean_topic\s+as\s+\w+', sql.split("SELECT")[-1], re.IGNORECASE):
+                    # Replace clean_topic with clean_topic as topic in the final SELECT
+                    sql = re.sub(
+                        r'(SELECT\s+(?:.*?,\s*)?)clean_topic(\s*,|\s*FROM|\s*$)',
+                        r'\1clean_topic as topic\2',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                    column_errors.append(
+                        "Renamed 'clean_topic' to 'topic' in output for better readability")
+
+            # Fix HAVING clauses in the final SELECT that reference clean_topic after it's been renamed
+            if "clean_topic as topic" in sql.lower():
+                # Find the final SELECT statement
+                final_select_pos = sql.rfind("SELECT")
+                if final_select_pos > 0:
+                    # Check if there's a HAVING clause in the final SELECT
+                    final_having_pos = sql.rfind("HAVING", final_select_pos)
+                    if final_having_pos > 0:
+                        # Replace clean_topic with topic in the final HAVING clause
+                        sql_before = sql[:final_having_pos]
+                        sql_after = sql[final_having_pos:]
+                        # Only replace clean_topic with topic in the HAVING clause
+                        sql_after = sql_after.replace("clean_topic", "topic")
+                        sql = sql_before + sql_after
+                        column_errors.append(
+                            "Fixed column reference in final HAVING clause")
 
             # Log validation details
             logger.info(f"SQL Validation Details:\n\

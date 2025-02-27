@@ -172,7 +172,12 @@ class CallAnalysisWorkflow:
 
             # Detect language (Dutch vs English)
             is_dutch = any(dutch_word in question.lower() for dutch_word in
-                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
+                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp',
+                           'kun', 'kunt', 'je', 'jij', 'u', 'bent', 'zijn', 'waar', 'wat', 'wie', 'hoe',
+                            'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
+                            'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet', 'met',
+                            'over', 'door', 'om', 'op', 'voor', 'na', 'bij', 'aan', 'in', 'uit', 'te',
+                            'bedrijf', 'waarom', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal'])
 
             # Initialize tenant conversation history if needed
             if tenant_code not in self.conversation_history:
