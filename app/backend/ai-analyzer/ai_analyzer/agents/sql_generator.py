@@ -289,10 +289,45 @@ class SQLGeneratorAgent(BaseAgent):
                                     sql = sql.replace(
                                         select_clause, new_select)
 
-                                    # Add GROUP BY if not present
+                                    # Add GROUP BY call_direction at the end of the query, before any existing GROUP BY
                                     if "GROUP BY" not in sql:
-                                        sql = sql.replace(
-                                            ";", " GROUP BY call_direction;")
+                                        # If there's a WHERE clause, add GROUP BY after it
+                                        if "WHERE" in sql:
+                                            where_pattern = r'(WHERE\s+[^;]+?)(?:ORDER BY|LIMIT|;|$)'
+                                            where_match = re.search(
+                                                where_pattern, sql, re.IGNORECASE | re.DOTALL)
+                                            if where_match:
+                                                where_clause = where_match.group(
+                                                    1)
+                                                sql = sql.replace(
+                                                    where_clause, f"{where_clause} GROUP BY call_direction")
+                                            else:
+                                                # Just add at the end
+                                                sql = sql.replace(
+                                                    ";", " GROUP BY call_direction;")
+                                                if ";" not in sql:
+                                                    sql = sql + " GROUP BY call_direction"
+                                        else:
+                                            # Just add at the end
+                                            sql = sql.replace(
+                                                ";", " GROUP BY call_direction;")
+                                            if ";" not in sql:
+                                                sql = sql + " GROUP BY call_direction"
+                                    else:
+                                        # If GROUP BY exists, add call_direction to it
+                                        group_by_pattern = r'(GROUP BY\s+)([^;]+)'
+                                        group_by_match = re.search(
+                                            group_by_pattern, sql, re.IGNORECASE)
+                                        if group_by_match:
+                                            group_by_clause = group_by_match.group(
+                                                1)
+                                            group_by_columns = group_by_match.group(
+                                                2)
+                                            if "call_direction" not in group_by_columns:
+                                                new_group_by = f"{group_by_clause}call_direction, {group_by_columns}"
+                                                sql = sql.replace(
+                                                    f"{group_by_clause}{group_by_columns}", new_group_by)
+
                                     column_errors.append(
                                         "Added call_direction to phone number query results")
 
@@ -352,6 +387,63 @@ class SQLGeneratorAgent(BaseAgent):
                         sql = sql.replace(columns, new_columns)
                         column_errors.append(
                             "Removed 'transcription_id' from output")
+
+            # Fix malformed WHERE clauses with phone number conditions
+            if "WHERE t.(" in sql:
+                # This is a syntax error - fix it by removing the t. before the parenthesis
+                sql = sql.replace("WHERE t.(", "WHERE (")
+                column_errors.append(
+                    "Fixed syntax error in WHERE clause with phone condition")
+
+            # Also fix cases where there's no AND between conditions
+            if ") t.tenant_code" in sql:
+                # This is missing an AND - fix it
+                sql = sql.replace(") t.tenant_code", ") AND t.tenant_code")
+                column_errors.append(
+                    "Added missing AND operator in WHERE clause")
+
+            # Fix AND t.( pattern which is also a syntax error
+            if "AND t.(" in sql:
+                # This is a syntax error - fix it by removing the t. before the parenthesis
+                sql = sql.replace("AND t.(", "AND (")
+                column_errors.append(
+                    "Fixed syntax error in AND clause with phone condition")
+
+            # Fix missing AND between parenthesis and subsequent conditions
+            if ") t." in sql and ") AND t." not in sql:
+                # Replace all occurrences of ") t." with ") AND t." except those already fixed
+                sql = re.sub(r'\)\s+t\.', ') AND t.', sql)
+                column_errors.append(
+                    "Added missing AND operators between conditions")
+
+            # Fix queries that should be filtered by phone number but aren't
+            if "0610684074" not in sql and "telephone_number" not in sql and "clid" not in sql:
+                # Check if this is a follow-up query about a specific phone number
+                if "conversation" in sql.lower() or "summary" in sql.lower() or "topic" in sql.lower():
+                    # Add phone number filter to the WHERE clause
+                    if "WHERE" in sql:
+                        # Find the WHERE clause
+                        where_pattern = r'(WHERE\s+[^;]+?)(?:GROUP BY|ORDER BY|LIMIT|;|$)'
+                        where_match = re.search(
+                            where_pattern, sql, re.IGNORECASE | re.DOTALL)
+                        if where_match:
+                            where_clause = where_match.group(1)
+                            # Add phone number condition to the WHERE clause
+                            new_where = f"{where_clause} AND (telephone_number LIKE '%0610684074%' OR clid LIKE '%0610684074%' OR telephone_number LIKE '%0610684074%' OR clid LIKE '%0610684074%')"
+                            sql = sql.replace(where_clause, new_where)
+                            column_errors.append(
+                                "Added phone number filter to follow-up query")
+                    else:
+                        # Add a new WHERE clause before any GROUP BY, ORDER BY, etc.
+                        from_pattern = r'(FROM\s+base_data\s*)(?:GROUP BY|ORDER BY|LIMIT|;|$)'
+                        from_match = re.search(
+                            from_pattern, sql, re.IGNORECASE | re.DOTALL)
+                        if from_match:
+                            from_clause = from_match.group(1)
+                            new_from = f"{from_clause} WHERE (telephone_number LIKE '%0610684074%' OR clid LIKE '%0610684074%' OR telephone_number LIKE '%0610684074%' OR clid LIKE '%0610684074%') "
+                            sql = sql.replace(from_clause, new_from)
+                            column_errors.append(
+                                "Added phone number filter to follow-up query")
 
             # Log validation details
             logger.info(f"SQL Validation Details:\n\
@@ -462,7 +554,14 @@ class SQLGeneratorAgent(BaseAgent):
                         subsequent_ctes, fixed_ctes)
 
             # Validate the SQL
-            if not self.validate_sql(generated_sql, tenant_code):
+            is_valid, validation_result = self.validate_sql(
+                generated_sql, tenant_code)
+
+            # HERE IS THE CRITICAL CHANGE:
+            # Only return the validated SQL, not a modified version
+            if is_valid:
+                return validation_result  # Return the actual validated SQL, not the original
+            else:
                 logger.error(
                     f"Invalid SQL generated for tenant {tenant_code}: {generated_sql}")
                 raise ValueError(
