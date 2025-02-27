@@ -218,6 +218,17 @@ class SQLGeneratorAgent(BaseAgent):
             # Check for column errors and fix them
             column_errors = []
 
+            # Fix t.clean_topic reference - this is a derived column that needs to be created
+            if "t.clean_topic" in sql and "LOWER(TRIM(t.topic))" not in sql:
+                # Replace t.clean_topic with LOWER(TRIM(t.topic))
+                sql = re.sub(
+                    r't\.clean_topic\s*=\s*\'([^\']+)\'',
+                    r"LOWER(TRIM(t.topic)) = '\1'",
+                    sql
+                )
+                column_errors.append(
+                    "Fixed t.clean_topic reference to use LOWER(TRIM(t.topic))")
+
             # Make sure clid is included in the base_data CTE if it's used later
             if "clid" in sql and "clid" not in sql.split("base_data AS (")[1].split(")")[0]:
                 # Add clid to the base_data CTE
@@ -236,6 +247,60 @@ class SQLGeneratorAgent(BaseAgent):
                             sql = sql.replace(select_part, modified_select)
                             column_errors.append(
                                 "Added missing column 't.clid' to base_data CTE")
+
+            # Replace transcription with summary in final output
+            if "transcription" in sql and "summary" in sql:
+                # Replace transcription with summary in SELECT clauses outside of base_data CTE
+                base_cte_end = sql.find(
+                    "base_data AS (") + sql[sql.find("base_data AS ("):].find(")") + 1
+                rest_of_sql = sql[base_cte_end:]
+
+                # Replace transcription with summary in the rest of the SQL
+                if "transcription" in rest_of_sql:
+                    rest_of_sql = re.sub(
+                        r'\btranscription\b', 'summary', rest_of_sql)
+                    sql = sql[:base_cte_end] + rest_of_sql
+                    column_errors.append(
+                        "Replaced 'transcription' with 'summary' in output")
+
+            # Rename clean_topic to topic in the final output for better readability
+            final_select = sql.split("SELECT")[-1]
+            if "clean_topic" in final_select and "as topic" not in final_select.lower():
+                # Find if clean_topic is already being aliased
+                if not re.search(r'clean_topic\s+as\s+\w+', final_select, re.IGNORECASE):
+                    # Replace clean_topic with clean_topic as topic in the final SELECT
+                    sql = re.sub(
+                        r'(SELECT\s+(?:.*?,\s*)?)clean_topic(\s*,|\s*FROM|\s*$)',
+                        r'\1clean_topic as topic\2',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                    column_errors.append(
+                        "Renamed 'clean_topic' to 'topic' in output for better readability")
+
+            # Remove transcription_id from final output
+            final_select = sql.split("SELECT")[-1]
+            if "transcription_id" in final_select:
+                # Find the final SELECT statement
+                select_pattern = r'SELECT\s+(.*?)\s+FROM'
+                select_match = re.search(
+                    select_pattern, final_select, re.IGNORECASE | re.DOTALL)
+
+                if select_match:
+                    columns = select_match.group(1)
+                    # Remove transcription_id from the column list
+                    if "transcription_id" in columns:
+                        new_columns = re.sub(
+                            r'\btranscription_id\s*,\s*', '', columns)
+                        new_columns = re.sub(
+                            r',\s*\btranscription_id\b', '', new_columns)
+                        new_columns = re.sub(
+                            r'\btranscription_id\b', '', new_columns)
+
+                        # Replace the columns in the final SELECT
+                        sql = sql.replace(columns, new_columns)
+                        column_errors.append(
+                            "Removed 'transcription_id' from output")
 
             # Log validation details
             logger.info(f"SQL Validation Details:\n\
