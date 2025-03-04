@@ -415,7 +415,7 @@ def main():
             f"Pipeline execution failed after {elapsed_time:.2f} seconds: {str(e)}")
         raise
     finally:
-        logger.info("========== DATA PIPELINE EXECUTION FINISHED ==========")
+        logger.info("==========  DATA PIPELINE EXECUTION FINISHED  ==========")
 
 
 if __name__ == "__main__":
