@@ -136,6 +136,25 @@ services:
     networks:
       - app-network
 
+  qdrant:
+    build:
+      context: ./backend
+      dockerfile: qdrant.Dockerfile
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - app-network
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 volumes:
   frontend_node_modules:
     name: ai_analyzer_frontend_node_modules
@@ -155,6 +174,7 @@ volumes:
   cron_logs:
     name: ai_analyzer_cron_logs
     driver: local
+  qdrant_data:
 
 networks:
   app-network:

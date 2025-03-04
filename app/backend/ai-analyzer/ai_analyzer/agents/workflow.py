@@ -67,11 +67,11 @@ class CallAnalysisWorkflow:
         context = base_context or ""
         return f"""
         {context}
-
+        
         CRITICAL TENANT ISOLATION RULES:
         1. EVERY query MUST use this exact base CTE structure:
         WITH base_data AS (
-            SELECT
+            SELECT 
                 t.id,
                 t.transcription_id,
                 t.transcription,
@@ -92,16 +92,16 @@ class CallAnalysisWorkflow:
             AND t.tenant_code = :tenant_code
         ),
         topic_trends AS (
-            SELECT
+            SELECT 
                 clean_topic as topic,
                 COUNT(*) as mention_count,
                 COUNT(*) FILTER (WHERE processing_date >= CURRENT_DATE - INTERVAL '7 days') as recent_mentions,
                 COUNT(*) FILTER (WHERE clean_sentiment = 'positief') as positive_mentions,
                 COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') as negative_mentions,
-                ROUND(AVG(CASE
+                ROUND(AVG(CASE 
                     WHEN clean_sentiment = 'positief' THEN 1
                     WHEN clean_sentiment = 'negatief' THEN -1
-                    ELSE 0
+                    ELSE 0 
                 END)::numeric, 2) as sentiment_score
             FROM base_data
             WHERE clean_topic IS NOT NULL
@@ -250,7 +250,7 @@ class CallAnalysisWorkflow:
                             True  # is_cached
                         )
 
-                        return {
+                return {
                             'success': True,
                             'response': cached_result.get("result", ""),
                             'followup_questions': followup_questions,
@@ -408,7 +408,7 @@ class CallAnalysisWorkflow:
                 'success': True,
                 'response': result,
                 'followup_questions': followup_questions
-            }
+                }
 
         except Exception as e:
             logger.error(f"Error in workflow: {str(e)}")
@@ -750,7 +750,7 @@ class CallAnalysisWorkflow:
                     "Hoe is de verdeling van positieve, neutrale en negatieve gesprekken per onderwerp?"
                 ]
             else:
-                return [
+            return [
                     "What are the top 5 most discussed topics and their relative percentages?",
                     "What call trends have we seen over the past two weeks?",
                     "How is the distribution of positive, neutral, and negative calls per topic?"

@@ -63,3 +63,5 @@ tzdata==2024.2
 urllib3==2.2.3 
 uvicorn==0.32.0 
 yarl==1.15.4 
+qdrant-client>=1.6.0
+fastembed>=0.1.2

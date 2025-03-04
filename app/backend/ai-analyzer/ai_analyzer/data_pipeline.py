@@ -12,6 +12,7 @@ from datetime import datetime
 import logging
 from psycopg2 import connect
 import time
+from ai_analyzer.utils import update_tenant_vector_db
 
 # Enhanced logging setup
 logging.basicConfig(
@@ -323,8 +324,40 @@ def process_data_pipeline(session, tenant_code):
         return False
 
 
+def update_vector_database(tenant_codes, months=3):
+    """Update the vector database for all tenants"""
+    logger.info(
+        f"Starting vector database update for {len(tenant_codes)} tenants: {tenant_codes}")
+    db_url = DATABASE_URL  # Use the DATABASE_URL constant directly
+    logger.info(f"Using database URL: {db_url}")
+
+    if not tenant_codes:
+        logger.warning("No tenant codes provided for vector database update")
+        return
+
+    for tenant_code in tenant_codes:
+        logger.info(
+            f"Processing vector database update for tenant: {tenant_code}")
+        try:
+            # Add more detailed logging
+            logger.info(
+                f"Calling update_tenant_vector_db for tenant: {tenant_code}")
+            update_tenant_vector_db(db_url, tenant_code, months)
+            logger.info(
+                f"Completed vector database update for tenant {tenant_code}")
+        except Exception as e:
+            logger.error(
+                f"Error updating vector database for tenant {tenant_code}: {e}")
+            logger.exception("Detailed error:")
+
+    logger.info("Vector database update process completed")
+
+
 def main():
     """Main function to run the data pipeline"""
+    start_time = time.time()
+    logger.info("========== STARTING DATA PIPELINE EXECUTION ==========")
+
     try:
         logger.info("Starting data pipeline execution")
 
@@ -345,20 +378,44 @@ def main():
 
                 logger.info(f"Found {len(tenant_results)} tenants to process")
 
-                # Process each tenant
+                # Process each tenant individually
                 for tenant_code, alias in tenant_results:
                     logger.info(f"Processing tenant: {tenant_code} ({alias})")
+
+                    # Process data pipeline for this tenant
                     if not process_data_pipeline(session, tenant_code):
                         logger.error(
                             f"Failed to process tenant: {tenant_code}")
+                        continue
+
+                    # Update vector database for this tenant immediately
+                    try:
+                        logger.info(
+                            f"Updating vector database for tenant: {tenant_code}")
+                        update_vector_database([tenant_code], months=3)
+                        logger.info(
+                            f"Completed full processing for tenant: {tenant_code}")
+                    except Exception as e:
+                        logger.error(
+                            f"Error updating vector database for tenant {tenant_code}: {e}")
+                        logger.exception(
+                            f"Detailed vector database error for {tenant_code}:")
 
             except Exception as e:
                 logger.error(f"Error during tenant processing: {e}")
                 raise
 
+        elapsed_time = time.time() - start_time
+        logger.info(
+            f"Data pipeline execution completed successfully in {elapsed_time:.2f} seconds")
+
     except Exception as e:
-        logger.error(f"Pipeline execution failed: {str(e)}")
+        elapsed_time = time.time() - start_time
+        logger.error(
+            f"Pipeline execution failed after {elapsed_time:.2f} seconds: {str(e)}")
         raise
+    finally:
+        logger.info("========== DATA PIPELINE EXECUTION FINISHED ==========")
 
 
 if __name__ == "__main__":

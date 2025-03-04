@@ -27,6 +27,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        - TARGETPLATFORM=linux/arm64
     container_name: db_init
     depends_on:
       database:
@@ -52,10 +54,14 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.cron
+      args:
+        - TARGETPLATFORM=linux/arm64
     container_name: cron_app
     depends_on:
       db_init:
         condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -78,12 +84,37 @@ services:
     networks:
       - app-network
 
+  qdrant:
+    build:
+      context: ./backend
+      dockerfile: qdrant.Dockerfile
+      args:
+        - TARGETPLATFORM=linux/arm64
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - app-network
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 volumes:
   postgres_data:
     name: ai_analyzer_postgres_data
     driver: local
   cron_logs:
     name: ai_analyzer_cron_logs
+    driver: local
+  qdrant_data:
+    name: ai_analyzer_qdrant_data
     driver: local
 
 networks:
