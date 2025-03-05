@@ -9,11 +9,13 @@ import hashlib
 import time
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from psycopg2 import connect
 from typing import List
 from pydantic import BaseModel
 import psycopg2
+import json
+import os
 
 # Update internal imports
 from ai_analyzer.config import config, DATABASE_URL
@@ -26,8 +28,9 @@ from ai_analyzer.data_import_postgresql import (
     get_conversation_messages
 )
 from ai_analyzer.cache_manager import DatabaseCacheManager
-from ai_analyzer.agents.workflow import CallAnalysisWorkflow
-import os
+from ai_analyzer.agents import AgentManager  # Import our new AgentManager
+from ai_analyzer.agents.workflow import CallAnalysisWorkflow  # Add this import
+from ai_analyzer.data_pipeline import get_db_session
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -252,34 +255,19 @@ def create_base_context(tenant_code: str) -> str:
 
 
 def get_workflow_for_tenant(tenant_code: str) -> CallAnalysisWorkflow:
-    """Get or create workflow instance for tenant"""
+    """Get or create a workflow instance for a tenant"""
     try:
-        if tenant_code not in workflow_instances:
-            logger.info(
-                f"Creating new workflow instance for tenant: {tenant_code}")
-            workflow_instances[tenant_code] = CallAnalysisWorkflow(
-                db_url=DATABASE_URL,
-                model_provider="openai",
-                model_name=os.getenv('MODEL_NAME', 'gpt-4'),
-                api_key=os.getenv('AI_ANALYZER_OPENAI_API_KEY'),
-                restricted_tables=restricted_tables,
-                base_context=create_base_context(tenant_code),
-                cache_manager=cache_manager
-            )
-            logger.info(
-                f"Successfully created workflow instance for tenant: {tenant_code}")
-        else:
-            logger.info(
-                f"Using existing workflow instance for tenant: {tenant_code}")
-
-        return workflow_instances[tenant_code]
+        logger.info(f"Creating workflow instance for tenant: {tenant_code}")
+        # Create a new workflow instance
+        workflow = CallAnalysisWorkflow(tenant_code=tenant_code)
+        logger.info(
+            f"Successfully created workflow instance for tenant: {tenant_code}")
+        return workflow
     except Exception as e:
-        logger.error(
-            f"Error getting workflow for tenant {tenant_code}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error initializing workflow for tenant {tenant_code}"
-        )
+        logger.error(f"Error creating workflow for tenant {tenant_code}: {e}")
+        logger.exception("Detailed error:")
+        # Return a basic workflow as fallback
+        return CallAnalysisWorkflow(tenant_code=tenant_code)
 
 
 def wait_for_db(max_retries=10, delay=10):
@@ -551,112 +539,120 @@ class QueryRequest(BaseModel):
 
 
 @app.post("/api/query")
-async def process_query(
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    """Process a user query"""
+async def query(request: Request, db_session: Session = Depends(get_db)):
+    """Process a user query using the Agno agents with Qdrant"""
     try:
-        # Get tenant code from headers
-        tenant_code = request.headers.get('X-Tenant-Code')
+        data = await request.json()
+
+        # Support both formats: direct "question" field or inside a "query" object
+        question = data.get("question", "")
+        if not question and "query" in data:
+            question = data.get("query", "")
+
+        conversation_id = data.get("conversation_id", str(uuid.uuid4()))
+
+        # Get tenant code from either the request body or headers
+        tenant_code = data.get("tenant_code", "")
         if not tenant_code:
-            raise HTTPException(status_code=401, detail="Tenant code required")
+            tenant_code = request.headers.get('X-Tenant-Code', "")
 
-        # Get or create workflow for tenant
-        workflow = get_workflow_for_tenant(tenant_code)
+        if not question:
+            raise HTTPException(status_code=400, detail="Question is required")
 
-        # Parse request body
-        try:
-            body = await request.json()
-            # Validate with Pydantic model
-            query_request = QueryRequest(**body)
-        except Exception as e:
-            logger.error(f"Error parsing request body: {e}")
+        if not tenant_code:
             raise HTTPException(
-                status_code=422,
-                detail="Invalid request format. Required fields: either 'query' or 'question' (string), optional: 'conversation_id' (string)"
-            )
+                status_code=400, detail="Tenant code is required")
 
-        # Use validated request data
-        question = query_request.get_question
-        conversation_id = query_request.conversation_id or str(uuid.uuid4())
+        logger.info(
+            f"Processing query: '{question}' for tenant: {tenant_code}")
 
-        logger.info(f"Processing query for tenant: {tenant_code}")
-        logger.info(f"Question: {question}")
-        logger.info(f"Conversation ID: {conversation_id}")
+        # Use our new AgentManager instead of the old workflow
+        agent_manager = AgentManager(
+            tenant_code=tenant_code, session=db_session)
 
-        # Process query through workflow
-        result = await workflow.process_user_question(
-            question=question,
-            conversation_id=conversation_id,
-            db_session=db,
-            tenant_code=tenant_code
+        # Process the query using semantic search in Qdrant
+        search_results = agent_manager.search_transcriptions(question)
+
+        # Generate a response based on the search results
+        response = agent_manager.generate_response(question, search_results)
+
+        # Generate follow-up questions
+        followup_questions = agent_manager.generate_followup_questions(
+            "system",
+            [question],
+            [response]
         )
 
-        if not result['success'] and result.get('context_exceeded'):
-            # Special handling for context length exceeded
-            return {
-                "success": False,
-                "error": result['error'],
-                "context_exceeded": True,
-                "followup_questions": result['followup_questions']
-            }
+        # Store the conversation for history
+        if db_session:
+            try:
+                # Convert response to string if it's not already
+                response_str = response if isinstance(
+                    response, str) else str(response)
 
-        logger.info(f"Workflow result: {result}")
+                # Convert followup_questions to JSON string
+                followup_json = json.dumps(followup_questions)
 
-        if result.get('success', False):
-            # Store successful conversation
-            store_success = store_conversation(
-                session=db,
-                user_id=tenant_code,  # Use tenant_code as user_id for now
-                conversation_id=conversation_id,
-                query=question,
-                response=result['response'],
-                message_order=None,
-                followup_questions=result.get('followup_questions', [])
-            )
+                # Use the existing store_conversation function instead of raw SQL
+                store_conversation(
+                    session=db_session,
+                    user_id=tenant_code,
+                    conversation_id=conversation_id,
+                    query=question,
+                    response=response_str,
+                    message_order=0,
+                    followup_questions=followup_questions
+                )
+            except Exception as e:
+                logger.error(f"Error storing conversation: {e}")
+                logger.exception("Detailed error:")
+                db_session.rollback()
 
-            if not store_success:
-                logger.warning("Failed to store conversation")
-
-            return {
-                "success": True,
-                "result": result['response'],
-                "conversation_id": conversation_id,
-                "followup_questions": result.get('followup_questions', [])
-            }
-        else:
-            error_msg = result.get('error', 'Unknown error occurred')
-            reformulated = result.get('reformulated_question', '')
-            followup = result.get('followup_questions',
-                                  get_default_followup_questions())
-
-            # Store the error response
-            store_conversation(
-                session=db,
-                user_id=tenant_code,  # Use tenant_code as user_id for now
-                conversation_id=conversation_id,
-                query=question,
-                response=f"Error: {error_msg}\n" +
-                (f"Try instead: {reformulated}" if reformulated else ""),
-                message_order=None,
-                followup_questions=followup
-            )
-
-            return {
-                "success": False,
-                "error": error_msg,
-                "reformulated_question": reformulated,
-                "followup_questions": followup,
-                "conversation_id": conversation_id
-            }
-
+        return {
+            "success": True,
+            "response": response,
+            "conversation_id": conversation_id,
+            "followup_questions": followup_questions
+        }
+    except HTTPException as he:
+        # Re-raise HTTP exceptions
+        raise he
     except Exception as e:
-        logger.error(f"Error processing query: {e}")
+        logger.error(f"Error processing query: {str(e)}")
+        logger.exception("Detailed error:")
         return {
             "success": False,
             "error": str(e),
-            "followup_questions": get_default_followup_questions()
+            "conversation_id": str(uuid.uuid4())
+        }
+
+
+# Keep the old endpoint for backward compatibility
+@app.post("/api/query_sql")
+async def query_sql(request: Request, db_session: Session = Depends(get_db)):
+    """Legacy endpoint that uses SQL-based workflow"""
+    try:
+        data = await request.json()
+        question = data.get("question", "")
+        conversation_id = data.get("conversation_id", "")
+        tenant_code = data.get("tenant_code", "")
+
+        workflow = get_workflow_for_tenant(tenant_code)
+        result = await workflow.process_user_question(
+            question,
+            conversation_id,
+            db_session,
+            tenant_code
+        )
+
+        logger.info(f"Workflow result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error processing query: {str(e)}")
+        logger.exception("Detailed error:")
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 
@@ -696,38 +692,190 @@ async def get_conversations(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/api/initial-questions")
-async def get_initial_questions(request: Request, db: Session = Depends(get_db)):
-    """Get initial suggested questions"""
+async def get_initial_questions(
+    request: Request,
+    transcription_id: str = None,
+    db_session: Session = Depends(get_db)
+):
+    """Generate initial questions for a transcription"""
     try:
         # Get tenant code from headers
         tenant_code = request.headers.get('X-Tenant-Code')
         if not tenant_code:
             raise HTTPException(status_code=401, detail="Tenant code required")
 
-        # Get or create workflow for tenant
-        workflow = get_workflow_for_tenant(tenant_code)
+        # Create a hardcoded response with categories structured exactly as the frontend expects
+        categories = {
+            "Trending Topics": {
+                "description": "Analyze popular discussion topics",
+                "questions": [
+                    "What are the most discussed topics this month?",
+                    "Which topics show increasing trends?",
+                    "What topics are commonly mentioned in positive calls?",
+                    "How have topic patterns changed over time?",
+                    "What are the emerging topics from recent calls?"
+                ]
+            },
+            "Customer Sentiment": {
+                "description": "Understand customer satisfaction trends",
+                "questions": [
+                    "How has overall sentiment changed over time?",
+                    "What topics generate the most positive feedback?",
+                    "Which issues need immediate attention based on sentiment?",
+                    "Show me the distribution of sentiments across topics",
+                    "What topics have improving sentiment trends?"
+                ]
+            },
+            "Call Analysis": {
+                "description": "Analyze call patterns and duration",
+                "questions": [
+                    "What is the average call duration by topic?",
+                    "Which topics tend to have longer calls?",
+                    "Show me the call volume trends by time of day",
+                    "What's the distribution of call directions by topic?",
+                    "Which days have the highest call volumes?"
+                ]
+            },
+            "Topic Correlations": {
+                "description": "Discover relationships between topics",
+                "questions": [
+                    "Which topics often appear together?",
+                    "What topics are related to technical issues?",
+                    "Show me topics that commonly lead to follow-up calls",
+                    "What topics frequently occur with complaints?",
+                    "Which topics have similar sentiment patterns?"
+                ]
+            },
+            "Performance Metrics": {
+                "description": "Analyze key performance indicators",
+                "questions": [
+                    "What's our overall customer satisfaction rate?",
+                    "Show me topics with the highest resolution rates",
+                    "Which topics need more attention based on metrics?",
+                    "What are our best performing areas?",
+                    "Show me trends in call handling efficiency"
+                ]
+            },
+            "Time-based Analysis": {
+                "description": "Understand temporal patterns",
+                "questions": [
+                    "What are the busiest times for calls?",
+                    "How do topics vary by time of day?",
+                    "Show me weekly trends in call volumes",
+                    "What patterns emerge during peak hours?",
+                    "Which days show the best sentiment scores?"
+                ]
+            }
+        }
 
-        # Get initial questions from workflow
-        initial_questions = await workflow.get_initial_questions()
+        # Return in the exact format the frontend expects
+        return {
+            "success": True,
+            "categories": categories
+        }
+    except Exception as e:
+        logger.error(f"Error generating initial questions: {e}")
+        logger.exception("Detailed error:")
+
+        # Return a fallback response with the same structure
+        fallback_categories = {
+            "General Analysis": {
+                "description": "Basic analysis questions",
+                "questions": [
+                    "What are the most common topics in our calls?",
+                    "How has customer sentiment changed over time?",
+                    "Show me the breakdown of call topics by sentiment"
+                ]
+            }
+        }
+
+        return {
+            "success": False,
+            "categories": fallback_categories
+        }
+
+
+@app.post("/api/analyze-response")
+async def analyze_response(request: Request, db_session: Session = Depends(get_db)):
+    """Analyze a response to a question"""
+    try:
+        data = await request.json()
+
+        # Extract parameters
+        transcription_id = data.get("transcription_id")
+        question_id = data.get("question_id")
+        response_text = data.get("response")
+        tenant_code = request.headers.get('X-Tenant-Code')
+
+        if not all([transcription_id, question_id, response_text, tenant_code]):
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required parameters: transcription_id, question_id, response, tenant_code"
+            )
+
+        # Create agent manager
+        agent_manager = AgentManager(
+            tenant_code=tenant_code, session=db_session)
+
+        # Analyze response
+        analysis = agent_manager.analyze_response(
+            transcription_id, question_id, response_text
+        )
 
         return {
             "success": True,
-            "categories": initial_questions
+            "analysis": analysis
         }
     except Exception as e:
-        logger.error(f"Error getting initial questions: {e}")
+        logger.error(f"Error analyzing response: {e}")
+        logger.exception("Detailed error:")
         return {
             "success": False,
-            "categories": {
-                "General Analysis": {
-                    "description": "Basic analysis questions",
-                    "questions": [
-                        "What are the most common topics in our calls?",
-                        "How has customer sentiment changed over time?",
-                        "Show me the breakdown of call topics by sentiment"
-                    ]
-                }
-            }
+            "error": str(e)
+        }
+
+
+@app.post("/api/generate-followup")
+async def generate_followup(request: Request, db_session: Session = Depends(get_db)):
+    """Generate follow-up questions based on previous conversation"""
+    try:
+        data = await request.json()
+
+        # Extract parameters
+        conversation_type = data.get("conversation_type", "system")
+        questions = data.get("questions", [])
+        responses = data.get("responses", [])
+        tenant_code = request.headers.get('X-Tenant-Code')
+
+        if not tenant_code:
+            raise HTTPException(status_code=401, detail="Tenant code required")
+
+        if not questions or not responses:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required parameters: questions, responses"
+            )
+
+        # Create agent manager
+        agent_manager = AgentManager(
+            tenant_code=tenant_code, session=db_session)
+
+        # Generate follow-up questions
+        followup_questions = agent_manager.generate_followup_questions(
+            conversation_type, questions, responses
+        )
+
+        return {
+            "success": True,
+            "followup_questions": followup_questions
+        }
+    except Exception as e:
+        logger.error(f"Error generating follow-up questions: {e}")
+        logger.exception("Detailed error:")
+        return {
+            "success": False,
+            "error": str(e),
+            "followup_questions": get_default_followup_questions()
         }
 
 

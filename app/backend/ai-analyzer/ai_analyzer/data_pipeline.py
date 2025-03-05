@@ -41,6 +41,20 @@ Session = sessionmaker(bind=engine)
 # Base for ORM models
 Base = declarative_base()
 
+# Add the missing get_db_session function
+
+
+def get_db_session():
+    """
+    Create and return a database session.
+
+    Returns:
+        sqlalchemy.orm.Session: A database session
+    """
+    engine = create_engine(DATABASE_URL)
+    Session = sessionmaker(bind=engine)
+    return Session()
+
 
 class Transcription(Base):
     """Model for transcription data"""
@@ -351,6 +365,36 @@ def update_vector_database(tenant_codes, months=3):
             logger.exception("Detailed error:")
 
     logger.info("Vector database update process completed")
+
+
+def create_agent_tables(engine):
+    """Create tables needed for the agent manager if they don't exist"""
+    with engine.connect() as conn:
+        # Create questions table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS questions (
+                id VARCHAR(255) PRIMARY KEY,
+                transcription_id VARCHAR(255) NOT NULL,
+                question TEXT NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                tenant_code VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        # Create analyses table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS analyses (
+                id VARCHAR(255) PRIMARY KEY,
+                transcription_id VARCHAR(255) NOT NULL,
+                question_id VARCHAR(255) NOT NULL,
+                analysis TEXT NOT NULL,
+                tenant_code VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        conn.commit()
 
 
 def main():

@@ -250,7 +250,7 @@ class CallAnalysisWorkflow:
                             True  # is_cached
                         )
 
-                return {
+                        return {
                             'success': True,
                             'response': cached_result.get("result", ""),
                             'followup_questions': followup_questions,
@@ -408,7 +408,7 @@ class CallAnalysisWorkflow:
                 'success': True,
                 'response': result,
                 'followup_questions': followup_questions
-                }
+            }
 
         except Exception as e:
             logger.error(f"Error in workflow: {str(e)}")
@@ -731,15 +731,15 @@ class CallAnalysisWorkflow:
             if metrics['customer_service'] and metrics['volume_mentioned']:
                 if is_dutch:
                     return [
-                        f"Wat zijn de meest voorkomende klantenservice-onderwerpen en hun volumeverdeling?",
-                        f"Welke klantenservice-problemen leiden tot de langste gesprekken?",
-                        f"Hoe verandert het gespreksvolume van klantenservice gedurende de dag?"
+                        "Wat zijn de meest voorkomende klantenservice-onderwerpen en hun volumeverdeling?",
+                        "Welke klantenservice-problemen leiden tot de langste gesprekken?",
+                        "Hoe verandert het gespreksvolume van klantenservice gedurende de dag?"
                     ]
                 else:
                     return [
-                        f"What are the most common customer service topics and their volume distribution?",
-                        f"Which customer service issues lead to the longest conversations?",
-                        f"How does customer service call volume change throughout the day?"
+                        "What are the most common customer service topics and their volume distribution?",
+                        "Which customer service issues lead to the longest conversations?",
+                        "How does customer service call volume change throughout the day?"
                     ]
 
             # Default questions based on aggregated insights for call analysis
@@ -750,7 +750,7 @@ class CallAnalysisWorkflow:
                     "Hoe is de verdeling van positieve, neutrale en negatieve gesprekken per onderwerp?"
                 ]
             else:
-            return [
+                return [
                     "What are the top 5 most discussed topics and their relative percentages?",
                     "What call trends have we seen over the past two weeks?",
                     "How is the distribution of positive, neutral, and negative calls per topic?"
