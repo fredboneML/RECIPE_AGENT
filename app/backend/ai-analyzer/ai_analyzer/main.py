@@ -596,14 +596,11 @@ async def process_query(request: Request, db_session: Session = Depends(get_db))
             logger.exception("Detailed error:")
             # Continue even if storage fails
 
-        # Return a response that includes everything the frontend needs
+        # Return a response with the exact fields the frontend expects
         return {
-            "success": True,  # Add success flag
             "response": response,
             "conversation_id": conversation_id,
-            "followup_questions": followup_questions,
-            "query": query,  # Include the original query
-            "timestamp": datetime.now().isoformat()  # Add timestamp
+            "followup_questions": followup_questions
         }
 
     except Exception as e:

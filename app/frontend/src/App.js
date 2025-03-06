@@ -27,8 +27,18 @@ function App() {
     : `http://${window.location.hostname}:8000`;
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ 
+        behavior: "smooth", 
+        block: "end" 
+      });
+    }
   };
+
+  // Add effect to scroll to bottom when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
 
   useEffect(() => {
@@ -151,7 +161,7 @@ const fetchInitialQuestions = async () => {
           reformulated_question: item.reformulated_question
         }));
         setMessages(transformedMessages);
-        scrollToBottom();
+        setTimeout(scrollToBottom, 100); // Add scroll after loading messages
       }
     } catch (error) {
       console.error('Error fetching messages:', error);
@@ -185,28 +195,35 @@ const fetchInitialQuestions = async () => {
       
       if (!isRequestCanceled) {
         if (data.error) {
-          setMessages(prev => [...prev, { 
+          const errorMessage = {
             query,
             error: data.error,
             reformulated_question: data.reformulated_question,
-            followup_questions: data.followup_questions,
-            timestamp: new Date() 
-          }]);
+            followup_questions: data.followup_questions || [],
+            timestamp: new Date()
+          };
+          console.log("Adding error message to UI:", errorMessage);
+          setMessages(prev => [...prev, errorMessage]);
         } else {
-          setResult(data.result);
+          const responseText = data.result || data.response || "";
+          setResult(responseText);
           const newMessage = {
             query,
-            response: data.result,
-            followup_questions: data.followup_questions,
+            response: responseText,
+            followup_questions: data.followup_questions || [],
             timestamp: new Date()
           };
           
+          console.log("Adding new message to UI:", newMessage);
           setMessages(prev => [...prev, newMessage]);
           
           if (!currentConversation) {
             setCurrentConversation({ id: data.conversation_id });
             fetchConversations();
           }
+          
+          // Force scroll after a small delay to ensure rendering is complete
+          setTimeout(scrollToBottom, 100);
         }
       }
     } catch (error) {
@@ -336,7 +353,8 @@ const fetchInitialQuestions = async () => {
 
           <div className="messages-container">
             {messages.map((message, index) => (
-              <div key={index}>
+              <div key={index} className="message-group">
+                {/* User message */}
                 {message.query && (
                   <div className="message user">
                     <div className="message-content user-message">
@@ -344,6 +362,8 @@ const fetchInitialQuestions = async () => {
                     </div>
                   </div>
                 )}
+                
+                {/* Assistant response */}
                 {message.response && (
                   <div className="message assistant">
                     <div className="message-content assistant-message">
@@ -367,6 +387,8 @@ const fetchInitialQuestions = async () => {
                     )}
                   </div>
                 )}
+                
+                {/* Error message with reformulated question */}
                 {message.error && (
                   <div className="error-suggestion">
                     <h4>Query Suggestion:</h4>

@@ -266,7 +266,7 @@ class AgentManager:
                     collection_name=collection_name,
                     # Specify vector name
                     query_vector=(vector_name, query_vector),
-                    limit=3  # Increased from 5 to 50
+                    limit=2
                 )
 
                 # Log the search results
