@@ -266,7 +266,7 @@ class AgentManager:
                     collection_name=collection_name,
                     # Specify vector name
                     query_vector=(vector_name, query_vector),
-                    limit=50  # Increased from 5 to 50
+                    limit=3  # Increased from 5 to 50
                 )
 
                 # Log the search results
@@ -606,3 +606,409 @@ class AgentManager:
         else:
             logger.error("No agent found")
             return None
+
+    def process_query(self, query: str) -> str:
+        """Process a user query using hybrid approach with Agno multiagent"""
+        try:
+            # 1. Search for relevant transcriptions using vector search
+            similar_transcripts = self.search_transcriptions(query)
+
+            if not similar_transcripts:
+                return "I couldn't find any relevant transcriptions to answer your question. Could you please provide more details or try a different query?"
+
+            # 2. Check for entity corrections (e.g., partial names)
+            entity_corrections = self._detect_entity_corrections(
+                query, similar_transcripts)
+
+            # 3. Generate SQL query based on the natural language query and similar transcripts
+            sql_query = self.generate_sql_query(query, similar_transcripts)
+
+            # Log the generated SQL query
+            logger.info(f"Generated SQL query: {sql_query}")
+
+            # 4. Format examples for the agent
+            examples_text = self._format_example_transcriptions(
+                similar_transcripts)
+
+            # 5. Initialize agents if needed
+            self._initialize_agents_if_needed()
+
+            # Get the agent
+            agent = self._get_agent()
+
+            if agent is None:
+                return "I'm sorry, I couldn't process your query. The agent could not be initialized."
+
+            # 6. Execute SQL query if available
+            sql_results = ""
+            if sql_query and self.session:
+                try:
+                    logger.info(f"Executing SQL query: {sql_query}")
+                    result = self.session.execute(text(sql_query))
+                    rows = result.fetchall()
+                    if rows:
+                        # Format SQL results
+                        columns = result.keys()
+                        sql_results = "SQL Query Results:\n"
+                        sql_results += "\n".join(
+                            [f"{', '.join(columns)}", "-" * 40])
+                        for row in rows[:10]:  # Limit to 10 rows
+                            sql_results += f"\n{', '.join(str(val) for val in row)}"
+                        if len(rows) > 10:
+                            sql_results += f"\n... and {len(rows) - 10} more rows"
+
+                        # Log the SQL results
+                        logger.info(f"SQL query results: {sql_results}")
+                    else:
+                        logger.info("SQL query returned no results")
+                except Exception as e:
+                    logger.error(f"Error executing SQL query: {e}")
+                    logger.exception("Detailed error:")
+                    sql_results = f"Error executing SQL query: {str(e)}"
+
+            # 7. Create a prompt with the context, query, entity corrections, and SQL results
+            prompt = f"""
+            I need to answer this user question:
+            "{query}"
+            
+            {entity_corrections}
+            
+            Here are some relevant call transcriptions that might help:
+            {examples_text}
+            
+            {sql_results if sql_results else ""}
+            
+            Based on these transcriptions and SQL results, please provide a comprehensive answer to the user's question.
+            Include specific details from the transcriptions when relevant.
+            If the transcriptions don't contain enough information to answer the question fully, 
+            acknowledge this limitation in your response.
+            
+            {'' if not entity_corrections else 'IMPORTANT: Make sure to acknowledge the entity correction at the beginning of your response.'}
+            """
+
+            # 8. Use the agent to generate a response
+            try:
+                response_obj = agent.run(prompt)
+
+                # Extract the text content from the RunResponse object
+                if hasattr(response_obj, 'content'):
+                    response = response_obj.content
+                elif isinstance(response_obj, str):
+                    response = response_obj
+                else:
+                    # Convert the response object to a string if it's not already a string
+                    response = str(response_obj)
+
+                # Log the final response
+                logger.info(f"Final response: {response[:100]}...")
+
+                return response
+
+            except Exception as e:
+                logger.error(f"Error running agent: {e}")
+                logger.exception("Detailed error:")
+                return "I'm sorry, I couldn't generate a response based on the available data."
+
+        except Exception as e:
+            logger.error(f"Error processing query: {e}")
+            logger.exception("Detailed error:")
+            return f"I'm sorry, I couldn't process your query. Error: {str(e)}"
+
+    def _detect_entity_corrections(self, query: str, transcripts: List[Dict[str, Any]]) -> str:
+        """Detect and suggest corrections for entity names in the query"""
+        try:
+            # Extract potential entity names from the query
+            # This is a simple implementation - in a production system, you might use NER
+            query_words = query.lower().split()
+            potential_entities = []
+
+            # Look for capitalized words in transcripts that might be entities
+            entity_candidates = {}
+
+            for transcript in transcripts:
+                text = transcript.get("text", "")
+                # Extract metadata
+                metadata = transcript.get("metadata", {})
+                summary = metadata.get("summary", "")
+
+                # Combine text and summary for entity extraction
+                content = f"{text} {summary}"
+
+                # Simple entity extraction - look for capitalized words
+                words = content.split()
+                for i, word in enumerate(words):
+                    if word and word[0].isupper() and i < len(words) - 1:
+                        # Check if this might be a name (two capitalized words in sequence)
+                        if i + 1 < len(words) and words[i+1] and words[i+1][0].isupper():
+                            potential_entity = f"{word} {words[i+1]}"
+                            entity_candidates[potential_entity.lower(
+                            )] = potential_entity
+                        else:
+                            entity_candidates[word.lower()] = word
+
+            # Check if any words in the query might be partial matches to entities
+            corrections = []
+            for query_word in query_words:
+                if len(query_word) >= 3:  # Only consider words of reasonable length
+                    for entity_lower, entity_original in entity_candidates.items():
+                        # Check for partial matches
+                        if query_word in entity_lower and query_word != entity_lower:
+                            corrections.append((query_word, entity_original))
+
+            # Generate correction text
+            if corrections:
+                correction_text = "I noticed you mentioned: "
+                for partial, full in corrections:
+                    correction_text += f"'{partial}' which I'm assuming refers to '{full}'. "
+                return correction_text
+
+            return ""
+
+        except Exception as e:
+            logger.error(f"Error detecting entity corrections: {e}")
+            logger.exception("Detailed error:")
+            return ""
+
+    def _format_example_transcriptions(self, transcripts: List[Dict[str, Any]]) -> str:
+        """Format transcriptions as examples for the agent"""
+        formatted_examples = ""
+
+        for i, transcript in enumerate(transcripts):
+            # Extract text and metadata
+            text = transcript.get("text", "")
+            metadata = transcript.get("metadata", {})
+
+            # Format the example with metadata
+            formatted_examples += f"Example {i+1}:\n"
+            formatted_examples += f"ID: {metadata.get('id', 'unknown')}\n"
+            formatted_examples += f"Call ID: {metadata.get('call_id', 'unknown')}\n"
+            formatted_examples += f"Timestamp: {metadata.get('timestamp', 'unknown')}\n"
+            formatted_examples += f"Relevance Score: {metadata.get('score', 0):.4f}\n"
+            formatted_examples += f"Text:\n{text}\n\n"
+
+        return formatted_examples
+
+    def generate_sql_query(self, query: str, similar_transcripts: List[Dict[str, Any]]) -> str:
+        """Generate a SQL query based on the user's natural language query and similar transcripts"""
+        try:
+            # Initialize agents if needed
+            self._initialize_agents_if_needed()
+
+            # Get the SQL generation agent
+            sql_agent = AgentFactory.create_sql_agent(self.tenant_code)
+
+            if sql_agent is None:
+                logger.error("No SQL agent found")
+                return ""
+
+            # Format examples for the agent
+            examples_text = self._format_example_transcriptions(
+                similar_transcripts)
+
+            # Get database schema information
+            db_schema = self._get_database_schema()
+
+            # Extract entity names from the query for better filtering
+            entity_names = self._extract_entity_names_from_query(query)
+            entity_filter_hint = ""
+            if entity_names:
+                entity_filter_hint = f"""
+                IMPORTANT: The query is asking about: {', '.join(entity_names)}
+                Make sure to filter results to only include records related to these entities.
+                Use ILIKE with wildcards for partial name matching (e.g., '%Hendrik%Stuiver%').
+                """
+
+            # Create a prompt with the context and query
+            prompt = f"""
+            Generate a PostgreSQL query for this user question:
+            "{query}"
+            
+            Use these example transcripts as reference:
+            {examples_text}
+            
+            Database schema information:
+            {db_schema}
+            
+            {entity_filter_hint}
+            
+            CRITICAL REQUIREMENTS:
+            1. ALWAYS include "tenant_code = '{self.tenant_code}'" in the WHERE clause
+            2. NEVER use DELETE, UPDATE, INSERT or other data-modifying statements
+            3. Use PostgreSQL syntax
+            4. If text matching is needed, use ILIKE for case-insensitivity
+            5. For people's names, use ILIKE with wildcards
+            6. ONLY use tables that exist in the schema information provided
+            7. The main table for call data is "transcription" (NOT "transcripts")
+            8. LIMIT results to 10-20 rows maximum for readability
+            9. SELECT only the most relevant columns for the question
+            10. Focus on finding SPECIFIC records that answer the question, not general statistics
+            
+            Generate ONLY the SQL query, no explanations.
+            """
+
+            # Use the agent to generate a SQL query
+            try:
+                response_obj = sql_agent.run(prompt)
+
+                # Extract the text content from the RunResponse object
+                if hasattr(response_obj, 'content'):
+                    sql_query = response_obj.content
+                elif isinstance(response_obj, str):
+                    sql_query = response_obj
+                else:
+                    # Convert the response object to a string if it's not already a string
+                    sql_query = str(response_obj)
+
+                # Clean up the SQL query (remove markdown formatting, etc.)
+                sql_query = self._clean_sql_query(sql_query)
+
+                # Validate the SQL query
+                sql_query = self._validate_sql_query(sql_query)
+
+                # Add LIMIT if not present
+                if "LIMIT" not in sql_query.upper():
+                    sql_query += " LIMIT 20;"
+
+                return sql_query
+
+            except Exception as e:
+                logger.error(f"Error running SQL agent: {e}")
+                logger.exception("Detailed error:")
+                return ""
+
+        except Exception as e:
+            logger.error(f"Error generating SQL query: {e}")
+            logger.exception("Detailed error:")
+            return ""
+
+    def _clean_sql_query(self, sql_query: str) -> str:
+        """Clean up the SQL query by removing markdown formatting, etc."""
+        # Remove markdown code block formatting
+        sql_query = re.sub(r'```sql\s*', '', sql_query)
+        sql_query = re.sub(r'```\s*', '', sql_query)
+
+        # Remove leading/trailing whitespace
+        sql_query = sql_query.strip()
+
+        return sql_query
+
+    def _validate_sql_query(self, sql_query: str) -> str:
+        """Validate the SQL query to ensure it's safe to execute"""
+        # Check if the query is empty
+        if not sql_query:
+            return ""
+
+        # Check if the query contains the tenant code
+        if self.tenant_code and f"tenant_code = '{self.tenant_code}'" not in sql_query:
+            # Add tenant code filter if not present
+            if "WHERE" in sql_query.upper():
+                # Add to existing WHERE clause
+                sql_query = sql_query.replace(
+                    "WHERE", f"WHERE tenant_code = '{self.tenant_code}' AND ", 1)
+            else:
+                # Add new WHERE clause before ORDER BY, GROUP BY, LIMIT, etc.
+                for clause in ["ORDER BY", "GROUP BY", "LIMIT", "HAVING"]:
+                    if clause in sql_query.upper():
+                        sql_query = sql_query.replace(
+                            clause, f"WHERE tenant_code = '{self.tenant_code}' {clause}", 1)
+                        break
+                else:
+                    # If no clause found, add WHERE at the end
+                    sql_query += f" WHERE tenant_code = '{self.tenant_code}'"
+
+        # Ensure the query is read-only
+        if any(keyword in sql_query.upper() for keyword in ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE"]):
+            logger.error(f"SQL query contains forbidden keywords: {sql_query}")
+            return ""
+
+        return sql_query
+
+    def _get_database_schema(self) -> str:
+        """Get database schema information for the SQL agent"""
+        try:
+            if not self.session:
+                return "No database connection available."
+
+            # Get table information from the database
+            schema_info = {}
+
+            # Get list of restricted tables
+            restricted_tables = self._get_restricted_tables()
+
+            # Query for table names
+            result = self.session.execute(text("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+            """))
+
+            tables = [row[0]
+                      for row in result if row[0] not in restricted_tables]
+
+            # For each table, get column information
+            for table in tables:
+                result = self.session.execute(text(f"""
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = '{table}'
+                """))
+
+                columns = {row[0]: row[1] for row in result}
+                schema_info[table] = columns
+
+            # Format the schema information
+            formatted_schema = "Available tables and their columns:\n\n"
+
+            for table, columns in schema_info.items():
+                formatted_schema += f"Table: {table}\n"
+                formatted_schema += "Columns:\n"
+                for column, data_type in columns.items():
+                    formatted_schema += f"  - {column} ({data_type})\n"
+                formatted_schema += "\n"
+
+            return formatted_schema
+
+        except Exception as e:
+            logger.error(f"Error getting database schema: {e}")
+            logger.exception("Detailed error:")
+            return "Error retrieving database schema."
+
+    def _get_restricted_tables(self) -> List[str]:
+        """Get list of restricted table names"""
+        try:
+            if not self.session:
+                return ["users", "user_memory", "query_cache", "query_performance"]
+
+            # Try to get restricted tables from database
+            try:
+                result = self.session.execute(text("""
+                    SELECT table_name 
+                    FROM restricted_tables 
+                    WHERE added_by = 'system'
+                """))
+                return [row[0] for row in result]
+            except Exception:
+                # Fallback to minimum set of restricted tables
+                return ["users", "user_memory", "query_cache", "query_performance"]
+
+        except Exception as e:
+            logger.error(f"Error getting restricted tables: {e}")
+            logger.exception("Detailed error:")
+            # Fallback to minimum set of restricted tables
+            return ["users", "user_memory", "query_cache", "query_performance"]
+
+    def _extract_entity_names_from_query(self, query: str) -> List[str]:
+        """Extract potential entity names from the query"""
+        # Simple extraction based on capitalized words
+        words = query.split()
+        entities = []
+
+        for i, word in enumerate(words):
+            # Check if word starts with a capital letter
+            if word and word[0].isupper():
+                entities.append(word)
+            # Check for words that might be part of names but not capitalized
+            elif word.lower() in ['hendrik', 'stu', 'stuiver', 'gerbrand', 'luc']:
+                entities.append(word)
+
+        return entities

@@ -355,22 +355,32 @@ def store_conversation(session, user_id, conversation_id, query, response, messa
             message_order = (last_message.message_order +
                              1) if last_message else 0
 
+        # Create a title from the query for new conversations
+        title = query[:50] + "..." if len(query) > 50 else query
+
+        # Store in UserMemory table
         memory = UserMemory(
             user_id=user_id,
             conversation_id=conversation_id,
             query=query,
             response=response,
-            title=generate_title(query),
+            title=title if message_order == 0 else None,  # Only set title for first message
             message_order=message_order,
             # Handle followup_questions
             followup_questions=followup_questions if followup_questions else []
         )
+
         session.add(memory)
         session.commit()
+
+        logger.info(
+            f"Stored conversation in UserMemory: {conversation_id}, order: {message_order}")
         return True
+
     except Exception as e:
-        session.rollback()
         logger.error(f"Error storing conversation: {e}")
+        logger.exception("Detailed error:")
+        session.rollback()
         return False
 
 
@@ -539,92 +549,67 @@ class QueryRequest(BaseModel):
 
 
 @app.post("/api/query")
-async def query(request: Request, db_session: Session = Depends(get_db)):
-    """Process a user query using the Agno agents with Qdrant"""
+async def process_query(request: Request, db_session: Session = Depends(get_db)):
+    """Process a natural language query"""
     try:
-        data = await request.json()
+        # Parse request body
+        body = await request.json()
+        query = body.get("query", "")
+        tenant_code = body.get("tenant_code", "")
 
-        # Support both formats: direct "question" field or inside a "query" object
-        question = data.get("question", "")
-        if not question and "query" in data:
-            question = data.get("query", "")
+        # Validate input
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
 
-        conversation_id = data.get("conversation_id", str(uuid.uuid4()))
-
-        # Get tenant code from either the request body or headers
-        tenant_code = data.get("tenant_code", "")
+        # Get tenant code from request or use default
         if not tenant_code:
-            tenant_code = request.headers.get('X-Tenant-Code', "")
+            tenant_code = get_tenant_code_from_request(request)
 
-        if not question:
-            raise HTTPException(status_code=400, detail="Question is required")
+        logger.info(f"Processing query: '{query}' for tenant: {tenant_code}")
 
-        if not tenant_code:
-            raise HTTPException(
-                status_code=400, detail="Tenant code is required")
-
-        logger.info(
-            f"Processing query: '{question}' for tenant: {tenant_code}")
-
-        # Use our new AgentManager instead of the old workflow
+        # Create agent manager
         agent_manager = AgentManager(
             tenant_code=tenant_code, session=db_session)
 
-        # Process the query using semantic search in Qdrant
-        search_results = agent_manager.search_transcriptions(question)
-
-        # Generate a response based on the search results
-        response = agent_manager.generate_response(question, search_results)
+        # Process the query using the hybrid approach
+        response = agent_manager.process_query(query)
 
         # Generate follow-up questions
         followup_questions = agent_manager.generate_followup_questions(
-            "system",
-            [question],
-            [response]
-        )
+            "query", [query], [response])
 
-        # Store the conversation for history
-        if db_session:
-            try:
-                # Convert response to string if it's not already
-                response_str = response if isinstance(
-                    response, str) else str(response)
+        # Store conversation in database using tenant_code as user_id
+        conversation_id = str(uuid.uuid4())
+        try:
+            logger.info(f"Storing conversation with ID: {conversation_id}")
+            store_conversation(
+                db_session,
+                tenant_code,  # Use tenant_code as user_id
+                conversation_id,
+                query,
+                response,
+                followup_questions=followup_questions
+            )
+            logger.info("Conversation stored successfully")
+        except Exception as e:
+            logger.error(f"Error storing conversation: {e}")
+            logger.exception("Detailed error:")
+            # Continue even if storage fails
 
-                # Convert followup_questions to JSON string
-                followup_json = json.dumps(followup_questions)
-
-                # Use the existing store_conversation function instead of raw SQL
-                store_conversation(
-                    session=db_session,
-                    user_id=tenant_code,
-                    conversation_id=conversation_id,
-                    query=question,
-                    response=response_str,
-                    message_order=0,
-                    followup_questions=followup_questions
-                )
-            except Exception as e:
-                logger.error(f"Error storing conversation: {e}")
-                logger.exception("Detailed error:")
-                db_session.rollback()
-
+        # Return a response that includes everything the frontend needs
         return {
-            "success": True,
+            "success": True,  # Add success flag
             "response": response,
             "conversation_id": conversation_id,
-            "followup_questions": followup_questions
+            "followup_questions": followup_questions,
+            "query": query,  # Include the original query
+            "timestamp": datetime.now().isoformat()  # Add timestamp
         }
-    except HTTPException as he:
-        # Re-raise HTTP exceptions
-        raise he
+
     except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
+        logger.error(f"Error processing query: {e}")
         logger.exception("Detailed error:")
-        return {
-            "success": False,
-            "error": str(e),
-            "conversation_id": str(uuid.uuid4())
-        }
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Keep the old endpoint for backward compatibility
@@ -1000,6 +985,62 @@ async def get_conversation(conversation_id: str, db: Session = Depends(get_db)):
                  "timestamp": msg.timestamp} for msg in messages]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Add this function to extract tenant code from request
+def get_tenant_code_from_request(request: Request) -> str:
+    """Extract tenant code from request headers or default to a fallback tenant"""
+    # Try to get from headers first
+    tenant_code = request.headers.get('X-Tenant-Code', '')
+
+    # If not in headers, try to get from cookies
+    if not tenant_code:
+        cookies = request.cookies
+        tenant_code = cookies.get('tenant_code', '')
+
+    # If still not found, use a default tenant
+    if not tenant_code:
+        tenant_code = config.get('DEFAULT_TENANT', 'default')
+        logger.warning(
+            f"No tenant code found in request, using default: {tenant_code}")
+
+    return tenant_code
+
+
+# Add this function to create conversation tables
+def create_conversation_tables(engine):
+    """Create tables for storing conversations if they don't exist"""
+    try:
+        # Create conversations table
+        engine.execute(text("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            conversation_id VARCHAR(255) PRIMARY KEY,
+            user_id VARCHAR(255) NOT NULL,
+            title TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """))
+
+        # Create conversation_messages table
+        engine.execute(text("""
+        CREATE TABLE IF NOT EXISTS conversation_messages (
+            id SERIAL PRIMARY KEY,
+            conversation_id VARCHAR(255) NOT NULL,
+            message_order INTEGER NOT NULL,
+            query TEXT NOT NULL,
+            response TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            followup_questions JSONB,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
+        )
+        """))
+
+        logger.info("Conversation tables created successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Error creating conversation tables: {e}")
+        logger.exception("Detailed error:")
+        return False
 
 
 if __name__ == "__main__":

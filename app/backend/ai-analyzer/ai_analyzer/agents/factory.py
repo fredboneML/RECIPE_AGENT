@@ -239,3 +239,25 @@ class AgentFactory:
             markdown=True,
             search_knowledge=True
         )
+
+    @staticmethod
+    def create_sql_agent(tenant_code: str) -> Agent:
+        """Create an agent that generates SQL queries based on natural language"""
+        knowledge_base = AgentFactory.create_knowledge_base(tenant_code)
+
+        return Agent(
+            name="SQL Generator",
+            role="Generate SQL queries based on natural language",
+            model=OpenAIChat(api_key=OPENAI_API_KEY),
+            knowledge=knowledge_base,
+            instructions=[
+                "You are an expert SQL query generator.",
+                "Your task is to convert natural language questions into PostgreSQL queries.",
+                "Always include tenant isolation in your queries.",
+                "Never generate data-modifying queries (INSERT, UPDATE, DELETE, etc.).",
+                "Use ILIKE for case-insensitive text matching.",
+                "Keep your responses concise and focused on the SQL query."
+            ],
+            markdown=True,
+            search_knowledge=True
+        )
