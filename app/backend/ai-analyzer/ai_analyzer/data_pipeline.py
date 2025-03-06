@@ -368,33 +368,53 @@ def update_vector_database(tenant_codes, months=3):
 
 
 def create_agent_tables(engine):
-    """Create tables needed for the agent manager if they don't exist"""
-    with engine.connect() as conn:
-        # Create questions table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS questions (
-                id VARCHAR(255) PRIMARY KEY,
-                transcription_id VARCHAR(255) NOT NULL,
-                question TEXT NOT NULL,
-                type VARCHAR(50) NOT NULL,
-                tenant_code VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
+    """Create tables needed for agent operations"""
+    try:
+        # Use the correct SQLAlchemy pattern for executing SQL
+        with engine.connect() as conn:
+            # Check if query_cache table exists
+            result = conn.execute(text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'query_cache'
+                )
+            """))
+            table_exists = result.scalar()
 
-        # Create analyses table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS analyses (
-                id VARCHAR(255) PRIMARY KEY,
-                transcription_id VARCHAR(255) NOT NULL,
-                question_id VARCHAR(255) NOT NULL,
-                analysis TEXT NOT NULL,
-                tenant_code VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
+            if not table_exists:
+                # Create query_cache table
+                conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS query_cache (
+                    id SERIAL PRIMARY KEY,
+                    tenant_code VARCHAR(255) NOT NULL,
+                    query_text TEXT NOT NULL,
+                    response TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """))
 
-        conn.commit()
+                # Create index on tenant_code
+                conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_query_cache_tenant
+                ON query_cache (tenant_code)
+                """))
+
+                # Create index on created_at
+                conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_query_cache_created_at
+                ON query_cache (created_at)
+                """))
+
+                conn.commit()
+                logger.info("Created query_cache table")
+            else:
+                logger.info("query_cache table already exists")
+
+        return True
+    except Exception as e:
+        logger.error(f"Error creating agent tables: {e}")
+        logger.exception("Detailed error:")
+        return False
 
 
 def main():

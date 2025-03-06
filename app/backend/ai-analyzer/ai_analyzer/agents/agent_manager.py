@@ -6,6 +6,8 @@ import uuid
 import re
 from sqlalchemy import text
 import time
+import hashlib
+from datetime import datetime, timedelta
 
 from ai_analyzer.agents.factory import AgentFactory
 from ai_analyzer.config import config
@@ -610,6 +612,12 @@ class AgentManager:
     def process_query(self, query: str) -> str:
         """Process a user query using hybrid approach with Agno multiagent"""
         try:
+            # Check cache first
+            cached_response = self._check_query_cache(query)
+            if cached_response:
+                logger.info("Using cached response")
+                return cached_response
+
             # 1. Search for relevant transcriptions using vector search
             similar_transcripts = self.search_transcriptions(query)
 
@@ -643,24 +651,33 @@ class AgentManager:
             sql_results = ""
             if sql_query and self.session:
                 try:
-                    logger.info(f"Executing SQL query: {sql_query}")
-                    result = self.session.execute(text(sql_query))
-                    rows = result.fetchall()
-                    if rows:
-                        # Format SQL results
-                        columns = result.keys()
-                        sql_results = "SQL Query Results:\n"
-                        sql_results += "\n".join(
-                            [f"{', '.join(columns)}", "-" * 40])
-                        for row in rows[:10]:  # Limit to 10 rows
-                            sql_results += f"\n{', '.join(str(val) for val in row)}"
-                        if len(rows) > 10:
-                            sql_results += f"\n... and {len(rows) - 10} more rows"
-
-                        # Log the SQL results
-                        logger.info(f"SQL query results: {sql_results}")
+                    # Check SQL query cache
+                    cached_sql_results = self._check_sql_cache(sql_query)
+                    if cached_sql_results:
+                        logger.info("Using cached SQL results")
+                        sql_results = cached_sql_results
                     else:
-                        logger.info("SQL query returned no results")
+                        logger.info(f"Executing SQL query: {sql_query}")
+                        result = self.session.execute(text(sql_query))
+                        rows = result.fetchall()
+                        if rows:
+                            # Format SQL results
+                            columns = result.keys()
+                            sql_results = "SQL Query Results:\n"
+                            sql_results += "\n".join(
+                                [f"{', '.join(columns)}", "-" * 40])
+                            for row in rows[:10]:  # Limit to 10 rows
+                                sql_results += f"\n{', '.join(str(val) for val in row)}"
+                            if len(rows) > 10:
+                                sql_results += f"\n... and {len(rows) - 10} more rows"
+
+                            # Cache SQL results
+                            self._cache_sql_results(sql_query, sql_results)
+
+                            # Log the SQL results
+                            logger.info(f"SQL query results: {sql_results}")
+                        else:
+                            logger.info("SQL query returned no results")
                 except Exception as e:
                     logger.error(f"Error executing SQL query: {e}")
                     logger.exception("Detailed error:")
@@ -676,10 +693,10 @@ class AgentManager:
             Here are some relevant call transcriptions that might help:
             {examples_text}
             
-            {sql_results if sql_results else ""}
+            SQL Query Results:
+            {sql_results}
             
-            Based on these transcriptions and SQL results, please provide a comprehensive answer to the user's question.
-            Include specific details from the transcriptions when relevant.
+            Please provide a comprehensive answer based on the transcriptions and SQL results.
             If the transcriptions don't contain enough information to answer the question fully, 
             acknowledge this limitation in your response.
             
@@ -699,20 +716,265 @@ class AgentManager:
                     # Convert the response object to a string if it's not already a string
                     response = str(response_obj)
 
-                # Log the final response
                 logger.info(f"Final response: {response[:100]}...")
+
+                # Cache the response
+                self._cache_query_response(query, response)
 
                 return response
 
             except Exception as e:
                 logger.error(f"Error running agent: {e}")
                 logger.exception("Detailed error:")
-                return "I'm sorry, I couldn't generate a response based on the available data."
+                return f"I'm sorry, I couldn't process your query. Error: {str(e)}"
 
         except Exception as e:
             logger.error(f"Error processing query: {e}")
             logger.exception("Detailed error:")
             return f"I'm sorry, I couldn't process your query. Error: {str(e)}"
+
+    def _check_query_cache(self, query: str) -> str:
+        """Check if a similar query exists in the cache"""
+        try:
+            if not self.session:
+                return None
+
+            # First, rollback any failed transaction
+            self.session.rollback()
+
+            # Get the actual column names from the query_cache table
+            try:
+                # Check if the table exists and get its columns
+                columns_result = self.session.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'query_cache'
+                """)).fetchall()
+
+                column_names = [col[0] for col in columns_result]
+                logger.info(f"Found query_cache columns: {column_names}")
+
+                # Normalize query for better matching
+                normalized_query = self._normalize_query(query)
+
+                # Check for exact match first - use the correct column names
+                cache_result = self.session.execute(
+                    text("""
+                    SELECT result, created_at
+                    FROM query_cache
+                    WHERE tenant_code = :tenant_code
+                      AND question ILIKE :query
+                      AND created_at > NOW() - INTERVAL '5 minutes'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """),
+                    {
+                        "tenant_code": self.tenant_code,
+                        "query": f"%{normalized_query}%"
+                    }
+                ).fetchone()
+
+                if cache_result:
+                    logger.info(
+                        f"Found exact match in cache from {cache_result[1]}")
+                    return cache_result[0]
+
+                return None
+
+            except Exception as e:
+                logger.error(f"Error checking query_cache schema: {e}")
+                logger.exception("Detailed error:")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error checking query cache: {e}")
+            logger.exception("Detailed error:")
+            # Make sure to rollback on error
+            if self.session:
+                self.session.rollback()
+            return None
+
+    def _normalize_query(self, query: str) -> str:
+        """Normalize a query for better cache matching"""
+        # Convert to lowercase
+        normalized = query.lower()
+
+        # Remove punctuation
+        normalized = re.sub(r'[^\w\s]', '', normalized)
+
+        # Remove extra whitespace
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+
+        return normalized
+
+    def _query_similarity(self, query1: str, query2: str) -> float:
+        """Calculate similarity between two queries"""
+        # Simple word overlap similarity
+        words1 = set(query1.split())
+        words2 = set(query2.split())
+
+        if not words1 or not words2:
+            return 0.0
+
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+
+        return len(intersection) / len(union)
+
+    def _cache_query_response(self, query: str, response: str) -> None:
+        """Cache a query and its response"""
+        try:
+            if not self.session:
+                return
+
+            # First, rollback any failed transaction
+            self.session.rollback()
+
+            # Create a hash key for the query
+            hash_key = self._create_hash_key(query)
+
+            # Calculate expiry date (7 days from now)
+            expires_at = datetime.utcnow() + timedelta(days=7)
+
+            # Insert into cache using the correct column names
+            # Include hash_key in the INSERT statement
+            stmt = text("""
+                INSERT INTO query_cache 
+                (tenant_code, question, sql, result, created_at, expires_at, hash_key)
+                VALUES 
+                (:tenant_code, :query, :query, :response, NOW(), :expires_at, :hash_key)
+                ON CONFLICT (hash_key, tenant_code) 
+                DO UPDATE SET 
+                    result = EXCLUDED.result,
+                    created_at = CURRENT_TIMESTAMP,
+                    expires_at = EXCLUDED.expires_at
+            """)
+
+            self.session.execute(stmt, {
+                "tenant_code": self.tenant_code,
+                "query": query,
+                "response": response,
+                "expires_at": expires_at,
+                "hash_key": hash_key
+            })
+
+            self.session.commit()
+            logger.info("Cached query response")
+
+        except Exception as e:
+            logger.error(f"Error caching query response: {e}")
+            logger.exception("Detailed error:")
+            # Make sure to rollback on error
+            if self.session:
+                self.session.rollback()
+
+    def _create_hash_key(self, text: str) -> str:
+        """Create a hash key for caching"""
+        # Normalize the text by removing extra whitespace
+        normalized = ' '.join(text.lower().split())
+        # Create SHA-256 hash
+        return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+    def _check_sql_cache(self, sql_query: str) -> str:
+        """Check if SQL query results are cached"""
+        try:
+            if not self.session:
+                return None
+
+            # First, rollback any failed transaction
+            self.session.rollback()
+
+            # Normalize SQL query
+            normalized_sql = self._normalize_sql(sql_query)
+
+            # Check cache using the correct column names
+            cache_result = self.session.execute(
+                text("""
+                SELECT result, created_at
+                FROM query_cache
+                WHERE tenant_code = :tenant_code
+                  AND sql ILIKE :sql_query
+                  AND created_at > NOW() - INTERVAL '5 minutes'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """),
+                {
+                    "tenant_code": self.tenant_code,
+                    "sql_query": f"%{normalized_sql}%"
+                }
+            ).fetchone()
+
+            if cache_result:
+                logger.info(
+                    f"Found SQL query in cache from {cache_result[1]}")
+                return cache_result[0]
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error checking SQL cache: {e}")
+            logger.exception("Detailed error:")
+            # Make sure to rollback on error
+            if self.session:
+                self.session.rollback()
+            return None
+
+    def _normalize_sql(self, sql_query: str) -> str:
+        """Normalize SQL query for better cache matching"""
+        # Convert to lowercase
+        normalized = sql_query.lower()
+
+        # Remove extra whitespace
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+
+        return normalized
+
+    def _cache_sql_results(self, sql_query: str, results: str) -> None:
+        """Cache SQL query results"""
+        try:
+            if not self.session:
+                return
+
+            # First, rollback any failed transaction
+            self.session.rollback()
+
+            # Create a hash key for the query
+            hash_key = self._create_hash_key(sql_query)
+
+            # Calculate expiry date (7 days from now)
+            expires_at = datetime.utcnow() + timedelta(days=7)
+
+            # Insert into cache with SQL prefix to distinguish from regular queries
+            # Include hash_key in the INSERT statement
+            stmt = text("""
+                INSERT INTO query_cache 
+                (tenant_code, question, sql, result, created_at, expires_at, hash_key)
+                VALUES 
+                (:tenant_code, :sql_query, :sql_query, :results, NOW(), :expires_at, :hash_key)
+                ON CONFLICT (hash_key, tenant_code) 
+                DO UPDATE SET 
+                    result = EXCLUDED.result,
+                    created_at = CURRENT_TIMESTAMP,
+                    expires_at = EXCLUDED.expires_at
+            """)
+
+            self.session.execute(stmt, {
+                "tenant_code": self.tenant_code,
+                "sql_query": sql_query,
+                "results": results,
+                "expires_at": expires_at,
+                "hash_key": hash_key
+            })
+
+            self.session.commit()
+            logger.info("Cached SQL results")
+
+        except Exception as e:
+            logger.error(f"Error caching SQL results: {e}")
+            logger.exception("Detailed error:")
+            # Make sure to rollback on error
+            if self.session:
+                self.session.rollback()
 
     def _detect_entity_corrections(self, query: str, transcripts: List[Dict[str, Any]]) -> str:
         """Detect and suggest corrections for entity names in the query"""
