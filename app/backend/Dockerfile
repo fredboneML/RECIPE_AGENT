@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64 python:3.12-slim
+FROM python:3.12-slim
 
 # Add curl for health checks and system dependencies
 RUN apt-get update && \
