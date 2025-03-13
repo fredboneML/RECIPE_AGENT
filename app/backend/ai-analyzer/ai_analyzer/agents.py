@@ -24,6 +24,9 @@ OPENAI_API_KEY = os.environ.get(
 if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY not found in environment or config")
 
+# Default model for all agents
+DEFAULT_MODEL = "gpt-3.5-turbo"
+
 
 class TranscriptionKnowledgeBase(KnowledgeBase):
     """Custom knowledge base for transcription data from Qdrant"""
@@ -84,14 +87,14 @@ class AgentFactory:
         )
 
     @staticmethod
-    def create_initial_questions_agent(tenant_code: str) -> Agent:
+    def create_initial_questions_agent(tenant_code: str, model: str = DEFAULT_MODEL) -> Agent:
         """Create an agent that generates initial questions based on transcriptions"""
         knowledge_base = AgentFactory.create_knowledge_base(tenant_code)
 
         return Agent(
             name="Initial Questions Agent",
             role="Generate initial questions based on call transcriptions",
-            model=OpenAIChat(api_key=OPENAI_API_KEY, id="gpt-4o"),
+            model=OpenAIChat(api_key=OPENAI_API_KEY, id=model),
             knowledge=knowledge_base,
             instructions=[
                 "You are an expert call analyst who reviews call transcriptions.",
@@ -105,14 +108,14 @@ class AgentFactory:
         )
 
     @staticmethod
-    def create_response_analyzer_agent(tenant_code: str) -> Agent:
+    def create_response_analyzer_agent(tenant_code: str, model: str = DEFAULT_MODEL) -> Agent:
         """Create an agent that analyzes responses to questions"""
         knowledge_base = AgentFactory.create_knowledge_base(tenant_code)
 
         return Agent(
             name="Response Analyzer",
             role="Analyze responses to questions about call transcriptions",
-            model=OpenAIChat(api_key=OPENAI_API_KEY, id="gpt-4o"),
+            model=OpenAIChat(api_key=OPENAI_API_KEY, id=model),
             knowledge=knowledge_base,
             instructions=[
                 "You are an expert call analyst who reviews responses to questions about call transcriptions.",
@@ -125,14 +128,14 @@ class AgentFactory:
         )
 
     @staticmethod
-    def create_followup_agent(tenant_code: str) -> Agent:
+    def create_followup_agent(tenant_code: str, model: str = DEFAULT_MODEL) -> Agent:
         """Create an agent that generates follow-up questions based on previous responses"""
         knowledge_base = AgentFactory.create_knowledge_base(tenant_code)
 
         return Agent(
             name="Follow-up Questions Agent",
             role="Generate follow-up questions based on previous responses",
-            model=OpenAIChat(api_key=OPENAI_API_KEY, id="gpt-4o"),
+            model=OpenAIChat(api_key=OPENAI_API_KEY, id=model),
             knowledge=knowledge_base,
             instructions=[
                 "You are an expert call analyst who reviews call transcriptions and previous responses.",
@@ -146,19 +149,20 @@ class AgentFactory:
         )
 
     @staticmethod
-    def create_agent_team(tenant_code: str) -> Agent:
+    def create_agent_team(tenant_code: str, model: str = DEFAULT_MODEL) -> Agent:
         """Create a team of agents for call analysis"""
         initial_questions_agent = AgentFactory.create_initial_questions_agent(
-            tenant_code)
+            tenant_code, model)
         response_analyzer_agent = AgentFactory.create_response_analyzer_agent(
-            tenant_code)
-        followup_agent = AgentFactory.create_followup_agent(tenant_code)
+            tenant_code, model)
+        followup_agent = AgentFactory.create_followup_agent(
+            tenant_code, model)
 
         return Agent(
             name="Call Analysis Team",
             team=[initial_questions_agent,
                   response_analyzer_agent, followup_agent],
-            model=OpenAIChat(api_key=OPENAI_API_KEY, id="gpt-4o"),
+            model=OpenAIChat(api_key=OPENAI_API_KEY, id=model),
             instructions=[
                 "You are a team of call analysis experts.",
                 "Work together to analyze call transcriptions and generate insightful questions.",
@@ -172,12 +176,14 @@ class AgentFactory:
 class AgentManager:
     """Manager for Agno agents"""
 
-    def __init__(self, tenant_code: str, session=None):
+    def __init__(self, tenant_code: str, session=None, model: str = DEFAULT_MODEL):
         """Initialize the agent manager"""
         self.tenant_code = tenant_code
         self.session = session
-        logger.info(f"Initialized AgentManager for tenant: {tenant_code}")
-        self.agent_team = AgentFactory.create_agent_team(tenant_code)
+        self.model = model
+        logger.info(
+            f"Initialized AgentManager for tenant: {tenant_code} with model: {model}")
+        self.agent_team = AgentFactory.create_agent_team(tenant_code, model)
 
     def generate_initial_questions(self, transcription_id: str) -> List[str]:
         """Generate initial questions for a transcription"""
@@ -196,7 +202,7 @@ class AgentManager:
 
             # Create agent
             agent = AgentFactory.create_initial_questions_agent(
-                self.tenant_code)
+                self.tenant_code, self.model)
 
             # Generate questions
             prompt = f"Based on this call transcription:\n\n{transcription_text}\n\nGenerate 3-5 insightful questions:"
@@ -245,7 +251,7 @@ class AgentManager:
 
             # Create agent
             agent = AgentFactory.create_response_analyzer_agent(
-                self.tenant_code)
+                self.tenant_code, self.model)
 
             # Generate analysis
             prompt = f"""
@@ -266,7 +272,7 @@ class AgentManager:
             if not search_results:
                 logger.warning(
                     f"Transcription {transcription_id} not found in Qdrant")
-                return {"analysis": "Error: Transcription not found"}
+                return "Error: Transcription not found"
 
             # Save analysis to database
             analysis_id = self._save_analysis_to_db(
@@ -294,7 +300,8 @@ class AgentManager:
                 transcription_text = search_results[0].document
 
             # Create agent
-            agent = AgentFactory.create_followup_agent(self.tenant_code)
+            agent = AgentFactory.create_followup_agent(
+                self.tenant_code, self.model)
 
             # Prepare conversation history
             conversation = ""
@@ -460,7 +467,7 @@ class AgentManager:
         try:
             # Create an agent
             agent = AgentFactory.create_initial_questions_agent(
-                self.tenant_code)
+                self.tenant_code, self.model)
 
             # Prepare context from search results
             context = "Based on the following transcriptions:\n\n"

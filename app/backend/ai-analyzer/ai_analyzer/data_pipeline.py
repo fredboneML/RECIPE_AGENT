@@ -338,7 +338,7 @@ def process_data_pipeline(session, tenant_code):
         return False
 
 
-def update_vector_database(tenant_codes, months=3):
+def update_vector_database(tenant_codes, months=6):
     """Update the vector database for all tenants"""
     logger.info(
         f"Starting vector database update for {len(tenant_codes)} tenants: {tenant_codes}")
@@ -456,7 +456,7 @@ def main():
                     try:
                         logger.info(
                             f"Updating vector database for tenant: {tenant_code}")
-                        update_vector_database([tenant_code], months=3)
+                        update_vector_database([tenant_code], months=6)
                         logger.info(
                             f"Completed full processing for tenant: {tenant_code}")
                     except Exception as e:
