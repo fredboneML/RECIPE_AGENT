@@ -25,7 +25,7 @@ if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY not found in environment or config")
 
 # Default model for all agents
-DEFAULT_MODEL = "gpt-3.5-turbo"
+DEFAULT_MODEL = "gpt-4o-mini-2024-07-18"  # or "gpt-3.5-turbo"
 
 
 class TranscriptionKnowledgeBase(KnowledgeBase):
