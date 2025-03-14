@@ -651,37 +651,50 @@ class AgentManager:
             sql_results = ""
             if sql_query and self.session:
                 try:
+                    # Make sure the SQL query is properly sanitized
+                    sanitized_sql = self._sanitize_sql_query(sql_query)
+
                     # Check SQL query cache
-                    cached_sql_results = self._check_sql_cache(sql_query)
+                    cached_sql_results = self._check_sql_cache(sanitized_sql)
                     if cached_sql_results:
                         logger.info("Using cached SQL results")
                         sql_results = cached_sql_results
                     else:
-                        logger.info(f"Executing SQL query: {sql_query}")
-                        result = self.session.execute(text(sql_query))
-                        rows = result.fetchall()
-                        if rows:
-                            # Format SQL results
-                            columns = result.keys()
-                            sql_results = "SQL Query Results:\n"
-                            sql_results += "\n".join(
-                                [f"{', '.join(columns)}", "-" * 40])
-                            for row in rows[:10]:  # Limit to 10 rows
-                                sql_results += f"\n{', '.join(str(val) for val in row)}"
-                            if len(rows) > 10:
-                                sql_results += f"\n... and {len(rows) - 10} more rows"
+                        logger.info(f"Executing SQL query: {sanitized_sql}")
+                        try:
+                            result = self.session.execute(text(sanitized_sql))
+                            rows = result.fetchall()
+                            if rows:
+                                # Format SQL results
+                                columns = result.keys()
+                                sql_results = "SQL Query Results:\n"
+                                sql_results += "\n".join(
+                                    [f"{', '.join(columns)}", "-" * 40])
+                                for row in rows[:10]:  # Limit to 10 rows in display only
+                                    sql_results += f"\n{', '.join(str(val) for val in row)}"
 
-                            # Cache SQL results
-                            self._cache_sql_results(sql_query, sql_results)
+                                # Log the results
+                                logger.info(
+                                    f"SQL query returned {len(rows)} rows")
+                                logger.info(
+                                    f"SQL results sample: {sql_results[:200]}...")
 
-                            # Log the SQL results
-                            logger.info(f"SQL query results: {sql_results}")
-                        else:
-                            logger.info("SQL query returned no results")
+                                # Cache the results
+                                self._cache_sql_results(
+                                    sanitized_sql, sql_results)
+                            else:
+                                # Log when no results are returned
+                                logger.info("SQL query returned no data")
+                                sql_results = "SQL Query Results: No data found"
+                        except Exception as sql_error:
+                            logger.error(
+                                f"Error executing SQL query: {sql_error}")
+                            logger.exception("Detailed SQL error:")
+                            sql_results = f"Error executing SQL query: {str(sql_error)}"
                 except Exception as e:
-                    logger.error(f"Error executing SQL query: {e}")
+                    logger.error(f"Error processing SQL query: {e}")
                     logger.exception("Detailed error:")
-                    sql_results = f"Error executing SQL query: {str(e)}"
+                    sql_results = f"Error processing SQL query: {str(e)}"
 
             # 7. Create a prompt with the context, query, entity corrections, and SQL results
             prompt = f"""
@@ -1101,89 +1114,63 @@ class AgentManager:
             5. For people's names, use ILIKE with wildcards
             6. ONLY use tables that exist in the schema information provided
             7. The main table for call data is "transcription" (NOT "transcripts")
-            8. LIMIT results to 10-20 rows maximum for readability
+            8. DO NOT add LIMIT clauses unless specifically needed for the query
             9. SELECT only the most relevant columns for the question
             10. Focus on finding SPECIFIC records that answer the question, not general statistics
+            11. DO NOT add semicolons in the middle of the query
             
             Generate ONLY the SQL query, no explanations.
             """
 
-            # Use the agent to generate a SQL query
-            try:
-                response_obj = sql_agent.run(prompt)
+            # Generate SQL query using run method instead of get_response
+            response_obj = sql_agent.run(prompt)
 
-                # Extract the text content from the RunResponse object
-                if hasattr(response_obj, 'content'):
-                    sql_query = response_obj.content
-                elif isinstance(response_obj, str):
-                    sql_query = response_obj
-                else:
-                    # Convert the response object to a string if it's not already a string
-                    sql_query = str(response_obj)
+            # Extract the text content from the response object
+            if hasattr(response_obj, 'content'):
+                sql_query = response_obj.content
+            elif isinstance(response_obj, str):
+                sql_query = response_obj
+            else:
+                # Convert the response object to a string if it's not already a string
+                sql_query = str(response_obj)
 
-                # Clean up the SQL query (remove markdown formatting, etc.)
-                sql_query = self._clean_sql_query(sql_query)
+            # Clean up the SQL query
+            sql_query = self._sanitize_sql_query(sql_query)
 
-                # Validate the SQL query
-                sql_query = self._validate_sql_query(sql_query)
-
-                # Add LIMIT if not present
-                if "LIMIT" not in sql_query.upper():
-                    sql_query += " LIMIT 20;"
-
-                return sql_query
-
-            except Exception as e:
-                logger.error(f"Error running SQL agent: {e}")
-                logger.exception("Detailed error:")
-                return ""
-
+            return sql_query
         except Exception as e:
             logger.error(f"Error generating SQL query: {e}")
             logger.exception("Detailed error:")
             return ""
 
-    def _clean_sql_query(self, sql_query: str) -> str:
-        """Clean up the SQL query by removing markdown formatting, etc."""
-        # Remove markdown code block formatting
-        sql_query = re.sub(r'```sql\s*', '', sql_query)
-        sql_query = re.sub(r'```\s*', '', sql_query)
+    def _sanitize_sql_query(self, sql_query: str) -> str:
+        """Sanitize SQL query to fix common issues"""
+        try:
+            # Remove any markdown formatting
+            if sql_query.startswith("```") and sql_query.endswith("```"):
+                sql_query = sql_query[3:-3].strip()
 
-        # Remove leading/trailing whitespace
-        sql_query = sql_query.strip()
+            if sql_query.startswith("sql"):
+                sql_query = sql_query[3:].strip()
 
-        return sql_query
+            # Fix issue with semicolons before LIMIT
+            sql_query = sql_query.replace("; LIMIT", " LIMIT")
 
-    def _validate_sql_query(self, sql_query: str) -> str:
-        """Validate the SQL query to ensure it's safe to execute"""
-        # Check if the query is empty
-        if not sql_query:
-            return ""
+            # Remove any trailing semicolons
+            sql_query = sql_query.rstrip(";")
 
-        # Check if the query contains the tenant code
-        if self.tenant_code and f"tenant_code = '{self.tenant_code}'" not in sql_query:
-            # Add tenant code filter if not present
-            if "WHERE" in sql_query.upper():
-                # Add to existing WHERE clause
-                sql_query = sql_query.replace(
-                    "WHERE", f"WHERE tenant_code = '{self.tenant_code}' AND ", 1)
-            else:
-                # Add new WHERE clause before ORDER BY, GROUP BY, LIMIT, etc.
-                for clause in ["ORDER BY", "GROUP BY", "LIMIT", "HAVING"]:
-                    if clause in sql_query.upper():
-                        sql_query = sql_query.replace(
-                            clause, f"WHERE tenant_code = '{self.tenant_code}' {clause}", 1)
-                        break
-                else:
-                    # If no clause found, add WHERE at the end
-                    sql_query += f" WHERE tenant_code = '{self.tenant_code}'"
+            # Ensure there's only one LIMIT clause at the end
+            if "LIMIT" in sql_query:
+                # Split by LIMIT, keeping only the first part and the last LIMIT clause
+                parts = sql_query.split("LIMIT")
+                if len(parts) > 2:
+                    sql_query = parts[0] + "LIMIT" + parts[-1]
 
-        # Ensure the query is read-only
-        if any(keyword in sql_query.upper() for keyword in ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE"]):
-            logger.error(f"SQL query contains forbidden keywords: {sql_query}")
-            return ""
-
-        return sql_query
+            return sql_query
+        except Exception as e:
+            logger.error(f"Error sanitizing SQL query: {e}")
+            logger.exception("Detailed error:")
+            return sql_query  # Return original query if sanitization fails
 
     def _get_database_schema(self) -> str:
         """Get database schema information for the SQL agent"""

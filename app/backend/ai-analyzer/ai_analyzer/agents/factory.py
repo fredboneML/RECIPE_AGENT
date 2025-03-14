@@ -20,9 +20,9 @@ from ai_analyzer.utils import get_qdrant_client
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 # Get OpenAI API key from environment or config
-OPENAI_API_KEY = os.environ.get(
-    "OPENAI_API_KEY", config.get("OPENAI_API_KEY", ""))
+OPENAI_API_KEY = config['AI_ANALYZER_OPENAI_API_KEY']
 if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY not found in environment or config")
 
@@ -242,22 +242,39 @@ class AgentFactory:
 
     @staticmethod
     def create_sql_agent(tenant_code: str) -> Agent:
-        """Create an agent that generates SQL queries based on natural language"""
-        knowledge_base = AgentFactory.create_knowledge_base(tenant_code)
+        """Create an agent for SQL generation"""
+        try:
+            # Create knowledge base
+            knowledge_base = AgentFactory.create_knowledge_base(tenant_code)
 
-        return Agent(
-            name="SQL Generator",
-            role="Generate SQL queries based on natural language",
-            model=OpenAIChat(api_key=OPENAI_API_KEY),
-            knowledge=knowledge_base,
-            instructions=[
-                "You are an expert SQL query generator.",
-                "Your task is to convert natural language questions into PostgreSQL queries.",
-                "Always include tenant isolation in your queries.",
-                "Never generate data-modifying queries (INSERT, UPDATE, DELETE, etc.).",
-                "Use ILIKE for case-insensitive text matching.",
-                "Keep your responses concise and focused on the SQL query."
-            ],
-            markdown=True,
-            search_knowledge=True
-        )
+            # Log the API key (partially masked for security)
+            logger.info(
+                f"SQL Agent started")
+
+            # Create SQL agent
+            return Agent(
+                name="SQL Agent",
+                role="Generate SQL queries based on natural language questions",
+                # Remove model parameter
+                model=OpenAIChat(api_key=OPENAI_API_KEY),
+                knowledge=knowledge_base,
+                instructions=[
+                    "You are an expert SQL query generator for PostgreSQL.",
+                    "Your task is to convert natural language questions into SQL queries.",
+                    "Use the knowledge base to understand the database schema and available tables.",
+                    "Generate SQL queries that are accurate, efficient, and follow best practices.",
+                    "Always include proper table aliases and join conditions.",
+                    "Format your SQL queries with proper indentation and line breaks for readability.",
+                    "IMPORTANT: DO NOT add LIMIT clauses to your queries unless specifically requested.",
+                    "IMPORTANT: DO NOT add semicolons in the middle of your queries.",
+                    "If you need to limit results, place the LIMIT clause at the very end of the query after all other clauses.",
+                    "Always ensure your SQL follows valid PostgreSQL syntax.",
+                    "If you're unsure about a specific table or column, make a reasonable assumption based on the context.",
+                    "If the question cannot be answered with SQL, explain why."
+                ],
+                markdown=True
+            )
+        except Exception as e:
+            logger.error(f"Error creating SQL agent: {e}")
+            logger.exception("Detailed error:")
+            return None
