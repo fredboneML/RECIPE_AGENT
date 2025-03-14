@@ -14,6 +14,11 @@ from ai_analyzer.config import config
 from ai_analyzer.data_pipeline import create_agent_tables
 from sqlalchemy import create_engine
 from ai_analyzer.config import DATABASE_URL
+from sqlalchemy.orm import Session
+
+from ai_analyzer.agents.database_inspector import DatabaseInspectorAgent
+from ai_analyzer.agents.sql_generator import SQLGeneratorAgent
+from ai_analyzer.data_import_postgresql import UserMemory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -619,7 +624,7 @@ class AgentManager:
             logger.error("No agent found")
             return None
 
-    def process_query(self, query: str) -> str:
+    def process_query(self, query: str, conversation_id: Optional[str] = None) -> str:
         """Process a user query using hybrid approach with Agno multiagent"""
         try:
             # Check cache first
@@ -706,10 +711,41 @@ class AgentManager:
                     logger.exception("Detailed error:")
                     sql_results = f"Error processing SQL query: {str(e)}"
 
-            # 7. Create a prompt with the context, query, entity corrections, and SQL results
+            # 7. Get conversation history if conversation_id is provided
+            conversation_history = ""
+            if conversation_id and self.session:
+                try:
+                    # Query previous messages from this conversation
+                    previous_messages = self.session.query(UserMemory)\
+                        .filter(
+                            UserMemory.conversation_id == conversation_id,
+                            UserMemory.user_id == self.tenant_code,
+                            UserMemory.is_active == True
+                    )\
+                        .order_by(UserMemory.message_order.desc())\
+                        .limit(5)\
+                        .all()
+
+                    if previous_messages:
+                        conversation_history = "Previous conversation history:\n\n"
+                        # Process in chronological order (oldest first)
+                        for msg in reversed(previous_messages):
+                            conversation_history += f"User: {msg.query}\n"
+                            conversation_history += f"Assistant: {msg.response}\n\n"
+
+                        logger.info(
+                            f"Retrieved {len(previous_messages)} previous messages from conversation {conversation_id}")
+                except Exception as e:
+                    logger.error(f"Error retrieving conversation history: {e}")
+                    logger.exception("Detailed error:")
+                    # Continue without conversation history if there's an error
+
+            # 8. Create a prompt with the context, conversation history, query, entity corrections, and SQL results
             prompt = f"""
             I need to answer this user question:
             "{query}"
+            
+            {conversation_history}
             
             {entity_corrections}
             
@@ -726,7 +762,7 @@ class AgentManager:
             {'' if not entity_corrections else 'IMPORTANT: Make sure to acknowledge the entity correction at the beginning of your response.'}
             """
 
-            # 8. Use the agent to generate a response
+            # 9. Use the agent to generate a response
             try:
                 response_obj = agent.run(prompt)
 

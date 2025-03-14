@@ -556,6 +556,7 @@ async def process_query(request: Request, db_session: Session = Depends(get_db))
         body = await request.json()
         query = body.get("query", "")
         tenant_code = body.get("tenant_code", "")
+        conversation_id = body.get("conversation_id", "")
 
         # Validate input
         if not query:
@@ -566,20 +567,24 @@ async def process_query(request: Request, db_session: Session = Depends(get_db))
             tenant_code = get_tenant_code_from_request(request)
 
         logger.info(f"Processing query: '{query}' for tenant: {tenant_code}")
+        if conversation_id:
+            logger.info(f"Continuing conversation: {conversation_id}")
 
         # Create agent manager
         agent_manager = AgentManager(
             tenant_code=tenant_code, session=db_session)
 
         # Process the query using the hybrid approach
-        response = agent_manager.process_query(query)
+        response = agent_manager.process_query(query, conversation_id)
 
         # Generate follow-up questions
         followup_questions = agent_manager.generate_followup_questions(
             "query", [query], [response])
 
         # Store conversation in database using tenant_code as user_id
-        conversation_id = str(uuid.uuid4())
+        if not conversation_id:
+            conversation_id = str(uuid.uuid4())
+
         try:
             logger.info(f"Storing conversation with ID: {conversation_id}")
             store_conversation(
