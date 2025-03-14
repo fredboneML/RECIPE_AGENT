@@ -723,7 +723,7 @@ class AgentManager:
                             UserMemory.is_active == True
                     )\
                         .order_by(UserMemory.message_order.desc())\
-                        .limit(5)\
+                        .limit(10)\
                         .all()
 
                     if previous_messages:

@@ -112,7 +112,7 @@ class DatabaseInspectorAgent:
                 AND is_active = true 
                 AND expires_at > NOW()
                 ORDER BY message_order DESC
-                LIMIT 5  -- Get last 5 messages for context
+                LIMIT 10  -- Get last 10 messages for context
             """)
 
             result = db_session.execute(

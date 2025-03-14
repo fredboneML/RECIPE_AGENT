@@ -152,8 +152,8 @@ class CallAnalysisWorkflow:
         # Include example context for reference
         context += f"\nInitial Context:\n{self.example_queries['result']}\n"
 
-        # Last 3 interactions
-        for interaction in self.conversation_history[tenant_code][conversation_id][-3:]:
+        # Last 10 interactions instead of 3
+        for interaction in self.conversation_history[tenant_code][conversation_id][-10:]:
             context += f"\nQuestion: {interaction['question']}\n"
             context += f"Findings: {interaction['result']}\n"
         return context
@@ -567,9 +567,9 @@ class CallAnalysisWorkflow:
     def _generate_followup_questions(self, question: str, response: str, conversation_id: str, tenant_code: str) -> List[str]:
         """Generate dynamic followup questions based on conversation context and call analysis patterns"""
         try:
-            # Get last 3 interactions for enhanced context
+            # Get last 10 interactions for enhanced context instead of 3
             recent_interactions = self.conversation_history.get(
-                tenant_code, {}).get(conversation_id, [])[-3:]
+                tenant_code, {}).get(conversation_id, [])[-10:]
 
             # Build conversation history for context awareness
             conversation_context = ""
