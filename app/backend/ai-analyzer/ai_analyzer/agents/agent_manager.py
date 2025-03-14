@@ -285,6 +285,9 @@ class AgentManager:
                     logger.info(
                         f"  Full payload keys: {list(result.payload.keys())}")
 
+                    # Log the entire payload
+                    logger.info(f"  Full payload: {result.payload}")
+
                     # Try to find text in various fields
                     text = result.payload.get("text", "")
                     if not text:
@@ -303,9 +306,8 @@ class AgentManager:
                                             f"  Found text in field: {key}")
                                         break
                             if not text:
-                                # Log all payload values to see what's available
-                                logger.info(
-                                    f"  Full payload: {result.payload}")
+                                # We already logged the full payload above
+                                pass
 
                     # Log the first 100 characters of the text to avoid huge logs
                     logger.info(f"  Text: {text[:100]}..." if len(
@@ -315,14 +317,22 @@ class AgentManager:
                     if not text:
                         text = "No text content found in this result."
 
+                    # Create a metadata dictionary with all payload fields
+                    metadata = {
+                        "id": result.payload.get("id", ""),
+                        "call_id": result.payload.get("call_id", ""),
+                        "timestamp": result.payload.get("timestamp", ""),
+                        "score": result.score
+                    }
+
+                    # Add all other payload fields to metadata
+                    for key, value in result.payload.items():
+                        if key not in metadata:
+                            metadata[key] = value
+
                     formatted_results.append({
                         "text": text,
-                        "metadata": {
-                            "id": result.payload.get("id", ""),
-                            "call_id": result.payload.get("call_id", ""),
-                            "timestamp": result.payload.get("timestamp", ""),
-                            "score": result.score
-                        }
+                        "metadata": metadata
                     })
 
                 logger.info(
@@ -1055,10 +1065,19 @@ class AgentManager:
 
             # Format the example with metadata
             formatted_examples += f"Example {i+1}:\n"
-            formatted_examples += f"ID: {metadata.get('id', 'unknown')}\n"
-            formatted_examples += f"Call ID: {metadata.get('call_id', 'unknown')}\n"
-            formatted_examples += f"Timestamp: {metadata.get('timestamp', 'unknown')}\n"
-            formatted_examples += f"Relevance Score: {metadata.get('score', 0):.4f}\n"
+
+            # Include all metadata fields
+            for key, value in metadata.items():
+                # Format the value based on its type
+                if isinstance(value, float) and key == "score":
+                    formatted_value = f"{value:.4f}"
+                elif isinstance(value, dict) or isinstance(value, list):
+                    formatted_value = str(value)
+                else:
+                    formatted_value = str(value)
+
+                formatted_examples += f"{key}: {formatted_value}\n"
+
             formatted_examples += f"Text:\n{text}\n\n"
 
         return formatted_examples

@@ -646,25 +646,40 @@ async def get_conversations(request: Request, db: Session = Depends(get_db)):
         if not tenant_code:
             raise HTTPException(status_code=401, detail="Tenant code required")
 
-        # Get recent conversations for current tenant
-        conversations = db.query(UserMemory)\
-            .filter(
-                UserMemory.is_active == True,
-                UserMemory.expires_at > datetime.utcnow(),
-                UserMemory.user_id == tenant_code  # Add tenant isolation
-        )\
-            .order_by(UserMemory.timestamp.desc())\
-            .limit(10)\
-            .all()
+        # Get distinct conversation IDs with their first message (for title)
+        # First, get all distinct conversation IDs
+        distinct_conversations = db.query(
+            UserMemory.conversation_id,
+            func.min(UserMemory.message_order).label('first_message_order'),
+            func.max(UserMemory.timestamp).label('latest_timestamp')
+        ).filter(
+            UserMemory.is_active == True,
+            UserMemory.expires_at > datetime.utcnow(),
+            UserMemory.user_id == tenant_code
+        ).group_by(
+            UserMemory.conversation_id
+        ).order_by(
+            func.max(UserMemory.timestamp).desc()
+        ).limit(10).all()
 
-        return [
-            {
-                "id": conv.conversation_id,
-                "title": conv.title,
-                "timestamp": conv.timestamp.isoformat()
-            }
-            for conv in conversations
-        ]
+        # Now get the first message of each conversation for the title
+        result = []
+        for conv_id, first_order, latest_ts in distinct_conversations:
+            # Get the first message (for title)
+            first_message = db.query(UserMemory).filter(
+                UserMemory.conversation_id == conv_id,
+                UserMemory.message_order == first_order,
+                UserMemory.user_id == tenant_code
+            ).first()
+
+            if first_message:
+                result.append({
+                    "id": conv_id,
+                    "title": first_message.title or first_message.query[:50],
+                    "timestamp": latest_ts.isoformat()  # Use the latest timestamp for sorting
+                })
+
+        return result
     except Exception as e:
         logger.error(f"Error retrieving conversations: {e}")
         raise HTTPException(
@@ -880,7 +895,7 @@ async def get_conversation(
                 UserMemory.user_id == tenant_code,  # Add tenant isolation
                 UserMemory.is_active == True
         )\
-            .order_by(UserMemory.timestamp.asc())\
+            .order_by(UserMemory.message_order.asc())\
             .all()
 
         if not messages:
@@ -959,29 +974,6 @@ async def add_user(request: Request, db: Session = Depends(get_db), current_user
     db.add(new_user)
     db.commit()
     return {"success": True, "message": "User added successfully"}
-
-
-@app.get("/api/conversations")
-async def get_conversations(db: Session = Depends(get_db)):
-    try:
-        user_id = "current_user"  # Replace with actual user ID from auth
-        conversations = get_user_conversations(db, user_id)
-        return [{"id": conv.conversation_id,
-                "title": conv.title,
-                 "timestamp": conv.timestamp} for conv in conversations]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str, db: Session = Depends(get_db)):
-    try:
-        messages = get_conversation_messages(db, conversation_id)
-        return [{"query": msg.query,
-                "response": msg.response,
-                 "timestamp": msg.timestamp} for msg in messages]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Add this function to extract tenant code from request

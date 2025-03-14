@@ -148,19 +148,11 @@ const fetchInitialQuestions = async () => {
   const fetchConversationMessages = async (conversationId) => {
     try {
       const response = await fetch(`${backendUrl}/api/conversations/${conversationId}`, {
-        headers: getHeaders()  // Use the same getHeaders function for consistency
+        headers: getHeaders()
       });
       if (response.ok) {
         const data = await response.json();
-        const transformedMessages = data.map(item => ({
-          query: item.query,
-          response: item.response,
-          timestamp: new Date(item.timestamp),
-          followup_questions: item.followup_questions,
-          error: item.error,
-          reformulated_question: item.reformulated_question
-        }));
-        setMessages(transformedMessages);
+        setMessages(data);
         setTimeout(scrollToBottom, 100); // Add scroll after loading messages
       }
     } catch (error) {
