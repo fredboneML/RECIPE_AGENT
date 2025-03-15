@@ -1165,7 +1165,11 @@ class AgentManager:
             1. ALWAYS include "tenant_code = '{self.tenant_code}'" in the WHERE clause
             2. NEVER use DELETE, UPDATE, INSERT or other data-modifying statements
             3. Use PostgreSQL syntax
-            4. If text matching is needed, use ILIKE for case-insensitivity
+            4. ALWAYS use LIKE with wildcards for text matching, especially for:
+               - Phone numbers: Use "telephone_number LIKE '%{{phone_number}}%'" instead of equals
+               - Names: Use "name LIKE '%{{name}}%'" instead of equals
+               - Any entity identifiers: Always use LIKE with wildcards for flexible matching
+               - Addresses: Use LIKE with wildcards for address components
             5. For people's names, use ILIKE with wildcards
             6. ONLY use tables that exist in the schema information provided
             7. The main table for call data is "transcription" (NOT "transcripts")
@@ -1173,6 +1177,7 @@ class AgentManager:
             9. SELECT only the most relevant columns for the question
             10. Focus on finding SPECIFIC records that answer the question, not general statistics
             11. DO NOT add semicolons in the middle of the query
+            12. When checking for telephone numbers, ALWAYS check both the telephone_number and clid fields (e.g., "WHERE (telephone_number LIKE '%{{phone_number}}%' OR clid LIKE '%{{phone_number}}%')")
             
             Generate ONLY the SQL query, no explanations.
             """
@@ -1204,6 +1209,16 @@ class AgentManager:
             # Remove any markdown formatting
             if sql_query.startswith("```") and sql_query.endswith("```"):
                 sql_query = sql_query[3:-3].strip()
+            elif sql_query.startswith("```sql") and sql_query.endswith("```"):
+                sql_query = sql_query[6:-3].strip()
+            elif sql_query.startswith("```"):
+                # Handle case where only opening ``` is present
+                sql_query = sql_query[3:].strip()
+
+            # Remove any remaining markdown formatting
+            sql_query = re.sub(r'^```sql\s*', '', sql_query)
+            sql_query = re.sub(r'^```\s*', '', sql_query)
+            sql_query = re.sub(r'\s*```$', '', sql_query)
 
             if sql_query.startswith("sql"):
                 sql_query = sql_query[3:].strip()
@@ -1220,6 +1235,27 @@ class AgentManager:
                 parts = sql_query.split("LIMIT")
                 if len(parts) > 2:
                     sql_query = parts[0] + "LIMIT" + parts[-1]
+
+            # Convert exact matches for phone numbers to LIKE statements
+            # Look for patterns like: telephone_number = '1234567890' or telephone_number='1234567890'
+            phone_pattern = re.compile(
+                r"(telephone_number\s*=\s*['\"]([\d\+]+)['\"])")
+            matches = phone_pattern.findall(sql_query)
+            for match, phone_number in matches:
+                replacement = f"telephone_number LIKE '%{phone_number}%'"
+                sql_query = sql_query.replace(match, replacement)
+
+            # Convert exact matches for other common entity fields to LIKE statements
+            entity_fields = ['name', 'address', 'email',
+                             'clid', 'customer_id', 'account_number']
+            for field in entity_fields:
+                # Match pattern: field = 'value' or field='value'
+                field_pattern = re.compile(
+                    f"({field}\\s*=\\s*['\"](.*?)['\"])")
+                matches = field_pattern.findall(sql_query)
+                for match, value in matches:
+                    replacement = f"{field} LIKE '%{value}%'"
+                    sql_query = sql_query.replace(match, replacement)
 
             return sql_query
         except Exception as e:
