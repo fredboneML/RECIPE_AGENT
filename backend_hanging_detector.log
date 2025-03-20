@@ -1,0 +1,1163 @@
+Thu Mar 20 13:31:01 CET 2025: Starting backend hang detection for backend_app
+Thu Mar 20 13:31:01 CET 2025: Possible hang detected. Last activity: Fetching
+Thu Mar 20 13:31:01 CET 2025: Backend appears to be hanging
+Thu Mar 20 13:31:01 CET 2025: Checking container resources
+CONTAINER ID   NAME          CPU %     MEM USAGE / LIMIT     MEM %     NET I/O          BLOCK I/O      PIDS
+04a95dae0a90   backend_app   2.46%     22.07MiB / 3.828GiB   0.56%     265MB / 1.32MB   2.44GB / 1GB   3
+Thu Mar 20 13:31:02 CET 2025: Collecting diagnostic information
+==== RECENT LOGS ====
+[32mINFO[0m:     127.0.0.1:57848 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:Processing query: '**What other key factors do you think contribute to positive sentiment during calls beyond successful issue resolution and clear communication?**' for tenant: tientelecom
+INFO:ai_analyzer.main:Continuing conversation: e6170d5e-f6a5-472b-9916-73718d503ab7
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 5912.47it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.agent_manager:Found query_cache columns: ['id', 'question', 'sql', 'result', 'tenant_code', 'created_at', 'expires_at', 'hash_key', 'execution_time_ms', 'result_count']
+INFO:ai_analyzer.agents.agent_manager:Agent has knowledge: <class 'agno.knowledge.langchain.LangChainKnowledgeBase'>
+INFO:ai_analyzer.agents.agent_manager:Knowledge has retriever: <class 'langchain_core.vectorstores.base.VectorStoreRetriever'>
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://qdrant:6333/collections/tenant_tientelecom/points/search?timeout=5 "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Search query: '**What other key factors do you think contribute to positive sentiment during calls beyond successful issue resolution and clear communication?**'
+INFO:ai_analyzer.agents.agent_manager:Found 2 results in Qdrant
+INFO:ai_analyzer.agents.agent_manager:Result 1 (score: 0.6776):
+INFO:ai_analyzer.agents.agent_manager:  Full payload keys: ['document', 'id', 'tenant_code', 'processing_date', 'topic', 'summary', 'sentiment', 'call_duration_secs']
+INFO:ai_analyzer.agents.agent_manager:  Full payload: {'document': 'Summary: De 10Telecom collega feliciteert de beller en er is een positieve uitwisseling van gelukwensen. Topic: felicitaties', 'id': '828d1f56-109f-4e8d-93e9-25dba959f527', 'tenant_code': 'tientelecom', 'processing_date': '2024-09-23 09:29:05', 'topic': 'felicitaties', 'summary': 'De 10Telecom collega feliciteert de beller en er is een positieve uitwisseling van gelukwensen.', 'sentiment': 'positief', 'call_duration_secs': 12}
+INFO:ai_analyzer.agents.agent_manager:  Found text in field: document
+INFO:ai_analyzer.agents.agent_manager:  Text: Summary: De 10Telecom collega feliciteert de beller en er is een positieve uitwisseling van gelukwen...
+INFO:ai_analyzer.agents.agent_manager:Result 2 (score: 0.6700):
+INFO:ai_analyzer.agents.agent_manager:  Full payload keys: ['document', 'id', 'tenant_code', 'processing_date', 'topic', 'summary', 'sentiment', 'call_duration_secs']
+INFO:ai_analyzer.agents.agent_manager:  Full payload: {'document': 'Summary: De 10Telecom collega verwelkomt de beller en informeert dat het gesprek kan worden opgenomen voor kwaliteitsverbetering. Topic: klantenservice', 'id': '782ac736-2268-4f1a-8686-6d5515cbf65f', 'tenant_code': 'tientelecom', 'processing_date': '2024-12-03 13:39:07', 'topic': 'klantenservice', 'summary': 'De 10Telecom collega verwelkomt de beller en informeert dat het gesprek kan worden opgenomen voor kwaliteitsverbetering.', 'sentiment': 'neutral', 'call_duration_secs': 11}
+INFO:ai_analyzer.agents.agent_manager:  Found text in field: document
+INFO:ai_analyzer.agents.agent_manager:  Text: Summary: De 10Telecom collega verwelkomt de beller en informeert dat het gesprek kan worden opgenome...
+INFO:ai_analyzer.agents.agent_manager:Found 2 results using direct Qdrant search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 5029.14it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.factory:SQL Agent started
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Generated SQL query: SELECT 
+    t.id,
+    t.summary,
+    t.topic,
+    t.sentiment,
+    t.call_duration_secs
+FROM 
+    transcription AS t
+WHERE 
+    t.tenant_code = 'tientelecom'
+    AND t.sentiment ILIKE 'positief'
+    AND t.topic NOT IN ('succesvolle probleemoplossing', 'duidelijke communicatie')
+    AND (t.summary ILIKE '%gelukwensen%' OR t.summary ILIKE '%felicitatie%' OR t.summary ILIKE '%welkom%')
+INFO:ai_analyzer.agents.agent_manager:Executing SQL query: SELECT 
+    t.id,
+    t.summary,
+    t.topic,
+    t.sentiment,
+    t.call_duration_secs
+FROM 
+    transcription AS t
+WHERE 
+    t.tenant_code = 'tientelecom'
+    AND t.sentiment ILIKE 'positief'
+    AND t.topic NOT IN ('succesvolle probleemoplossing', 'duidelijke communicatie')
+    AND (t.summary ILIKE '%gelukwensen%' OR t.summary ILIKE '%felicitatie%' OR t.summary ILIKE '%welkom%')
+INFO:ai_analyzer.agents.agent_manager:SQL query returned 33 rows
+INFO:ai_analyzer.agents.agent_manager:SQL results sample: SQL Query Results:
+id, summary, topic, sentiment, call_duration_secs
+----------------------------------------
+42aec426-b344-48ad-8859-891749ac20e2, Hendrik had een gesprek met Pinda Rijsma over de goe...
+INFO:ai_analyzer.agents.agent_manager:Cached SQL results
+INFO:ai_analyzer.agents.agent_manager:Retrieved 2 previous messages from conversation e6170d5e-f6a5-472b-9916-73718d503ab7
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Final response: Based on the analysis of the call transcriptions and SQL results, here are key takeaways regarding f...
+INFO:ai_analyzer.agents.agent_manager:Cached query response
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Storing conversation with ID: e6170d5e-f6a5-472b-9916-73718d503ab7
+INFO:ai_analyzer.main:Stored conversation in UserMemory: e6170d5e-f6a5-472b-9916-73718d503ab7, order: 2
+INFO:ai_analyzer.main:Conversation stored successfully
+[32mINFO[0m:     192.168.65.1:42662 - "[1mPOST /api/query HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+[32mINFO[0m:     127.0.0.1:46148 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+[32mINFO[0m:     127.0.0.1:46046 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:Processing query: '**Have you noticed any specific instances or examples where empathetic language made a particularly significant impact on customer sentiment during a call?**' for tenant: tientelecom
+INFO:ai_analyzer.main:Continuing conversation: e6170d5e-f6a5-472b-9916-73718d503ab7
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 13971.70it/s]
+==== NETWORK CONNECTIONS ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "netstat": executable file not found in $PATH: unknown
+netstat not available
+==== PROCESS LIST ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
+ps not available
+==== MEMORY INFO ====
+MemTotal:        4013480 kB
+MemFree:         3101284 kB
+MemAvailable:    3236036 kB
+Buffers:           16956 kB
+Cached:           222748 kB
+SwapCached:        17444 kB
+Active:           602112 kB
+Inactive:         111384 kB
+Active(anon):     371088 kB
+Inactive(anon):   102172 kB
+Active(file):     231024 kB
+Inactive(file):     9212 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       1048572 kB
+SwapFree:         682736 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                48 kB
+Writeback:             0 kB
+AnonPages:        449696 kB
+Mapped:           104440 kB
+Shmem:              9476 kB
+KReclaimable:      50752 kB
+Slab:             104048 kB
+SReclaimable:      50752 kB
+SUnreclaim:        53296 kB
+KernelStack:        6480 kB
+PageTables:        12332 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     3055312 kB
+Committed_AS:    2129400 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:        5576 kB
+VmallocChunk:          0 kB
+Percpu:             2624 kB
+AnonHugePages:    202752 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+Thu Mar 20 13:31:03 CET 2025: Restarting backend_app due to hanging
+Thu Mar 20 13:31:04 CET 2025: Container restarted
+Thu Mar 20 13:32:04 CET 2025: Possible hang detected. Last activity: Fetching
+Thu Mar 20 13:32:04 CET 2025: Backend appears to be hanging
+Thu Mar 20 13:32:04 CET 2025: Checking container resources
+CONTAINER ID   NAME          CPU %     MEM USAGE / LIMIT     MEM %     NET I/O          BLOCK I/O    PIDS
+04a95dae0a90   backend_app   2.84%     489.9MiB / 3.828GiB   12.50%    7.9kB / 6.43kB   263MB / 0B   17
+Thu Mar 20 13:32:06 CET 2025: Collecting diagnostic information
+==== RECENT LOGS ====
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.factory:SQL Agent started
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Generated SQL query: SELECT 
+    t.id,
+    t.summary,
+    t.topic,
+    t.sentiment,
+    t.call_duration_secs
+FROM 
+    transcription AS t
+WHERE 
+    t.tenant_code = 'tientelecom'
+    AND t.sentiment ILIKE 'positief'
+    AND t.topic NOT IN ('succesvolle probleemoplossing', 'duidelijke communicatie')
+    AND (t.summary ILIKE '%gelukwensen%' OR t.summary ILIKE '%felicitatie%' OR t.summary ILIKE '%welkom%')
+INFO:ai_analyzer.agents.agent_manager:Executing SQL query: SELECT 
+    t.id,
+    t.summary,
+    t.topic,
+    t.sentiment,
+    t.call_duration_secs
+FROM 
+    transcription AS t
+WHERE 
+    t.tenant_code = 'tientelecom'
+    AND t.sentiment ILIKE 'positief'
+    AND t.topic NOT IN ('succesvolle probleemoplossing', 'duidelijke communicatie')
+    AND (t.summary ILIKE '%gelukwensen%' OR t.summary ILIKE '%felicitatie%' OR t.summary ILIKE '%welkom%')
+INFO:ai_analyzer.agents.agent_manager:SQL query returned 33 rows
+INFO:ai_analyzer.agents.agent_manager:SQL results sample: SQL Query Results:
+id, summary, topic, sentiment, call_duration_secs
+----------------------------------------
+42aec426-b344-48ad-8859-891749ac20e2, Hendrik had een gesprek met Pinda Rijsma over de goe...
+INFO:ai_analyzer.agents.agent_manager:Cached SQL results
+INFO:ai_analyzer.agents.agent_manager:Retrieved 2 previous messages from conversation e6170d5e-f6a5-472b-9916-73718d503ab7
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Final response: Based on the analysis of the call transcriptions and SQL results, here are key takeaways regarding f...
+INFO:ai_analyzer.agents.agent_manager:Cached query response
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Storing conversation with ID: e6170d5e-f6a5-472b-9916-73718d503ab7
+INFO:ai_analyzer.main:Stored conversation in UserMemory: e6170d5e-f6a5-472b-9916-73718d503ab7, order: 2
+INFO:ai_analyzer.main:Conversation stored successfully
+[32mINFO[0m:     192.168.65.1:42662 - "[1mPOST /api/query HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+[32mINFO[0m:     127.0.0.1:46148 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+[32mINFO[0m:     127.0.0.1:46046 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:Processing query: '**Have you noticed any specific instances or examples where empathetic language made a particularly significant impact on customer sentiment during a call?**' for tenant: tientelecom
+INFO:ai_analyzer.main:Continuing conversation: e6170d5e-f6a5-472b-9916-73718d503ab7
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 13971.70it/s]
+[32mINFO[0m:     Stopping reloader process [[36m[1m1[0m]
+[32mINFO[0m:     Will watch for changes in these directories: ['/usr/src/app']
+[32mINFO[0m:     Uvicorn running on [1mhttp://0.0.0.0:8000[0m (Press CTRL+C to quit)
+[32mINFO[0m:     Started reloader process [[36m[1m1[0m] using [36m[1mStatReload[0m
+INFO:ai_analyzer.config:Found .env file at: /usr/src/app/.env
+INFO:ai_analyzer.config:Using database host: database and port: 5432
+Directory 'data' already exists.
+/usr/local/lib/python3.12/site-packages/langchain/chat_models/__init__.py:33: LangChainDeprecationWarning: Importing chat models from langchain is deprecated. Importing from langchain will no longer be supported as of langchain==0.2.0. Please import from langchain-community instead:
+
+`from langchain_community.chat_models import ChatOpenAI`.
+
+To install langchain-community run `pip install -U langchain-community`.
+  warnings.warn(
+/usr/local/lib/python3.12/site-packages/langchain/chat_models/__init__.py:33: LangChainDeprecationWarning: Importing chat models from langchain is deprecated. Importing from langchain will no longer be supported as of langchain==0.2.0. Please import from langchain-community instead:
+
+`from langchain_community.chat_models import ChatOpenAI`.
+
+To install langchain-community run `pip install -U langchain-community`.
+  warnings.warn(
+INFO:ai_analyzer.cache_manager:Database cache manager initialized
+[32mINFO[0m:     Started server process [[36m8[0m]
+[32mINFO[0m:     Waiting for application startup.
+INFO:ai_analyzer.main:Direct PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:ai_analyzer.main:Database connection test successful
+INFO:ai_analyzer.main:Application startup completed successfully
+[32mINFO[0m:     Application startup complete.
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+[32mINFO[0m:     127.0.0.1:59130 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+[32mINFO[0m:     127.0.0.1:52098 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+==== NETWORK CONNECTIONS ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "netstat": executable file not found in $PATH: unknown
+netstat not available
+==== PROCESS LIST ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
+ps not available
+==== MEMORY INFO ====
+MemTotal:        4013480 kB
+MemFree:         2444024 kB
+MemAvailable:    2856408 kB
+Buffers:           33604 kB
+Cached:           479296 kB
+SwapCached:        18176 kB
+Active:          1092552 kB
+Inactive:         228604 kB
+Active(anon):     707588 kB
+Inactive(anon):   100296 kB
+Active(file):     384964 kB
+Inactive(file):   128308 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       1048572 kB
+SwapFree:         704752 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:        782876 kB
+Mapped:           221476 kB
+Shmem:              9652 kB
+KReclaimable:      59940 kB
+Slab:             113580 kB
+SReclaimable:      59940 kB
+SUnreclaim:        53640 kB
+KernelStack:        6752 kB
+PageTables:        13664 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     3055312 kB
+Committed_AS:    3030000 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:        5576 kB
+VmallocChunk:          0 kB
+Percpu:             2624 kB
+AnonHugePages:    208896 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+Thu Mar 20 13:32:07 CET 2025: Restarting backend_app due to hanging
+Thu Mar 20 13:32:09 CET 2025: Container restarted
+Thu Mar 20 13:44:10 CET 2025: Possible hang detected. Last activity: Fetching
+Thu Mar 20 13:44:10 CET 2025: Backend appears to be hanging
+Thu Mar 20 13:44:10 CET 2025: Checking container resources
+CONTAINER ID   NAME          CPU %     MEM USAGE / LIMIT     MEM %     NET I/O         BLOCK I/O        PIDS
+04a95dae0a90   backend_app   1.53%     2.774GiB / 3.828GiB   72.47%    304kB / 290kB   423MB / 67.1MB   56
+Thu Mar 20 13:44:11 CET 2025: Collecting diagnostic information
+==== RECENT LOGS ====
+Algemene communicatie, 5
+...
+INFO:ai_analyzer.agents.agent_manager:Cached SQL results
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Final response: To address the user's question about the most discussed topics this month, we can combine insights f...
+INFO:ai_analyzer.agents.agent_manager:Cached query response
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Storing conversation with ID: 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:ai_analyzer.main:Stored conversation in UserMemory: 77dfb4fa-c0a4-4799-b707-117abc815058, order: 0
+INFO:ai_analyzer.main:Conversation stored successfully
+[32mINFO[0m:     192.168.65.1:64458 - "[1mPOST /api/query HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:38960 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+[32mINFO[0m:     192.168.65.1:64458 - "[1mOPTIONS /api/conversations HTTP/1.1[0m" [32m200 OK[0m
+[32mINFO[0m:     192.168.65.1:64458 - "[1mGET /api/conversations HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:37856 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:Processing query: 'How do the discussion trends this month compare to those of previous months, especially in high-frequency topics like "Technical Support" and "Billing and Call Costs"?' for tenant: tientelecom
+INFO:ai_analyzer.main:Continuing conversation: 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 27060.03it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.agent_manager:Found query_cache columns: ['id', 'question', 'sql', 'result', 'tenant_code', 'created_at', 'expires_at', 'hash_key', 'execution_time_ms', 'result_count']
+INFO:ai_analyzer.agents.agent_manager:Agent has knowledge: <class 'agno.knowledge.langchain.LangChainKnowledgeBase'>
+INFO:ai_analyzer.agents.agent_manager:Knowledge has retriever: <class 'langchain_core.vectorstores.base.VectorStoreRetriever'>
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://qdrant:6333/collections/tenant_tientelecom/points/search?timeout=5 "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Search query: 'How do the discussion trends this month compare to those of previous months, especially in high-frequency topics like "Technical Support" and "Billing and Call Costs"?'
+INFO:ai_analyzer.agents.agent_manager:Found 2 results in Qdrant
+INFO:ai_analyzer.agents.agent_manager:Result 1 (score: 0.4827):
+INFO:ai_analyzer.agents.agent_manager:  Full payload keys: ['document', 'id', 'tenant_code', 'processing_date', 'topic', 'summary', 'sentiment', 'call_duration_secs']
+INFO:ai_analyzer.agents.agent_manager:  Full payload: {'document': 'Summary: De 10Telecom collega heeft een korte informele conversatie gevoerd zonder specifieke actie of oplossing te bespreken. Topic: Algemene communicatie', 'id': '33c9a725-e32e-404e-82b7-01d51a78e632', 'tenant_code': 'tientelecom', 'processing_date': '2024-12-31 13:51:05', 'topic': 'Algemene communicatie', 'summary': 'De 10Telecom collega heeft een korte informele conversatie gevoerd zonder specifieke actie of oplossing te bespreken.', 'sentiment': 'neutral', 'call_duration_secs': 23}
+INFO:ai_analyzer.agents.agent_manager:  Found text in field: document
+INFO:ai_analyzer.agents.agent_manager:  Text: Summary: De 10Telecom collega heeft een korte informele conversatie gevoerd zonder specifieke actie ...
+INFO:ai_analyzer.agents.agent_manager:Result 2 (score: 0.4689):
+INFO:ai_analyzer.agents.agent_manager:  Full payload keys: ['document', 'id', 'tenant_code', 'processing_date', 'topic', 'summary', 'sentiment', 'call_duration_secs']
+INFO:ai_analyzer.agents.agent_manager:  Full payload: {'document': 'Summary: Kees belt over zijn maandelijkse factuur van september, waarin hij een hoge kostenpost voor inkomende gesprekken opmerkt. Hij vraagt zich af waar deze kosten vandaan komen, aangezien hij niet vaak gebeld wordt. De 10Telecom collega zal de situatie verder onderzoeken en terugbellen met meer informatie. Topic: factuur en belkosten', 'id': '73d0506c-2cda-497c-95c0-c86fea55f654', 'tenant_code': 'tientelecom', 'processing_date': '2024-10-03 08:58:10', 'topic': 'factuur en belkosten', 'summary': 'Kees belt over zijn maandelijkse factuur van september, waarin hij een hoge kostenpost voor inkomende gesprekken opmerkt. Hij vraagt zich af waar deze kosten vandaan komen, aangezien hij niet vaak gebeld wordt. De 10Telecom collega zal de situatie verder onderzoeken en terugbellen met meer informatie.', 'sentiment': 'neutraal', 'call_duration_secs': 166}
+INFO:ai_analyzer.agents.agent_manager:  Found text in field: document
+INFO:ai_analyzer.agents.agent_manager:  Text: Summary: Kees belt over zijn maandelijkse factuur van september, waarin hij een hoge kostenpost voor...
+INFO:ai_analyzer.agents.agent_manager:Found 2 results using direct Qdrant search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 6900.80it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.factory:SQL Agent started
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Generated SQL query: SELECT 
+    t.processing_date,
+    t.topic,
+    COUNT(t.id) AS call_count
+FROM 
+    transcription AS t
+WHERE 
+    t.tenant_code = 'tientelecom' 
+    AND (t.topic ILIKE '%Technical Support%' OR t.topic ILIKE '%Billing and Call Costs%')
+    AND t.processing_date >= date_trunc('month', current_date - interval '1 month')
+GROUP BY 
+    t.processing_date, t.topic
+ORDER BY 
+    t.processing_date, t.topic
+INFO:ai_analyzer.agents.agent_manager:Executing SQL query: SELECT 
+    t.processing_date,
+    t.topic,
+    COUNT(t.id) AS call_count
+FROM 
+    transcription AS t
+WHERE 
+    t.tenant_code = 'tientelecom' 
+    AND (t.topic ILIKE '%Technical Support%' OR t.topic ILIKE '%Billing and Call Costs%')
+    AND t.processing_date >= date_trunc('month', current_date - interval '1 month')
+GROUP BY 
+    t.processing_date, t.topic
+ORDER BY 
+    t.processing_date, t.topic
+INFO:ai_analyzer.agents.agent_manager:SQL query returned no data
+INFO:ai_analyzer.agents.agent_manager:Retrieved 1 previous messages from conversation 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://qdrant:6333/collections/tenant_tientelecom/points/query "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://qdrant:6333/collections/tenant_tientelecom/points/query "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+==== NETWORK CONNECTIONS ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "netstat": executable file not found in $PATH: unknown
+netstat not available
+==== PROCESS LIST ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
+ps not available
+==== MEMORY INFO ====
+MemTotal:        4013480 kB
+MemFree:          304900 kB
+MemAvailable:     413376 kB
+Buffers:            1648 kB
+Cached:           213876 kB
+SwapCached:        81924 kB
+Active:          2026844 kB
+Inactive:        1476840 kB
+Active(anon):    1944152 kB
+Inactive(anon):  1349676 kB
+Active(file):      82692 kB
+Inactive(file):   127164 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       1048572 kB
+SwapFree:         582952 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                80 kB
+Writeback:             0 kB
+AnonPages:       3221356 kB
+Mapped:           172684 kB
+Shmem:              9764 kB
+KReclaimable:      58960 kB
+Slab:             112612 kB
+SReclaimable:      58960 kB
+SUnreclaim:        53652 kB
+KernelStack:        7504 kB
+PageTables:        19528 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     3055312 kB
+Committed_AS:    6977780 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:        5576 kB
+VmallocChunk:          0 kB
+Percpu:             2624 kB
+AnonHugePages:    354304 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+Thu Mar 20 13:44:12 CET 2025: Restarting backend_app due to hanging
+Thu Mar 20 13:44:23 CET 2025: Container restarted
+Thu Mar 20 13:45:23 CET 2025: Possible hang detected. Last activity: Fetching
+Thu Mar 20 13:45:23 CET 2025: Backend appears to be hanging
+Thu Mar 20 13:45:23 CET 2025: Checking container resources
+CONTAINER ID   NAME          CPU %     MEM USAGE / LIMIT   MEM %     NET I/O           BLOCK I/O    PIDS
+04a95dae0a90   backend_app   64.36%    673MiB / 3.828GiB   17.17%    26.2kB / 14.1kB   460MB / 0B   26
+Thu Mar 20 13:45:25 CET 2025: Collecting diagnostic information
+==== RECENT LOGS ====
+INFO:ai_analyzer.agents.agent_manager:Found 2 results using direct Qdrant search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 6900.80it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.factory:SQL Agent started
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Generated SQL query: SELECT 
+    t.processing_date,
+    t.topic,
+    COUNT(t.id) AS call_count
+FROM 
+    transcription AS t
+WHERE 
+    t.tenant_code = 'tientelecom' 
+    AND (t.topic ILIKE '%Technical Support%' OR t.topic ILIKE '%Billing and Call Costs%')
+    AND t.processing_date >= date_trunc('month', current_date - interval '1 month')
+GROUP BY 
+    t.processing_date, t.topic
+ORDER BY 
+    t.processing_date, t.topic
+INFO:ai_analyzer.agents.agent_manager:Executing SQL query: SELECT 
+    t.processing_date,
+    t.topic,
+    COUNT(t.id) AS call_count
+FROM 
+    transcription AS t
+WHERE 
+    t.tenant_code = 'tientelecom' 
+    AND (t.topic ILIKE '%Technical Support%' OR t.topic ILIKE '%Billing and Call Costs%')
+    AND t.processing_date >= date_trunc('month', current_date - interval '1 month')
+GROUP BY 
+    t.processing_date, t.topic
+ORDER BY 
+    t.processing_date, t.topic
+INFO:ai_analyzer.agents.agent_manager:SQL query returned no data
+INFO:ai_analyzer.agents.agent_manager:Retrieved 1 previous messages from conversation 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://qdrant:6333/collections/tenant_tientelecom/points/query "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://qdrant:6333/collections/tenant_tientelecom/points/query "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Final response: To address the user's question about how discussion trends this month compare to those of previous m...
+INFO:ai_analyzer.agents.agent_manager:Cached query response
+[32mINFO[0m:     Will watch for changes in these directories: ['/usr/src/app']
+[32mINFO[0m:     Uvicorn running on [1mhttp://0.0.0.0:8000[0m (Press CTRL+C to quit)
+[32mINFO[0m:     Started reloader process [[36m[1m1[0m] using [36m[1mStatReload[0m
+INFO:ai_analyzer.config:Found .env file at: /usr/src/app/.env
+INFO:ai_analyzer.config:Using database host: database and port: 5432
+Directory 'data' already exists.
+/usr/local/lib/python3.12/site-packages/langchain/chat_models/__init__.py:33: LangChainDeprecationWarning: Importing chat models from langchain is deprecated. Importing from langchain will no longer be supported as of langchain==0.2.0. Please import from langchain-community instead:
+
+`from langchain_community.chat_models import ChatOpenAI`.
+
+To install langchain-community run `pip install -U langchain-community`.
+  warnings.warn(
+/usr/local/lib/python3.12/site-packages/langchain/chat_models/__init__.py:33: LangChainDeprecationWarning: Importing chat models from langchain is deprecated. Importing from langchain will no longer be supported as of langchain==0.2.0. Please import from langchain-community instead:
+
+`from langchain_community.chat_models import ChatOpenAI`.
+
+To install langchain-community run `pip install -U langchain-community`.
+  warnings.warn(
+INFO:ai_analyzer.cache_manager:Database cache manager initialized
+[32mINFO[0m:     Started server process [[36m8[0m]
+[32mINFO[0m:     Waiting for application startup.
+INFO:ai_analyzer.main:Direct PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:ai_analyzer.main:Database connection test successful
+INFO:ai_analyzer.main:Application startup completed successfully
+[32mINFO[0m:     Application startup complete.
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:ai_analyzer.utils.singleton_resources:Starting Qdrant client initialization
+INFO:ai_analyzer.utils.singleton_resources:Creating Qdrant client instance
+INFO:httpx:HTTP Request: GET http://qdrant:6333 "HTTP/1.1 200 OK"
+INFO:ai_analyzer.utils.singleton_resources:Qdrant client instance created, testing connection
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.utils.singleton_resources:Qdrant connected successfully. Found collections: ['tenant_tientelecom', 'tenant_maccare']
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:37830 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:59710 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:Processing query: 'Are there any specific issues within the "Technical Support" calls that stand out as more urgent or complex than others?' for tenant: tientelecom
+INFO:ai_analyzer.main:Continuing conversation: 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 5818.96it/s]
+==== NETWORK CONNECTIONS ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "netstat": executable file not found in $PATH: unknown
+netstat not available
+==== PROCESS LIST ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
+ps not available
+==== MEMORY INFO ====
+MemTotal:        4013480 kB
+MemFree:         1959828 kB
+MemAvailable:    2536584 kB
+Buffers:            6152 kB
+Cached:           677660 kB
+SwapCached:        42820 kB
+Active:          1179248 kB
+Inactive:         647500 kB
+Active(anon):     968944 kB
+Inactive(anon):   179704 kB
+Active(file):     210304 kB
+Inactive(file):   467796 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       1048572 kB
+SwapFree:         651304 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                60 kB
+Writeback:             0 kB
+AnonPages:       1126200 kB
+Mapped:           243588 kB
+Shmem:              9808 kB
+KReclaimable:      59032 kB
+Slab:             112880 kB
+SReclaimable:      59032 kB
+SUnreclaim:        53848 kB
+KernelStack:        6912 kB
+PageTables:        14312 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     3055312 kB
+Committed_AS:    3624564 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:        5576 kB
+VmallocChunk:          0 kB
+Percpu:             2624 kB
+AnonHugePages:    387072 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+Thu Mar 20 13:45:25 CET 2025: Restarting backend_app due to hanging
+Thu Mar 20 13:45:36 CET 2025: Container restarted
+Thu Mar 20 13:46:36 CET 2025: Possible hang detected. Last activity: Fetching
+Thu Mar 20 13:46:36 CET 2025: Backend appears to be hanging
+Thu Mar 20 13:46:36 CET 2025: Checking container resources
+CONTAINER ID   NAME          CPU %     MEM USAGE / LIMIT    MEM %     NET I/O           BLOCK I/O        PIDS
+04a95dae0a90   backend_app   2.27%     1.99GiB / 3.828GiB   51.99%    89.9kB / 84.5kB   254kB / 8.19kB   49
+Thu Mar 20 13:46:38 CET 2025: Collecting diagnostic information
+==== RECENT LOGS ====
+
+`from langchain_community.chat_models import ChatOpenAI`.
+
+To install langchain-community run `pip install -U langchain-community`.
+  warnings.warn(
+INFO:ai_analyzer.cache_manager:Database cache manager initialized
+[32mINFO[0m:     Started server process [[36m8[0m]
+[32mINFO[0m:     Waiting for application startup.
+INFO:ai_analyzer.main:Direct PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:ai_analyzer.main:Database connection test successful
+INFO:ai_analyzer.main:Application startup completed successfully
+[32mINFO[0m:     Application startup complete.
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:ai_analyzer.utils.singleton_resources:Starting Qdrant client initialization
+INFO:ai_analyzer.utils.singleton_resources:Creating Qdrant client instance
+INFO:httpx:HTTP Request: GET http://qdrant:6333 "HTTP/1.1 200 OK"
+INFO:ai_analyzer.utils.singleton_resources:Qdrant client instance created, testing connection
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.utils.singleton_resources:Qdrant connected successfully. Found collections: ['tenant_tientelecom', 'tenant_maccare']
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:34100 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:Processing query: 'Are there any specific issues within the "Technical Support" calls that stand out as more urgent or complex than others?' for tenant: tientelecom
+INFO:ai_analyzer.main:Continuing conversation: 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 34323.27it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.utils.singleton_resources:Starting embedding model initialization: paraphrase-multilingual-MiniLM-L12-v2
+INFO:ai_analyzer.utils.singleton_resources:Creating embedding model instance
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 5748.77it/s]
+INFO:ai_analyzer.utils.singleton_resources:Model paraphrase-multilingual-MiniLM-L12-v2 instance created successfully
+INFO:ai_analyzer.agents.agent_manager:Found query_cache columns: ['id', 'question', 'sql', 'result', 'tenant_code', 'created_at', 'expires_at', 'hash_key', 'execution_time_ms', 'result_count']
+INFO:ai_analyzer.agents.agent_manager:Agent has knowledge: <class 'agno.knowledge.langchain.LangChainKnowledgeBase'>
+INFO:ai_analyzer.agents.agent_manager:Knowledge has retriever: <class 'langchain_core.vectorstores.base.VectorStoreRetriever'>
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://qdrant:6333/collections/tenant_tientelecom/points/search?timeout=5 "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Search query: 'Are there any specific issues within the "Technical Support" calls that stand out as more urgent or complex than others?'
+INFO:ai_analyzer.agents.agent_manager:Found 2 results in Qdrant
+INFO:ai_analyzer.agents.agent_manager:Result 1 (score: 0.6623):
+INFO:ai_analyzer.agents.agent_manager:  Full payload keys: ['document', 'id', 'tenant_code', 'processing_date', 'topic', 'summary', 'sentiment', 'call_duration_secs']
+INFO:ai_analyzer.agents.agent_manager:  Full payload: {'document': 'Summary: De 10Telecom collega bevestigt dat er technische problemen zijn. Er zijn geen specifieke oplossingen of vervolgacties besproken in het gesprek. Topic: Technische problemen', 'id': '2c866340-5ca2-42ce-b837-0a0870bce6da', 'tenant_code': 'tientelecom', 'processing_date': '2024-09-16 13:50:05', 'topic': 'Technische problemen', 'summary': 'De 10Telecom collega bevestigt dat er technische problemen zijn. Er zijn geen specifieke oplossingen of vervolgacties besproken in het gesprek.', 'sentiment': 'neutral', 'call_duration_secs': 27}
+INFO:ai_analyzer.agents.agent_manager:  Found text in field: document
+INFO:ai_analyzer.agents.agent_manager:  Text: Summary: De 10Telecom collega bevestigt dat er technische problemen zijn. Er zijn geen specifieke op...
+INFO:ai_analyzer.agents.agent_manager:Result 2 (score: 0.6528):
+INFO:ai_analyzer.agents.agent_manager:  Full payload keys: ['document', 'id', 'tenant_code', 'processing_date', 'topic', 'summary', 'sentiment', 'call_duration_secs']
+INFO:ai_analyzer.agents.agent_manager:  Full payload: {'document': 'Summary: Michael en Stijn bespreken technische problemen met inkomende oproepen op een vast toestel. Ze analyseren de wachtrijgeschiedenis en de registratie van telefoongesprekken. Michael zal de gebruiker vragen om de wifi uit te schakelen en opnieuw te testen om te zien of het probleem aanhoudt. Topic: technische problemen met telefoons', 'id': 'fa1a239d-4aeb-45f6-a98f-9d75d55ff9d0', 'tenant_code': 'tientelecom', 'processing_date': '2024-09-17 10:05:11', 'topic': 'technische problemen met telefoons', 'summary': 'Michael en Stijn bespreken technische problemen met inkomende oproepen op een vast toestel. Ze analyseren de wachtrijgeschiedenis en de registratie van telefoongesprekken. Michael zal de gebruiker vragen om de wifi uit te schakelen en opnieuw te testen om te zien of het probleem aanhoudt.', 'sentiment': 'neutral', 'call_duration_secs': 484}
+INFO:ai_analyzer.agents.agent_manager:  Found text in field: document
+INFO:ai_analyzer.agents.agent_manager:  Text: Summary: Michael en Stijn bespreken technische problemen met inkomende oproepen op een vast toestel....
+INFO:ai_analyzer.agents.agent_manager:Found 2 results using direct Qdrant search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 5514.47it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.factory:SQL Agent started
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Generated SQL query: SELECT 
+    t.id, 
+    t.summary, 
+    t.topic, 
+    t.sentiment, 
+    t.call_duration_secs 
+FROM 
+    transcription_tientelecom t
+WHERE 
+    t.topic ILIKE '%Technical Support%' 
+    AND t.tenant_code = 'tientelecom'
+    AND (t.sentiment = 'negative' OR t.call_duration_secs > 300)
+ORDER BY 
+    t.call_duration_secs DESC
+INFO:ai_analyzer.agents.agent_manager:Executing SQL query: SELECT 
+    t.id, 
+    t.summary, 
+    t.topic, 
+    t.sentiment, 
+    t.call_duration_secs 
+FROM 
+    transcription_tientelecom t
+WHERE 
+    t.topic ILIKE '%Technical Support%' 
+    AND t.tenant_code = 'tientelecom'
+    AND (t.sentiment = 'negative' OR t.call_duration_secs > 300)
+ORDER BY 
+    t.call_duration_secs DESC
+INFO:ai_analyzer.agents.agent_manager:SQL query returned no data
+INFO:ai_analyzer.agents.agent_manager:Retrieved 1 previous messages from conversation 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+==== NETWORK CONNECTIONS ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "netstat": executable file not found in $PATH: unknown
+netstat not available
+==== PROCESS LIST ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
+ps not available
+==== MEMORY INFO ====
+MemTotal:        4013480 kB
+MemFree:          537816 kB
+MemAvailable:    1132604 kB
+Buffers:            6396 kB
+Cached:           695392 kB
+SwapCached:        43172 kB
+Active:          2575640 kB
+Inactive:         645952 kB
+Active(anon):    2365276 kB
+Inactive(anon):   160148 kB
+Active(file):     210364 kB
+Inactive(file):   485804 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       1048572 kB
+SwapFree:         652584 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                72 kB
+Writeback:             0 kB
+AnonPages:       2506804 kB
+Mapped:           255380 kB
+Shmem:             10320 kB
+KReclaimable:      58956 kB
+Slab:             112336 kB
+SReclaimable:      58956 kB
+SUnreclaim:        53380 kB
+KernelStack:        7328 kB
+PageTables:        17608 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     3055312 kB
+Committed_AS:    5689396 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:        5576 kB
+VmallocChunk:          0 kB
+Percpu:             2624 kB
+AnonHugePages:    380928 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+Thu Mar 20 13:46:38 CET 2025: Restarting backend_app due to hanging
+Thu Mar 20 13:46:43 CET 2025: Container restarted
+Thu Mar 20 13:47:44 CET 2025: Possible hang detected. Last activity: Fetching
+Thu Mar 20 13:47:44 CET 2025: Backend appears to be hanging
+Thu Mar 20 13:47:44 CET 2025: Checking container resources
+CONTAINER ID   NAME          CPU %     MEM USAGE / LIMIT     MEM %     NET I/O         BLOCK I/O   PIDS
+04a95dae0a90   backend_app   103.25%   705.9MiB / 3.828GiB   18.01%    26.2kB / 14kB   0B / 0B     26
+Thu Mar 20 13:47:45 CET 2025: Collecting diagnostic information
+==== RECENT LOGS ====
+    t.topic, 
+    t.sentiment, 
+    t.call_duration_secs 
+FROM 
+    transcription_tientelecom t
+WHERE 
+    t.topic ILIKE '%Technical Support%' 
+    AND t.tenant_code = 'tientelecom'
+    AND (t.sentiment = 'negative' OR t.call_duration_secs > 300)
+ORDER BY 
+    t.call_duration_secs DESC
+INFO:ai_analyzer.agents.agent_manager:Executing SQL query: SELECT 
+    t.id, 
+    t.summary, 
+    t.topic, 
+    t.sentiment, 
+    t.call_duration_secs 
+FROM 
+    transcription_tientelecom t
+WHERE 
+    t.topic ILIKE '%Technical Support%' 
+    AND t.tenant_code = 'tientelecom'
+    AND (t.sentiment = 'negative' OR t.call_duration_secs > 300)
+ORDER BY 
+    t.call_duration_secs DESC
+INFO:ai_analyzer.agents.agent_manager:SQL query returned no data
+INFO:ai_analyzer.agents.agent_manager:Retrieved 1 previous messages from conversation 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Final response: Here's a comprehensive analysis based on the call transcriptions and generated insights to answer th...
+INFO:ai_analyzer.agents.agent_manager:Cached query response
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.agno.com/v1/telemetry/agent/run/create "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Storing conversation with ID: 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:ai_analyzer.main:Stored conversation in UserMemory: 77dfb4fa-c0a4-4799-b707-117abc815058, order: 1
+INFO:ai_analyzer.main:Conversation stored successfully
+[32mINFO[0m:     Shutting down
+[32mINFO[0m:     192.168.65.1:34177 - "[1mPOST /api/query HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:58572 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+[32mINFO[0m:     Waiting for application shutdown.
+[32mINFO[0m:     Application shutdown complete.
+[32mINFO[0m:     Finished server process [[36m8[0m]
+[32mINFO[0m:     Stopping reloader process [[36m[1m1[0m]
+[32mINFO[0m:     Will watch for changes in these directories: ['/usr/src/app']
+[32mINFO[0m:     Uvicorn running on [1mhttp://0.0.0.0:8000[0m (Press CTRL+C to quit)
+[32mINFO[0m:     Started reloader process [[36m[1m1[0m] using [36m[1mStatReload[0m
+INFO:ai_analyzer.config:Found .env file at: /usr/src/app/.env
+INFO:ai_analyzer.config:Using database host: database and port: 5432
+Directory 'data' already exists.
+/usr/local/lib/python3.12/site-packages/langchain/chat_models/__init__.py:33: LangChainDeprecationWarning: Importing chat models from langchain is deprecated. Importing from langchain will no longer be supported as of langchain==0.2.0. Please import from langchain-community instead:
+
+`from langchain_community.chat_models import ChatOpenAI`.
+
+To install langchain-community run `pip install -U langchain-community`.
+  warnings.warn(
+/usr/local/lib/python3.12/site-packages/langchain/chat_models/__init__.py:33: LangChainDeprecationWarning: Importing chat models from langchain is deprecated. Importing from langchain will no longer be supported as of langchain==0.2.0. Please import from langchain-community instead:
+
+`from langchain_community.chat_models import ChatOpenAI`.
+
+To install langchain-community run `pip install -U langchain-community`.
+  warnings.warn(
+INFO:ai_analyzer.cache_manager:Database cache manager initialized
+[32mINFO[0m:     Started server process [[36m8[0m]
+[32mINFO[0m:     Waiting for application startup.
+INFO:ai_analyzer.main:Direct PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:ai_analyzer.main:Database connection test successful
+INFO:ai_analyzer.main:Application startup completed successfully
+[32mINFO[0m:     Application startup complete.
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:ai_analyzer.utils.singleton_resources:Starting Qdrant client initialization
+INFO:ai_analyzer.utils.singleton_resources:Creating Qdrant client instance
+INFO:httpx:HTTP Request: GET http://qdrant:6333 "HTTP/1.1 200 OK"
+INFO:ai_analyzer.utils.singleton_resources:Qdrant client instance created, testing connection
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.utils.singleton_resources:Qdrant connected successfully. Found collections: ['tenant_tientelecom', 'tenant_maccare']
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:53486 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:33178 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:Processing query: '**Can you provide examples of specific systemic problems identified from call queue history analysis, and how predictive analytics is being used to address them?**' for tenant: tientelecom
+INFO:ai_analyzer.main:Continuing conversation: 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 44057.82it/s]
+==== NETWORK CONNECTIONS ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "netstat": executable file not found in $PATH: unknown
+netstat not available
+==== PROCESS LIST ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
+ps not available
+==== MEMORY INFO ====
+MemTotal:        4013480 kB
+MemFree:         1780016 kB
+MemAvailable:    2375076 kB
+Buffers:            6516 kB
+Cached:           695580 kB
+SwapCached:        43284 kB
+Active:          1347224 kB
+Inactive:         646108 kB
+Active(anon):    1136764 kB
+Inactive(anon):   160132 kB
+Active(file):     210460 kB
+Inactive(file):   485976 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       1048572 kB
+SwapFree:         652840 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                12 kB
+Writeback:             0 kB
+AnonPages:       1275080 kB
+Mapped:           246664 kB
+Shmem:             10360 kB
+KReclaimable:      58964 kB
+Slab:             111664 kB
+SReclaimable:      58964 kB
+SUnreclaim:        52700 kB
+KernelStack:        6976 kB
+PageTables:        14812 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     3055312 kB
+Committed_AS:    3919236 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:        5576 kB
+VmallocChunk:          0 kB
+Percpu:             2624 kB
+AnonHugePages:    319488 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+Thu Mar 20 13:47:46 CET 2025: Restarting backend_app due to hanging
+Thu Mar 20 13:47:56 CET 2025: Container restarted
+Thu Mar 20 14:24:58 CET 2025: Possible hang detected. Last activity: Fetching
+Thu Mar 20 14:25:04 CET 2025: Backend appears to be hanging
+Thu Mar 20 14:25:04 CET 2025: Checking container resources
+CONTAINER ID   NAME          CPU %     MEM USAGE / LIMIT     MEM %     NET I/O         BLOCK I/O        PIDS
+04a95dae0a90   backend_app   83.02%    2.979GiB / 3.828GiB   77.82%    705kB / 789kB   1.09GB / 723MB   69
+Thu Mar 20 14:25:06 CET 2025: Collecting diagnostic information
+==== RECENT LOGS ====
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:44786 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:50128 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:52382 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:49024 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:54766 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:55718 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:56170 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:46984 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:58180 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:33618 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:49072 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:45638 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:PostgreSQL connection successful
+INFO:ai_analyzer.main:SQLAlchemy connection successful
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:ai_analyzer.main:Qdrant connection successful
+[32mINFO[0m:     127.0.0.1:47714 - "[1mGET /health HTTP/1.1[0m" [32m200 OK[0m
+[32mINFO[0m:     192.168.65.1:40067 - "[1mOPTIONS /api/query HTTP/1.1[0m" [32m200 OK[0m
+INFO:ai_analyzer.main:Processing query: '**What are some common challenges frontline staff encounter when using predictive analytics tools, and how have these challenges been addressed by the development teams?**' for tenant: tientelecom
+INFO:ai_analyzer.main:Continuing conversation: 77dfb4fa-c0a4-4799-b707-117abc815058
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 34721.06it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.agent_manager:Found query_cache columns: ['id', 'question', 'sql', 'result', 'tenant_code', 'created_at', 'expires_at', 'hash_key', 'execution_time_ms', 'result_count']
+INFO:ai_analyzer.agents.agent_manager:Agent has knowledge: <class 'agno.knowledge.langchain.LangChainKnowledgeBase'>
+INFO:ai_analyzer.agents.agent_manager:Knowledge has retriever: <class 'langchain_core.vectorstores.base.VectorStoreRetriever'>
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://qdrant:6333/collections/tenant_tientelecom/points/search?timeout=5 "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.agent_manager:Search query: '**What are some common challenges frontline staff encounter when using predictive analytics tools, and how have these challenges been addressed by the development teams?**'
+INFO:ai_analyzer.agents.agent_manager:Found 2 results in Qdrant
+INFO:ai_analyzer.agents.agent_manager:Result 1 (score: 0.5452):
+INFO:ai_analyzer.agents.agent_manager:  Full payload keys: ['document', 'id', 'tenant_code', 'processing_date', 'topic', 'summary', 'sentiment', 'call_duration_secs']
+INFO:ai_analyzer.agents.agent_manager:  Full payload: {'document': 'Summary: De klant werd verwelkomd en geïnformeerd dat het gesprek kan worden opgenomen. Er werd een keuzemenu aangekondigd voor verdere assistentie. Topic: Klantenservice', 'id': 'cdb07101-4b56-485a-80f1-94c0d10b0fc6', 'tenant_code': 'tientelecom', 'processing_date': '2025-01-06 11:57:14', 'topic': 'Klantenservice', 'summary': 'De klant werd verwelkomd en geïnformeerd dat het gesprek kan worden opgenomen. Er werd een keuzemenu aangekondigd voor verdere assistentie.', 'sentiment': 'neutraal', 'call_duration_secs': 12}
+INFO:ai_analyzer.agents.agent_manager:  Found text in field: document
+INFO:ai_analyzer.agents.agent_manager:  Text: Summary: De klant werd verwelkomd en geïnformeerd dat het gesprek kan worden opgenomen. Er werd een ...
+INFO:ai_analyzer.agents.agent_manager:Result 2 (score: 0.5324):
+INFO:ai_analyzer.agents.agent_manager:  Full payload keys: ['document', 'id', 'tenant_code', 'processing_date', 'topic', 'summary', 'sentiment', 'call_duration_secs', 'call_direction']
+INFO:ai_analyzer.agents.agent_manager:  Full payload: {'document': 'Summary: De 10Telecom collega vermeldde dat momenteel al onze medewerkers beschikbaar zijn. Topic: Medewerkers', 'id': '99651d0a-7e33-458d-bd01-1d3842f8d91e', 'tenant_code': 'tientelecom', 'processing_date': '2025-02-05 16:35:07', 'topic': 'Medewerkers', 'summary': 'De 10Telecom collega vermeldde dat momenteel al onze medewerkers beschikbaar zijn.', 'sentiment': 'neutral', 'call_duration_secs': 16, 'call_direction': 'OUT'}
+INFO:ai_analyzer.agents.agent_manager:  Found text in field: document
+INFO:ai_analyzer.agents.agent_manager:  Text: Summary: De 10Telecom collega vermeldde dat momenteel al onze medewerkers beschikbaar zijn. Topic: M...
+INFO:ai_analyzer.agents.agent_manager:Found 2 results using direct Qdrant search
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Using vector name: fast-paraphrase-multilingual-minilm-l12-v2 for collection tenant_tientelecom
+Fetching 5 files:   0% 0/5 [00:00<?, ?it/s]Fetching 5 files: 100% 5/5 [00:00<00:00, 9271.23it/s]
+INFO:httpx:HTTP Request: GET http://qdrant:6333/collections/tenant_tientelecom "HTTP/1.1 200 OK"
+INFO:ai_analyzer.agents.factory:Successfully created knowledge base for collection tenant_tientelecom
+INFO:ai_analyzer.agents.factory:SQL Agent started
+==== NETWORK CONNECTIONS ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "netstat": executable file not found in $PATH: unknown
+netstat not available
+==== PROCESS LIST ====
+OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
+ps not available
+==== MEMORY INFO ====
+MemTotal:        4013480 kB
+MemFree:           81516 kB
+MemAvailable:     116096 kB
+Buffers:           11184 kB
+Cached:           146160 kB
+SwapCached:        13676 kB
+Active:          1903780 kB
+Inactive:        1776512 kB
+Active(anon):    1818076 kB
+Inactive(anon):  1722036 kB
+Active(file):      85704 kB
+Inactive(file):    54476 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       1048572 kB
+SwapFree:             76 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                40 kB
+Writeback:           180 kB
+AnonPages:       3509692 kB
+Mapped:           106876 kB
+Shmem:             18308 kB
+KReclaimable:      50520 kB
+Slab:             103840 kB
+SReclaimable:      50520 kB
+SUnreclaim:        53320 kB
+KernelStack:        7744 kB
+PageTables:        22040 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     3055312 kB
+Committed_AS:    8375136 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:        5576 kB
+VmallocChunk:          0 kB
+Percpu:             2624 kB
+AnonHugePages:    563200 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+Thu Mar 20 14:25:06 CET 2025: Restarting backend_app due to hanging
+Thu Mar 20 14:25:17 CET 2025: Container restarted

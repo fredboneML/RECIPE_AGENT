@@ -19,35 +19,38 @@ from sqlalchemy.orm import Session
 from ai_analyzer.agents.database_inspector import DatabaseInspectorAgent
 from ai_analyzer.agents.sql_generator import SQLGeneratorAgent
 from ai_analyzer.data_import_postgresql import UserMemory
+from ai_analyzer.utils.qdrant_client import get_qdrant_client, get_embedding_model, search_qdrant_with_retry
+from pybreaker import CircuitBreaker
+from ai_analyzer.utils.singleton_resources import get_qdrant_client, get_embedding_model
+from ai_analyzer.utils.resilience import search_qdrant_safely
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Create circuit breaker
+qdrant_breaker = CircuitBreaker(fail_max=5, reset_timeout=30)
+
+# Define default model
+DEFAULT_MODEL = "gpt-3.5-turbo"
+
 
 class AgentManager:
     """Manager for Agno agents"""
 
-    def __init__(self, tenant_code: str, session=None):
-        """Initialize the agent manager"""
+    def __init__(self, tenant_code: str, session: Session, model: str = DEFAULT_MODEL):
         self.tenant_code = tenant_code
         self.session = session
-        logger.info(f"Initialized AgentManager for tenant: {tenant_code}")
-
-        # Don't initialize agent_team in constructor to avoid errors
+        self.model = model
         self.agent_team = None
         self.followup_agent = None
+        self.sql_agent = None
+        self._initialize_agents_if_needed()
 
-        # Ensure tables exist
-        if self.session:
-            try:
-                # Get engine from session
-                engine = self.session.get_bind()
-                # Create tables if they don't exist
-                create_agent_tables(engine)
-            except Exception as e:
-                logger.error(f"Error creating tables: {e}")
-                logger.exception("Detailed error:")
+        # Initialize singleton instances once
+        self.qdrant_client = get_qdrant_client()
+        self.embedding_model = get_embedding_model()
+        self.collection_name = f"tenant_{tenant_code}"
 
     def _initialize_agents_if_needed(self):
         """Initialize agents if they haven't been initialized yet"""
@@ -227,6 +230,11 @@ class AgentManager:
             logger.exception("Detailed error:")
             return self._get_default_followup_questions()
 
+    @qdrant_breaker
+    def search_transcriptions_safe(self, query: str) -> List[Dict[str, Any]]:
+        """Circuit-breaker protected vector search"""
+        return self.search_transcriptions(query)
+
     def search_transcriptions(self, query: str) -> List[Dict[str, Any]]:
         """Search for relevant transcriptions using vector search"""
         try:
@@ -250,38 +258,29 @@ class AgentManager:
 
             # Try to search directly with the Qdrant client as a fallback
             try:
-                # If agent retriever fails, try direct Qdrant search
-                from ai_analyzer.utils import get_qdrant_client
-                from fastembed import TextEmbedding
-                import numpy as np
-
-                qdrant_client = get_qdrant_client()
-                collection_name = f"tenant_{self.tenant_code}"
-
-                # Get collection info to find the vector name
-                collection_info = qdrant_client.get_collection(collection_name)
+                # Use the singleton instances initialized in __init__
+                collection_info = self.qdrant_client.get_collection(
+                    self.collection_name)
                 vector_names = list(
                     collection_info.config.params.vectors.keys())
 
                 if not vector_names:
                     logger.error(
-                        f"No vector names found in collection {collection_name}")
+                        f"No vector names found in collection {self.collection_name}")
                     return []
 
                 vector_name = vector_names[0]  # Use the first vector name
                 logger.info(f"Using vector name: {vector_name} for search")
 
-                # Generate embeddings for the query
-                embedding_model = TextEmbedding(
-                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-                embeddings = list(embedding_model.embed([query]))
+                # Generate embeddings for the query using the singleton model
+                embeddings = list(self.embedding_model.embed([query]))
                 query_vector = embeddings[0].tolist()
 
-                # Search Qdrant directly with vector name specified and return more results
-                search_results = qdrant_client.search(
-                    collection_name=collection_name,
-                    # Specify vector name
-                    query_vector=(vector_name, query_vector),
+                # Search Qdrant with retry logic and circuit breaker
+                search_results = search_qdrant_safely(
+                    self.qdrant_client,
+                    self.collection_name,
+                    query_vector,
                     limit=2
                 )
 
@@ -311,17 +310,17 @@ class AgentManager:
                             text = result.payload.get("transcript", "")
                             if not text:
                                 text = result.payload.get("transcription", "")
-                            if not text:
-                                # Try to find any field that might contain text
-                                for key, value in result.payload.items():
-                                    if isinstance(value, str) and len(value) > 50:
-                                        text = value
-                                        logger.info(
-                                            f"  Found text in field: {key}")
-                                        break
-                            if not text:
-                                # We already logged the full payload above
-                                pass
+                                if not text:
+                                    # Try to find any field that might contain text
+                                    for key, value in result.payload.items():
+                                        if isinstance(value, str) and len(value) > 50:
+                                            text = value
+                                            logger.info(
+                                                f"  Found text in field: {key}")
+                                            break
+                                if not text:
+                                    # We already logged the full payload above
+                                    pass
 
                     # Log the first 100 characters of the text to avoid huge logs
                     logger.info(f"  Text: {text[:100]}..." if len(
@@ -642,8 +641,8 @@ class AgentManager:
                 logger.info("Using cached response")
                 return cached_response
 
-            # 1. Search for relevant transcriptions using vector search
-            similar_transcripts = self.search_transcriptions(query)
+            # 1. Search for relevant transcriptions using vector search with circuit breaker
+            similar_transcripts = self.search_transcriptions_safe(query)
 
             if not similar_transcripts:
                 return "I couldn't find any relevant transcriptions to answer your question. Could you please provide more details or try a different query?"
@@ -1187,6 +1186,11 @@ class AgentManager:
             10. Focus on finding SPECIFIC records that answer the question, not general statistics
             11. DO NOT add semicolons in the middle of the query
             12. When checking for telephone numbers, ALWAYS check both the telephone_number and clid fields (e.g., "WHERE (telephone_number LIKE '%{{phone_number}}%' OR clid LIKE '%{{phone_number}}%')")
+            13. For call direction analysis, use the following categories:
+                - 'IN': Incoming calls (calls received by the system)
+                - 'OUT': Outgoing calls (calls initiated by the system)
+                - 'LOCAL': Local/internal calls (calls within the system)
+                - None: Unspecified or unknown call direction
             
             Generate ONLY the SQL query, no explanations.
             """
@@ -1265,6 +1269,15 @@ class AgentManager:
                 for match, value in matches:
                     replacement = f"{field} LIKE '%{value}%'"
                     sql_query = sql_query.replace(match, replacement)
+
+            # Remove any explanatory text after the SQL query
+            # Look for common patterns like "This query will..." or "The query..."
+            explanatory_pattern = re.compile(
+                r'```\s*(This query|The query|This SQL|The SQL).*$', re.DOTALL | re.IGNORECASE)
+            sql_query = explanatory_pattern.sub('', sql_query).strip()
+
+            # Remove any remaining backticks
+            sql_query = sql_query.replace('```', '').strip()
 
             return sql_query
         except Exception as e:

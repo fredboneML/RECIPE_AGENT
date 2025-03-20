@@ -31,6 +31,7 @@ from ai_analyzer.cache_manager import DatabaseCacheManager
 from ai_analyzer.agents import AgentManager  # Import our new AgentManager
 from ai_analyzer.agents.workflow import CallAnalysisWorkflow  # Add this import
 from ai_analyzer.data_pipeline import get_db_session
+from ai_analyzer.utils.singleton_resources import ResourceManager  # Fix the import path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -419,44 +420,36 @@ async def startup_event():
 @app.get("/health")
 async def health_check():
     try:
-        # Try direct PostgreSQL connection first
-        conn = connect(
-            dbname=config['POSTGRES_DB'],
-            user=config['POSTGRES_USER'],
-            password=config['POSTGRES_PASSWORD'],
-            host=config['DB_HOST'],
-            port=config['DB_PORT']
-        )
-        conn.close()
-        logger.info("PostgreSQL connection successful")
-
-        # Then try SQLAlchemy connection with proper text() wrapper
+        # Check database connection
         db = SessionLocal()
         db.execute(text("SELECT 1"))
         db.close()
+        logger.info("PostgreSQL connection successful")
+
+        # Check SQLAlchemy connection
+        engine = create_engine(DATABASE_URL)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
         logger.info("SQLAlchemy connection successful")
+
+        # Check Qdrant connection
+        resource_manager = ResourceManager()
+        qdrant_client = resource_manager.get_qdrant_client()
+        collections = qdrant_client.get_collections()
+        logger.info("Qdrant connection successful")
 
         return {
             "status": "healthy",
-            "database": {
-                "host": config['DB_HOST'],
-                "port": config['DB_PORT'],
-                "name": config['POSTGRES_DB'],
-                "user": config['POSTGRES_USER']
-            }
+            "database": "connected",
+            "qdrant": "connected",
+            "collections": [c.name for c in collections.collections]
         }
     except Exception as e:
-        error_msg = f"Health check failed: {str(e)}"
-        logger.error(error_msg)
+        logger.error(f"Health check failed: {e}")
+        logger.error("Stack trace:", exc_info=True)
         return {
             "status": "unhealthy",
-            "error": error_msg,
-            "database_config": {
-                "host": config['DB_HOST'],
-                "port": config['DB_PORT'],
-                "name": config['POSTGRES_DB'],
-                "user": config['POSTGRES_USER']
-            }
+            "error": str(e)
         }
 
 
