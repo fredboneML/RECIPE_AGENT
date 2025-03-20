@@ -131,6 +131,10 @@ class AgentManager:
             # Get question from database
             question = self._get_question_from_db(question_id)
 
+            # Detect language (Dutch vs English)
+            is_dutch = any(dutch_word in question.lower() for dutch_word in
+                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
+
             # Create agent
             agent = AgentFactory.create_response_analyzer_agent(
                 self.tenant_code)
@@ -145,7 +149,7 @@ class AgentManager:
             Response:
             {response_text}
             
-            Please analyze this response:
+            {'Analyseer deze reactie in het Nederlands:' if is_dutch else 'Please analyze this response:'}
             """
 
             analysis = agent.get_response(prompt)
@@ -179,13 +183,18 @@ class AgentManager:
             for i, (q, r) in enumerate(zip(questions, responses)):
                 conversation += f"Question {i+1}: {q}\nResponse {i+1}: {r}\n\n"
 
+            # Detect language from the last question
+            last_question = questions[-1] if questions else ""
+            is_dutch = any(dutch_word in last_question.lower() for dutch_word in
+                           ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
+
             # Create a prompt for generating follow-up questions
             prompt = f"""
             Based on the following conversation, generate 3 follow-up questions that would help continue and deepen the conversation:
             
             {conversation}
             
-            FOLLOW-UP QUESTIONS:
+            {'Genereer 3 vervolgvragen in het Nederlands:' if is_dutch else 'FOLLOW-UP QUESTIONS:'}
             """
 
             try:
@@ -757,7 +766,7 @@ class AgentManager:
             
             Please provide a comprehensive answer based on the transcriptions and SQL results.
             If the transcriptions don't contain enough information to answer the question fully, 
-            acknowledge this limitation in your response.
+            acknowledge this limitation in your response. Make sure to answer in the language of the question!
             
             {'' if not entity_corrections else 'IMPORTANT: Make sure to acknowledge the entity correction at the beginning of your response.'}
             """
