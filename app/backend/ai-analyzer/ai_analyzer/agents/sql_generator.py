@@ -26,14 +26,6 @@ class SQLGeneratorAgent(BaseAgent):
         # Store base_context as instance variable
         self.base_context = base_context or ""
         self.days_lookback = DEFAULT_DAYS_LOOKBACK
-
-        # Initialize OpenAI client
-        if model_provider.lower() == "openai":
-            from openai import OpenAI
-            self.client = OpenAI(api_key=api_key)
-        else:
-            raise ValueError(f"Unsupported model provider: {model_provider}")
-
         self.model_name = model_name
 
     async def process(self, question: str, db_context: DatabaseContext,

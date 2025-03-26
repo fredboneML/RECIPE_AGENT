@@ -14,6 +14,7 @@ WORKDIR /usr/src/app
 
 # Copy requirements.txt and install dependencies
 COPY requirements.txt .
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the entire application directory including all subdirectories

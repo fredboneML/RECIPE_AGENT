@@ -34,19 +34,19 @@ class AgentFactory:
     def create_agent_team(tenant_code: str) -> Agent:
         """Create a team of agents for call analysis"""
         try:
-            # Create knowledge base first
+            # Create knowledge base
             knowledge_base = AgentFactory.create_knowledge_base(tenant_code)
 
-            # Create individual agents with the same knowledge base
+            # Create initial questions agent
             initial_questions_agent = Agent(
                 name="Initial Questions Generator",
-                role="Generate initial questions for call analysis",
+                role="Generate initial questions for call transcriptions",
                 model=OpenAIChat(api_key=OPENAI_API_KEY),
-                knowledge=knowledge_base,  # Pass the knowledge base
+                knowledge=knowledge_base,
                 instructions=[
-                    "You are an expert call analyst who generates initial questions for call analysis.",
+                    "You are an expert call analyst who generates initial questions.",
                     "Your task is to generate questions that help users explore call data.",
-                    "Focus on questions that reveal trends, patterns, and insights.",
+                    "Focus on questions that reveal key insights and patterns.",
                     "Make questions specific and actionable."
                 ],
                 markdown=True,
@@ -57,7 +57,7 @@ class AgentFactory:
                 name="Response Analyzer",
                 role="Analyze responses to questions about call transcriptions",
                 model=OpenAIChat(api_key=OPENAI_API_KEY),
-                knowledge=knowledge_base,  # Pass the knowledge base
+                knowledge=knowledge_base,
                 instructions=[
                     "You are an expert call analyst who reviews responses to questions about call transcriptions.",
                     "Your task is to analyze the response and extract key insights.",
@@ -73,7 +73,7 @@ class AgentFactory:
                 name="Follow-up Questions Generator",
                 role="Generate follow-up questions based on conversation",
                 model=OpenAIChat(api_key=OPENAI_API_KEY),
-                knowledge=knowledge_base,  # Pass the knowledge base
+                knowledge=knowledge_base,
                 instructions=[
                     "You are an expert call analyst who generates follow-up questions.",
                     "Your task is to generate questions that help users explore call data further.",
@@ -90,7 +90,7 @@ class AgentFactory:
                 team=[initial_questions_agent,
                       response_analyzer_agent, followup_agent],
                 model=OpenAIChat(api_key=OPENAI_API_KEY),
-                knowledge=knowledge_base,  # Pass the knowledge base
+                knowledge=knowledge_base,
                 instructions=[
                     "You are a team of expert call analysts who review call transcriptions.",
                     "Your task is to analyze call transcriptions and provide insights.",

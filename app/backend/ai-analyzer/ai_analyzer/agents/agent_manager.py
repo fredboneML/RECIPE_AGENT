@@ -245,17 +245,6 @@ class AgentManager:
                 logger.error("No agent found")
                 return []
 
-            # Add more detailed debugging
-            if hasattr(agent, 'knowledge'):
-                logger.info(f"Agent has knowledge: {type(agent.knowledge)}")
-                if hasattr(agent.knowledge, 'retriever'):
-                    logger.info(
-                        f"Knowledge has retriever: {type(agent.knowledge.retriever)}")
-                else:
-                    logger.error("Knowledge doesn't have retriever attribute")
-            else:
-                logger.error("Agent doesn't have knowledge attribute")
-
             # Try to search directly with the Qdrant client as a fallback
             try:
                 # Use the singleton instances initialized in __init__
@@ -666,58 +655,13 @@ class AgentManager:
 
             # Get the agent
             agent = self._get_agent()
+            if agent:
+                logger.info("Using agent for processing query")
+            else:
+                logger.error("No agent available for processing query")
 
-            if agent is None:
-                return "I'm sorry, I couldn't process your query. The agent could not be initialized."
-
-            # 6. Execute SQL query if available
-            sql_results = ""
-            if sql_query and self.session:
-                try:
-                    # Make sure the SQL query is properly sanitized
-                    sanitized_sql = self._sanitize_sql_query(sql_query)
-
-                    # Check SQL query cache
-                    cached_sql_results = self._check_sql_cache(sanitized_sql)
-                    if cached_sql_results:
-                        logger.info("Using cached SQL results")
-                        sql_results = cached_sql_results
-                    else:
-                        logger.info(f"Executing SQL query: {sanitized_sql}")
-                        try:
-                            result = self.session.execute(text(sanitized_sql))
-                            rows = result.fetchall()
-                            if rows:
-                                # Format SQL results
-                                columns = result.keys()
-                                sql_results = "SQL Query Results:\n"
-                                sql_results += "\n".join(
-                                    [f"{', '.join(columns)}", "-" * 40])
-                                for row in rows[:10]:  # Limit to 10 rows in display only
-                                    sql_results += f"\n{', '.join(str(val) for val in row)}"
-
-                                # Log the results
-                                logger.info(
-                                    f"SQL query returned {len(rows)} rows")
-                                logger.info(
-                                    f"SQL results sample: {sql_results[:200]}...")
-
-                                # Cache the results
-                                self._cache_sql_results(
-                                    sanitized_sql, sql_results)
-                            else:
-                                # Log when no results are returned
-                                logger.info("SQL query returned no data")
-                                sql_results = "SQL Query Results: No data found"
-                        except Exception as sql_error:
-                            logger.error(
-                                f"Error executing SQL query: {sql_error}")
-                            logger.exception("Detailed SQL error:")
-                            sql_results = f"Error executing SQL query: {str(sql_error)}"
-                except Exception as e:
-                    logger.error(f"Error processing SQL query: {e}")
-                    logger.exception("Detailed error:")
-                    sql_results = f"Error processing SQL query: {str(e)}"
+            # 6. Execute SQL query and get results
+            sql_results = self._execute_sql_query(sql_query)
 
             # 7. Get conversation history if conversation_id is provided
             conversation_history = ""
@@ -1374,3 +1318,44 @@ class AgentManager:
                 entities.append(word)
 
         return entities
+
+    def _execute_sql_query(self, sql_query: str) -> str:
+        """Execute SQL query and format results"""
+        try:
+            # Execute query
+            logger.info(f"Executing SQL query: {sql_query}")
+            result = self.session.execute(text(sql_query))
+            rows = result.fetchall()
+            column_names = result.keys()
+
+            # Log result count
+            row_count = len(rows)
+            logger.info(f"Query returned {row_count} rows")
+
+            # Format results into readable text
+            if not rows:
+                return "No results found for your query."
+
+            # Format output based on number of rows
+            if len(rows) == 1:
+                # Single row result
+                return "\n".join(f"{k}: {v}" for k, v in zip(column_names, rows[0]))
+            else:
+                # Multiple row result with row numbers
+                output = []
+                # Show first 10 rows with numbers
+                for i, row in enumerate(rows[:10], 1):
+                    row_str = ", ".join(
+                        f"{k}: {v}" for k, v in zip(column_names, row))
+                    output.append(f"{i}. {row_str}")
+
+                # Add note if there are more rows
+                if len(rows) > 10:
+                    extra_count = len(rows) - 10
+                    output.append(
+                        f"\n(Showing top 10 results of {len(rows)} total)")
+
+                return "\n".join(output)
+        except Exception as e:
+            logger.error(f"Error executing query: {e}")
+            raise ValueError(f"Error executing query: {str(e)}")

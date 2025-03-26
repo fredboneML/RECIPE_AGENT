@@ -47,6 +47,7 @@ class CallAnalysisWorkflow:
             api_key=api_key,
             base_context=enhanced_context
         )
+        logger.info("Initialized workflow")
 
         # Add initial questions generator
         self.initial_questions_generator = InitialQuestionGenerator(

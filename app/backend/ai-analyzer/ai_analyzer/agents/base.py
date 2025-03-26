@@ -13,6 +13,7 @@ from langchain.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.language_models.llms import LLM
 from langchain.chains import LLMChain
 from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
+from langchain_groq import ChatGroq
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 # Configure logging
@@ -56,6 +57,23 @@ class LangChainModelProvider:
                 temperature=kwargs.get('temperature', 0),
                 **kwargs
             )
+        elif provider == "groq":
+            # Support both native Groq and OpenAI compatibility
+            if kwargs.get('use_openai_compatibility', False):
+                return ChatOpenAI(
+                    model_name=model_name,
+                    api_key=api_key,
+                    base_url="https://api.groq.com/openai/v1",
+                    temperature=kwargs.get('temperature', 0),
+                    **kwargs
+                )
+            else:
+                return ChatGroq(
+                    model_name=model_name,
+                    groq_api_key=api_key,
+                    temperature=kwargs.get('temperature', 0),
+                    **kwargs
+                )
         elif provider == "ollama":
             return Ollama(
                 model=model_name,
