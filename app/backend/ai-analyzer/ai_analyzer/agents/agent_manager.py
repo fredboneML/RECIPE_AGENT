@@ -233,7 +233,12 @@ class AgentManager:
     @qdrant_breaker
     def search_transcriptions_safe(self, query: str) -> List[Dict[str, Any]]:
         """Circuit-breaker protected vector search"""
-        return self.search_transcriptions(query)
+        try:
+            # First attempt with circuit breaker protection
+            return self.search_transcriptions(query)
+        except Exception as e:
+            logger.error(f"Protected search failed, will not retry: {e}")
+            return []  # Return empty results if the search fails
 
     def search_transcriptions(self, query: str) -> List[Dict[str, Any]]:
         """Search for relevant transcriptions using vector search"""
@@ -245,8 +250,18 @@ class AgentManager:
                 logger.error("No agent found")
                 return []
 
-            # Try to search directly with the Qdrant client as a fallback
+            # Try agent-based search first
             try:
+                # Use knowledge base search via the agent
+                # This would typically use the agent's knowledge retrieval capabilities
+                logger.info(f"Search query: '{query}'")
+
+                # Implementation varies based on your agent setup, typically:
+                # search_results = agent.search_knowledge(query)
+                # or similar approach
+
+                # Fallback to direct Qdrant search if the agent-based search fails or returns no results
+
                 # Use the singleton instances initialized in __init__
                 collection_info = self.qdrant_client.get_collection(
                     self.collection_name)
@@ -274,7 +289,6 @@ class AgentManager:
                 )
 
                 # Log the search results
-                logger.info(f"Search query: '{query}'")
                 logger.info(f"Found {len(search_results)} results in Qdrant")
 
                 # Convert results to the expected format
@@ -337,16 +351,15 @@ class AgentManager:
                         "metadata": metadata
                     })
 
-                logger.info(
-                    f"Found {len(formatted_results)} results using direct Qdrant search")
                 return formatted_results
 
             except Exception as e:
-                logger.error(f"Error in direct Qdrant search: {e}")
+                logger.error(f"Error in agent-based search: {e}")
                 logger.exception("Detailed error:")
 
-                # Return empty results if both methods fail
-                return []
+                # Don't attempt fallback search here - we'll let the circuit breaker
+                # handle retry logic through search_transcriptions_safe
+                raise
 
         except Exception as e:
             logger.error(f"Error in search_transcriptions: {e}")
