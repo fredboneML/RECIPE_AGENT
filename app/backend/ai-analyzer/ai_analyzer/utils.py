@@ -60,10 +60,12 @@ def create_collection_if_not_exists(client: QdrantClient, collection_name: str):
             # Create the collection with the embedding dimension
             client.create_collection(
                 collection_name=collection_name,
-                vectors_config=models.VectorParams(
-                    size=384,  # BGE-small-en embedding dimension
-                    distance=models.Distance.COSINE
-                )
+                vectors_config={
+                    "fast-paraphrase-multilingual-minilm-l12-v2": {
+                        "size": 384,  # Size for MiniLM-L12-v2 embeddings
+                        "distance": "Cosine"
+                    }
+                }
             )
             logger.info(f"Collection {collection_name} created successfully")
         else:
@@ -321,7 +323,16 @@ def update_tenant_vector_db(db_url: str, tenant_code: str, months: int = 3):
             # If collection doesn't exist, create it
             if not collection_exists:
                 logger.info(f"Creating new collection {collection_name}")
-                # The collection will be created automatically by the add method
+                client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config={
+                        "fast-paraphrase-multilingual-minilm-l12-v2": {
+                            "size": 384,  # Size for MiniLM-L12-v2 embeddings
+                            "distance": "Cosine"
+                        }
+                    }
+                )
+                logger.info(f"Created new collection: {collection_name}")
 
             # Prepare documents and metadata
             documents = []
@@ -405,7 +416,8 @@ def update_tenant_vector_db(db_url: str, tenant_code: str, months: int = 3):
                     collection_name=collection_name,
                     documents=documents,
                     metadata=metadata,
-                    ids=ids
+                    ids=ids,
+                    vector_name="fast-paraphrase-multilingual-minilm-l12-v2"
                 )
             else:
                 logger.info(
