@@ -7,6 +7,7 @@ from langchain.prompts import ChatPromptTemplate
 import json
 import re
 from .base import BaseAgent, AgentResponse, DatabaseContext
+from ai_analyzer.utils.model_logger import ModelLogger
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +29,21 @@ class SQLGeneratorAgent(BaseAgent):
         self.days_lookback = DEFAULT_DAYS_LOOKBACK
         self.model_name = model_name
 
+        # Log model configuration using ModelLogger
+        ModelLogger.log_model_usage(
+            agent_name="SQLGeneratorAgent",
+            model_provider=model_provider,
+            model_name=model_name,
+            params={"temperature": 0.1}
+        )
+
+        # Log model configuration
+        logger.info(
+            f"SQL Generator Agent initialized with model provider: {model_provider}, model: {model_name}")
+        if model_provider == "groq":
+            logger.info(
+                f"Using Groq model with OpenAI compatibility: {getattr(self.llm, 'use_openai_compatibility', False)}")
+
     async def process(self, question: str, db_context: DatabaseContext,
                       conversation_context: Optional[Any] = None,
                       tenant_code: str = None) -> AgentResponse:
@@ -39,6 +55,16 @@ class SQLGeneratorAgent(BaseAgent):
                     error_message="Tenant code is required",
                     content=None
                 )
+
+            # Log the start of processing with model info
+            logger.info(
+                f"Processing SQL generation for tenant {tenant_code} using model: {self.model_name}")
+            logger.info(f"Model provider: {self.model_provider}")
+            if hasattr(self.llm, 'temperature'):
+                logger.info(f"Model temperature: {self.llm.temperature}")
+            if self.model_provider == "groq":
+                logger.info(
+                    f"Using Groq model with OpenAI compatibility: {getattr(self.llm, 'use_openai_compatibility', False)}")
 
             # Create the prompt with explicit tenant context and enhanced aggregation instructions
             prompt = ChatPromptTemplate.from_template("""

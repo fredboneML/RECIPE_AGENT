@@ -13,6 +13,9 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any, Union
 from sqlalchemy.orm import Session
 import re
+# Import model logging utilities
+from ai_analyzer.utils.model_logger import ModelLogger, get_model_config_from_env
+import time
 
 
 # Configure logging
@@ -25,36 +28,75 @@ logger = logging.getLogger(__name__)
 # In workflow.py
 
 class CallAnalysisWorkflow:
-    def __init__(self, db_url: str, model_provider: str, model_name: str, api_key: Optional[str] = None,
-                 restricted_tables: Optional[List[str]] = None, base_context: Optional[str] = None,
-                 cache_manager=None):
-        self.db_url = db_url
+
+    def __init__(self, tenant_code: str):
+        self.tenant_code = tenant_code
+
+        # Get model configuration from environment
+        model_config = get_model_config_from_env()
+        self.model_provider = model_config["provider"]
+
+        # Log initial model configuration
+        logger.info(
+            f"Initializing CallAnalysisWorkflow for tenant {tenant_code}")
+        logger.info(f"Model provider: {self.model_provider}")
+
+        # Handle special case for Groq
+        if self.model_provider == "groq":
+            self.model_name = model_config["groq_model_name"]
+            self.use_openai_compatibility = model_config["groq_use_openai_compatibility"]
+
+            # Log Groq-specific configuration
+            logger.info(f"Using Groq model: {self.model_name}")
+            logger.info(
+                f"Groq OpenAI compatibility mode: {self.use_openai_compatibility}")
+
+            # When using OpenAI compatibility mode, set provider to OpenAI with Groq base URL
+            if self.use_openai_compatibility:
+                self.model_provider = "openai"
+                self.base_url = "https://api.groq.com/openai/v1"
+                self.api_key = model_config.get("groq_api_key", "")
+                logger.info("Configured Groq with OpenAI compatibility mode")
+            else:
+                self.api_key = model_config.get("groq_api_key", "")
+                logger.info("Configured Groq in native mode")
+        else:
+            self.model_name = model_config.get("model_name", "gpt-3.5-turbo")
+            self.api_key = model_config.get("api_key", "")
+            logger.info(
+                f"Using {self.model_provider} model: {self.model_name}")
+
+        # Log initialization
+        ModelLogger.log_model_usage(
+            agent_name="CallAnalysisWorkflow",
+            model_provider=self.model_provider,
+            model_name=self.model_name,
+            params={"tenant_code": tenant_code}
+        )
+
+        # Initialize workflow components
         self.db_inspector = DatabaseInspectorAgent(db_url)
-        self.cache_manager = cache_manager
-        # Initialize conversation history with tenant isolation
-        # {tenant_code: {conversation_id: [{"question": str, "sql": str, "result": str}]}}
-        self.conversation_history: Dict[str,
-                                        Dict[str, List[Dict[str, str]]]] = {}
-        self.base_context = base_context
+        self.conversation_history = {}
 
         # Create enhanced context
-        enhanced_context = self._create_enhanced_context(base_context)
+        enhanced_context = self._create_enhanced_context(
+            self.base_context or create_base_context(tenant_code))
 
-        # Initialize SQL generator with all required parameters
+        # Initialize SQL generator with model settings
+        kwargs = {}
+        if self.base_url:
+            kwargs["base_url"] = self.base_url
+
         self.sql_generator = SQLGeneratorAgent(
-            model_provider=model_provider,
-            model_name=model_name,
-            api_key=api_key,
-            base_context=enhanced_context
+            model_provider=self.model_provider,
+            model_name=self.model_name,
+            api_key=self.api_key,
+            base_context=enhanced_context,
+            **kwargs
         )
-        logger.info("Initialized workflow")
 
-        # Add initial questions generator
-        self.initial_questions_generator = InitialQuestionGenerator(
-            model_provider=model_provider,
-            model_name=model_name,
-            api_key=api_key
-        )
+        # Add placeholder for follow-up questions generator
+        self.followup_generator = None
 
         # Add example queries to conversation history template
         self.example_queries = {

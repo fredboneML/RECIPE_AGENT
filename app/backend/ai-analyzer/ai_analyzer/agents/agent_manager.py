@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ai_analyzer.agents.database_inspector import DatabaseInspectorAgent
 from ai_analyzer.agents.sql_generator import SQLGeneratorAgent
+from ai_analyzer.utils.model_logger import get_model_config_from_env
 from ai_analyzer.data_import_postgresql import UserMemory
 from ai_analyzer.utils.qdrant_client import get_qdrant_client, get_embedding_model, search_qdrant_with_retry
 from pybreaker import CircuitBreaker
@@ -67,6 +68,33 @@ class AgentManager:
                     self.tenant_code)
             except Exception as e:
                 logger.error(f"Error initializing followup agent: {e}")
+                logger.exception("Detailed error:")
+
+        if self.sql_agent is None:
+            try:
+                # Get model configuration
+                model_config = get_model_config_from_env()
+
+                # Log model configuration
+                logger.info(
+                    f"Initializing SQL agent with model configuration:")
+                logger.info(f"Provider: {model_config['provider']}")
+                logger.info(f"Model: {model_config['model_name']}")
+                if model_config['provider'] == 'groq':
+                    logger.info(
+                        f"Groq model: {model_config['groq_model_name']}")
+                    logger.info(
+                        f"Groq OpenAI compatibility: {model_config['groq_use_openai_compatibility']}")
+
+                # Create SQL agent with model configuration
+                self.sql_agent = SQLGeneratorAgent(
+                    model_provider=model_config['provider'],
+                    model_name=model_config['model_name'],
+                    api_key=model_config.get('api_key'),
+                    base_context=None
+                )
+            except Exception as e:
+                logger.error(f"Error initializing SQL agent: {e}")
                 logger.exception("Detailed error:")
 
     def generate_initial_questions(self, transcription_id: str) -> List[str]:

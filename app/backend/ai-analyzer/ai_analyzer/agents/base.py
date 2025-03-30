@@ -50,17 +50,24 @@ class LangChainModelProvider:
         api_key: Optional[str] = None,
         **kwargs
     ) -> Union[ChatOpenAI, Ollama, LLM]:
+        # Log model creation
+        logger.info(
+            f"Creating model with provider: {provider}, model: {model_name}")
+
         if provider == "openai":
-            return ChatOpenAI(
+            model = ChatOpenAI(
                 model_name=model_name,
                 openai_api_key=api_key,
                 temperature=kwargs.get('temperature', 0),
                 **kwargs
             )
+            logger.info("Created OpenAI model")
+            return model
         elif provider == "groq":
             # Support both native Groq and OpenAI compatibility
             if kwargs.get('use_openai_compatibility', False):
-                return ChatOpenAI(
+                logger.info("Creating Groq model with OpenAI compatibility")
+                model = ChatOpenAI(
                     model_name=model_name,
                     api_key=api_key,
                     base_url="https://api.groq.com/openai/v1",
@@ -68,18 +75,22 @@ class LangChainModelProvider:
                     **kwargs
                 )
             else:
-                return ChatGroq(
+                logger.info("Creating native Groq model")
+                model = ChatGroq(
                     model_name=model_name,
                     groq_api_key=api_key,
                     temperature=kwargs.get('temperature', 0),
                     **kwargs
                 )
+            return model
         elif provider == "ollama":
+            logger.info("Creating Ollama model")
             return Ollama(
                 model=model_name,
                 **kwargs
             )
         elif provider == "huggingface":
+            logger.info("Creating HuggingFace model")
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             model = AutoModelForCausalLM.from_pretrained(model_name)
             pipe = pipeline(
@@ -101,12 +112,30 @@ class BaseAgent(ABC):
                  model_name: str,
                  api_key: Optional[str] = None,
                  **kwargs):
+        # Log agent initialization
+        logger.info(
+            f"Initializing {self.__class__.__name__} with model provider: {model_provider}, model: {model_name}")
+
         self.llm = LangChainModelProvider.create_model(
             model_provider,
             model_name,
             api_key,
             **kwargs
         )
+
+        # Log model type and configuration
+        logger.info(f"Created {type(self.llm).__name__} model instance")
+        if hasattr(self.llm, 'model_name'):
+            logger.info(f"Model name: {self.llm.model_name}")
+        if hasattr(self.llm, 'temperature'):
+            logger.info(f"Model temperature: {self.llm.temperature}")
+        if model_provider == "groq":
+            logger.info(
+                f"Using Groq model with OpenAI compatibility: {getattr(self.llm, 'use_openai_compatibility', False)}")
+
+        # Store model info for later use
+        self.model_provider = model_provider
+        self.model_name = model_name
 
     def _create_chain(self, prompt_template: str) -> LLMChain:
         """Create a LangChain chain with the given prompt template"""
