@@ -71,7 +71,28 @@ class SQLGeneratorAgent(BaseAgent):
                     AND t.tenant_code = :tenant_code
                 )
 
-                2. For trending topics with issue analysis, always use this pattern:
+                2. For sentiment analysis, use clean_sentiment (NOT score) and convert to numeric values:
+                WITH base_data AS (
+                    -- Base CTE as shown above
+                ),
+                sentiment_analysis AS (
+                    SELECT 
+                        DATE(processing_date) as call_date,
+                        COUNT(*) as total_calls,
+                        COUNT(*) FILTER (WHERE clean_sentiment = 'positief') as positive_calls,
+                        COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') as negative_calls,
+                        COUNT(*) FILTER (WHERE clean_sentiment = 'neutral') as neutral_calls,
+                        ROUND(AVG(CASE 
+                            WHEN clean_sentiment = 'positief' THEN 1
+                            WHEN clean_sentiment = 'negatief' THEN -1
+                            ELSE 0 
+                        END)::numeric, 2) as sentiment_score
+                    FROM base_data
+                    GROUP BY call_date
+                    ORDER BY sentiment_score DESC
+                )
+
+                3. For trending topics with issue analysis, always use this pattern:
                 WITH base_data AS (
                     -- Base CTE as shown above
                 ),
@@ -100,7 +121,7 @@ class SQLGeneratorAgent(BaseAgent):
                     ORDER BY recent_mentions DESC, mention_count DESC
                 )
 
-                3. For time-based analysis, include percentage changes:
+                4. For time-based analysis, include percentage changes:
                 WITH base_data AS (
                     -- Base CTE as shown above
                 ),
@@ -147,6 +168,8 @@ class SQLGeneratorAgent(BaseAgent):
                 5. Include insights about specific issues within topics when relevant
                 6. ALWAYS include trend comparisons or time-based patterns when possible
                 7. Limit results appropriately (e.g., TOP N, LIMIT)
+                8. NEVER use tables or columns that are not explicitly listed in the table_info above
+                9. If a required table or column is not available in table_info, you must acknowledge this limitation and suggest an alternative approach using only available tables and columns
 
                 Return only the SQL query, nothing else.
             """)
