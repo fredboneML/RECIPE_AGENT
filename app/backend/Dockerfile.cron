@@ -56,7 +56,7 @@ RUN echo '#!/bin/bash\n\
     && chmod +x /usr/local/bin/cron-wrapper.sh
 
 # Set up cron job with logging using the wrapper
-RUN echo "*/1 * * * * /usr/local/bin/cron-wrapper.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/pipeline-cron \
+RUN echo "*/5 * * * * /usr/local/bin/cron-wrapper.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/pipeline-cron \
     && chmod 0644 /etc/cron.d/pipeline-cron \
     && crontab /etc/cron.d/pipeline-cron
 

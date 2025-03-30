@@ -7,14 +7,17 @@ from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from agno.knowledge.langchain import LangChainKnowledgeBase
 
-# Import the correct version of langchain components
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+# Remove the FastEmbedEmbeddings import
+# from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams
 
 from ai_analyzer.config import config
-from ai_analyzer.utils import get_qdrant_client
+# Import both functions from singleton_resources
+from ai_analyzer.utils.singleton_resources import get_qdrant_client, get_embedding_model
+# Import the custom SingletonEmbeddings wrapper
+from ai_analyzer.utils.singleton_embeddings import SingletonEmbeddings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -131,6 +134,7 @@ class AgentFactory:
             logger.error(f"Error creating followup agent: {e}")
             logger.exception("Detailed error:")
             return None
+# Replace the create_knowledge_base method in factory.py
 
     @staticmethod
     def create_knowledge_base(tenant_code: str) -> LangChainKnowledgeBase:
@@ -163,10 +167,15 @@ class AgentFactory:
             logger.info(
                 f"Using vector name: {vector_name} for collection {collection_name}")
 
-            # Create embeddings model that matches what's in the collection
-            embeddings = FastEmbedEmbeddings(
-                model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-            )
+            # IMPORTANT CHANGE: Get embedding model from singleton instead of creating a new one
+            embedding_model = get_embedding_model(
+                "paraphrase-multilingual-MiniLM-L12-v2")
+
+            # Import the custom SingletonEmbeddings wrapper
+            from ai_analyzer.utils.singleton_embeddings import SingletonEmbeddings
+
+            # Use our custom wrapper instead of FastEmbedEmbeddings
+            embeddings = SingletonEmbeddings(model=embedding_model)
 
             # Connect to the existing vector store
             vector_store = QdrantVectorStore(

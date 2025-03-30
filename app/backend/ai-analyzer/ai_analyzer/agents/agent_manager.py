@@ -45,9 +45,8 @@ class AgentManager:
         self.agent_team = None
         self.followup_agent = None
         self.sql_agent = None
-        self._initialize_agents_if_needed()
 
-        # Initialize singleton instances once
+        # Get singleton instances - don't create new ones
         self.qdrant_client = get_qdrant_client()
         self.embedding_model = get_embedding_model()
         self.collection_name = f"tenant_{tenant_code}"
