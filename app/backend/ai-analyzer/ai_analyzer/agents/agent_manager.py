@@ -681,7 +681,90 @@ class AgentManager:
                 query, similar_transcripts)
 
             # 3. Generate SQL query based on the natural language query and similar transcripts
-            sql_query = self.generate_sql_query(query, similar_transcripts)
+            # Add retry logic for SQL generation
+            max_sql_retries = 3
+            sql_retry_count = 0
+            last_sql_error = None
+            sql_query = None
+
+            while sql_retry_count < max_sql_retries:
+                try:
+                    # Create error context for SQL retries
+                    error_context = ""
+                    if last_sql_error and sql_retry_count > 0:
+                        logger.info(
+                            f"SQL generation retry attempt {sql_retry_count+1}/{max_sql_retries}")
+                        error_context = f"Previous SQL error: {last_sql_error}"
+
+                    # Generate SQL query with error context if available
+                    sql_query = self.generate_sql_query(
+                        query, similar_transcripts, error_context)
+
+                    # Try to execute the query - this will validate it
+                    sql_results = self._execute_sql_query(sql_query)
+
+                    # If we reach here, the query succeeded
+                    logger.info(
+                        f"SQL query executed successfully after {sql_retry_count+1} attempts")
+                    break
+
+                except ValueError as e:
+                    # Store the error for the next retry
+                    last_sql_error = str(e)
+                    sql_retry_count += 1
+                    logger.warning(
+                        f"SQL query execution failed (attempt {sql_retry_count}/{max_sql_retries}): {last_sql_error}")
+
+                    # If we've reached max retries, try with a simplified approach
+                    if sql_retry_count >= max_sql_retries:
+                        logger.error(
+                            f"Failed to generate valid SQL after {max_sql_retries} attempts")
+
+                        # Generate a simple fallback query
+                        try:
+                            # Simple fallback query - just count topics
+                            fallback_query = f"""
+                            WITH base_data AS (
+                                SELECT 
+                                    t.id,
+                                    t.topic,
+                                    LOWER(TRIM(t.topic)) as clean_topic,
+                                    t.sentiment,
+                                    CASE
+                                        WHEN LOWER(TRIM(t.sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'
+                                        ELSE LOWER(TRIM(t.sentiment))
+                                    END AS clean_sentiment
+                                FROM transcription t
+                                WHERE t.processing_date >= CURRENT_DATE - INTERVAL '300 days'
+                                AND t.tenant_code = :tenant_code
+                            )
+                            SELECT 
+                                clean_topic AS topic, 
+                                COUNT(*) AS count,
+                                COUNT(*) FILTER (WHERE clean_sentiment = 'positief') AS positive_count,
+                                COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') AS negative_count
+                            FROM base_data
+                            WHERE clean_topic IS NOT NULL
+                            GROUP BY clean_topic
+                            ORDER BY count DESC
+                            LIMIT 10;
+                            """
+
+                            sql_results = self._execute_sql_query(
+                                fallback_query)
+                            sql_query = fallback_query
+                            logger.info("Executed fallback query successfully")
+
+                        except Exception as fallback_error:
+                            logger.error(
+                                f"Even fallback query failed: {fallback_error}")
+                            sql_results = "I couldn't generate a valid SQL query to answer your question. The system encountered technical difficulties with the database structure."
+
+            # If we somehow got here without a successful query or explicit error handling
+            if sql_query is None:
+                logger.error(
+                    "SQL query generation failed with no valid result")
+                sql_results = "I couldn't generate a valid SQL query to answer your question."
 
             # Log the generated SQL query
             logger.info(f"Generated SQL query: {sql_query}")
@@ -700,8 +783,7 @@ class AgentManager:
             else:
                 logger.error("No agent available for processing query")
 
-            # 6. Execute SQL query and get results
-            sql_results = self._execute_sql_query(sql_query)
+            # 6. Execute SQL query and get results - already done above with retry logic
 
             # 7. Get conversation history if conversation_id is provided
             conversation_history = ""
@@ -1110,8 +1192,8 @@ class AgentManager:
 
         return formatted_examples
 
-    def generate_sql_query(self, query: str, similar_transcripts: List[Dict[str, Any]]) -> str:
-        """Generate a SQL query based on the user's natural language query and similar transcripts"""
+    def generate_sql_query(self, query: str, similar_transcripts: List[Dict[str, Any]], error_context: str = "") -> str:
+        """Generate a SQL query based on the user's natural language query, similar transcripts, and error context"""
         try:
             # Initialize agents if needed
             self._initialize_agents_if_needed()
@@ -1140,7 +1222,7 @@ class AgentManager:
                 Use ILIKE with wildcards for partial name matching (e.g., '%Hendrik%Stuiver%').
                 """
 
-            # Create a prompt with the context and query
+            # Create a prompt with the context, query, and error information
             prompt = f"""
             Generate a PostgreSQL query for this user question:
             "{query}"
@@ -1153,15 +1235,17 @@ class AgentManager:
             
             {entity_filter_hint}
             
+            {error_context}
+            
             CRITICAL REQUIREMENTS:
             1. ALWAYS include "tenant_code = '{self.tenant_code}'" in the WHERE clause
             2. NEVER use DELETE, UPDATE, INSERT or other data-modifying statements
             3. Use PostgreSQL syntax
             4. ALWAYS use LIKE with wildcards for text matching, especially for:
-               - Phone numbers: Use "telephone_number LIKE '%{{phone_number}}%'" instead of equals
-               - Names: Use "name LIKE '%{{name}}%'" instead of equals
-               - Any entity identifiers: Always use LIKE with wildcards for flexible matching
-               - Addresses: Use LIKE with wildcards for address components
+            - Phone numbers: Use "telephone_number LIKE '%{{phone_number}}%'" instead of equals
+            - Names: Use "name LIKE '%{{name}}%'" instead of equals
+            - Any entity identifiers: Always use LIKE with wildcards for flexible matching
+            - Addresses: Use LIKE with wildcards for address components
             5. For people's names, use ILIKE with wildcards
             6. ONLY use tables that exist in the schema information provided
             7. The main table for call data is "transcription" (NOT "transcripts")
@@ -1175,6 +1259,10 @@ class AgentManager:
                 - 'OUT': Outgoing calls (calls initiated by the system)
                 - 'LOCAL': Local/internal calls (calls within the system)
                 - None: Unspecified or unknown call direction
+            14. THE 'score' COLUMN DOES NOT EXIST. Use sentiment data instead.
+            15. To analyze sentiment, use the clean_sentiment field with values like 'positief', 'negatief', 'neutral'
+            16. For calculations involving sentiment, use CASE statements like:
+                CASE WHEN clean_sentiment = 'positief' THEN 1 WHEN clean_sentiment = 'negatief' THEN -1 ELSE 0 END
             
             Generate ONLY the SQL query, no explanations.
             """
@@ -1198,7 +1286,7 @@ class AgentManager:
         except Exception as e:
             logger.error(f"Error generating SQL query: {e}")
             logger.exception("Detailed error:")
-            return ""
+            raise ValueError(f"Error generating SQL query: {str(e)}")
 
     def _sanitize_sql_query(self, sql_query: str) -> str:
         """Sanitize SQL query to fix common issues"""

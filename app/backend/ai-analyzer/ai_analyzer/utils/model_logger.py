@@ -28,11 +28,11 @@ class ModelLogger:
 def get_model_config_from_env() -> Dict[str, Any]:
     """Get model configuration from environment variables"""
     config = {
-        "provider": os.getenv("MODEL_PROVIDER", "openai"),
-        "model_name": os.getenv("MODEL_NAME", "gpt-3.5-turbo"),
+        "provider": os.getenv("MODEL_PROVIDER"),
+        "model_name": os.getenv("MODEL_NAME"),
         "api_key": os.getenv("API_KEY", ""),
-        "groq_model_name": os.getenv("GROQ_MODEL_NAME", "mixtral-8x7b-32768"),
-        "groq_api_key": os.getenv("GROQ_API_KEY", ""),
+        "groq_model_name": os.getenv("GROQ_MODEL_NAME"),
+        "groq_api_key": os.getenv("GROQ_API_KEY"),
         "groq_use_openai_compatibility": os.getenv("GROQ_USE_OPENAI_COMPATIBILITY", "false").lower() == "true"
     }
 
