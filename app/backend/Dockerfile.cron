@@ -68,12 +68,10 @@ RUN echo '#!/bin/bash\n\
     export PATH="/usr/local/bin:$PATH"\n\
     export PYTHONPATH=/usr/src/app/ai-analyzer\n\
     export DB_HOST=database\n\
-    echo "=== PIPELINE EXECUTION STARTED $(date) ===" >> /var/log/cron.log\n\
-    python3 -m ai_analyzer.data_pipeline 2>&1 >> /var/log/cron.log\n\
-    echo "=== PIPELINE EXECUTION FINISHED $(date) ===" >> /var/log/cron.log\n\
-    sleep 2\n\
-    kill -15 1\n\
-    exit 0' > /usr/local/bin/run-pipeline.sh \
+    echo "=== PIPELINE EXECUTION STARTED $(date) ===" \n\
+    python3 -m ai_analyzer.data_pipeline 2>&1\n\
+    echo "=== PIPELINE EXECUTION FINISHED $(date) ===" \n\
+    ' > /usr/local/bin/run-pipeline.sh \
     && chmod +x /usr/local/bin/run-pipeline.sh
 
 # Create and set up startup script
@@ -104,9 +102,17 @@ RUN echo '#!/bin/bash\n\
     echo "Testing Qdrant connection..." >> /var/log/cron.log\n\
     python3 -c "from qdrant_client import QdrantClient; client = QdrantClient(host='\''qdrant'\'', port=6333); print(f'\''Qdrant connected: {client.get_collections()}'\'')" >> /var/log/cron.log 2>&1\n\
     \n\
-    # Run the pipeline once at startup and wait for completion\n\
+    # Start cron and verify it is running\n\
+    service cron start\n\
+    status=$(service cron status)\n\
+    echo "Cron status: $status" >> /var/log/cron.log\n\
+    \n\
+    # Run the pipeline once at startup\n\
     echo "Running initial pipeline..." >> /var/log/cron.log\n\
-    /usr/local/bin/run-pipeline.sh\n' > /usr/local/bin/start.sh && \
+    /usr/local/bin/run-pipeline.sh >> /var/log/cron.log 2>&1\n\
+    \n\
+    # Keep container running and tail logs\n\
+    exec tail -f /var/log/cron.log' > /usr/local/bin/start.sh && \
     chmod +x /usr/local/bin/start.sh
 
 # Use exec form of CMD

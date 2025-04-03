@@ -64,6 +64,11 @@ class ResponseAnalyzerAgent(BaseAgent):
                 - Make questions highly specific and actionable
                 - Phrase questions as a call center analyst would
                 - Include references to specific values from the results
+                
+                IMPORTANT: When analyzing SQL query results, base your analysis ONLY on the SQL results provided, not on any call transcriptions that may be included in the prompt.
+                The call transcriptions are meant to help the SQL agent generate the query, not for you to analyze directly.
+                Focus your analysis entirely on the structured data from the SQL results, including metrics, counts, percentages, and trends.
+                Make your response user-friendly by avoiding SQL terminology - present the data in plain language without mentioning SQL, queries, or database terms.
                 """),
                 ("human",
                  """Previous context: {context}

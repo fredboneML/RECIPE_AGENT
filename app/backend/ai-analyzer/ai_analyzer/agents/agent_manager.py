@@ -829,9 +829,12 @@ class AgentManager:
             SQL Query Results:
             {sql_results}
             
-            Please provide a comprehensive answer based on the transcriptions and SQL results.
-            If the transcriptions don't contain enough information to answer the question fully, 
+            Please provide a comprehensive answer based ONLY on the SQL results above.
+            The call transcriptions are provided only to help with context, but your response should be based entirely on the SQL query results.
+            If the SQL results don't contain enough information to answer the question fully, 
             acknowledge this limitation in your response. Make sure to answer in the language of the question!
+            
+            Make your response user-friendly by avoiding SQL terminology - present the data in plain language without mentioning SQL, queries, or database terms.
             
             {'' if not entity_corrections else 'IMPORTANT: Make sure to acknowledge the entity correction at the beginning of your response.'}
             """

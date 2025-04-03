@@ -80,7 +80,7 @@ services:
       - ./backend:/usr/src/app:delegated
       - ./.env:/usr/src/app/.env:ro
       - cron_logs:/var/log
-    restart: "no"
+    restart: unless-stopped
     networks:
       - app-network
 
