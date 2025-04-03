@@ -1,5 +1,1 @@
-<<<<<<< HEAD
 */10 * * * * cd /usr/src/app && python3 data_pipeline.py >> /var/log/cron.log 2>&1
-=======
-*/5 * * * * cd /usr/src/app && python3 data_pipeline.py >> /var/log/cron.log 2>&1
->>>>>>> 8c6fffe6933c341b3b3167880c7b99e7b6352882
