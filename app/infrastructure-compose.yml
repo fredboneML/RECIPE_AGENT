@@ -80,13 +80,7 @@ services:
       - ./backend:/usr/src/app:delegated
       - ./.env:/usr/src/app/.env:ro
       - cron_logs:/var/log
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "sh", "-c", "echo 'Health check passed'"]
-      interval: 5m
-      timeout: 10s
-      retries: 1
-      start_period: 10s
+    restart: "no"
     networks:
       - app-network
 
