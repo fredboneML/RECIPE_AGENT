@@ -661,6 +661,43 @@ class AgentManager:
             logger.error("No agent found")
             return None
 
+    def _detect_language(self, text: str) -> str:
+        """Detect if the text is in Dutch or English"""
+        # Get total word count and cleaned words
+        words = text.lower().split()
+        total_words = len(words)
+        logger.info(f"Total words in text: {total_words}")
+
+        # Count English words
+        english_words = ['what', 'which', 'how', 'where', 'when', 'who', 'why', 'did', 'does', 'has', 'had', 'it', 'there', 'they', 'show',
+                         'is', 'are', 'was', 'were', 'the', 'this', 'that', 'these', 'those', 'our', 'your', 'an', 'a', 'top', 'give', 'do']
+        nb_en = sum(1 for word in words if word in english_words)
+        logger.info(
+            f"English words found: {[word for word in words if word in english_words]}")
+
+        # Count Dutch words
+        dutch_words = ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp',
+                       'kun', 'kunt', 'je', 'jij', 'u', 'bent', 'zijn', 'waar', 'wat', 'wie', 'hoe',
+                       'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
+                       'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet', 'met',
+                       'over', 'door', 'om', 'op', 'voor', 'na', 'bij', 'aan', 'in', 'uit', 'te',
+                       'bedrijf', 'waarom', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal']
+        nb_dutch = sum(1 for word in words if word in dutch_words)
+        logger.info(
+            f"Dutch words found: {[word for word in words if word in dutch_words]}")
+
+        logger.info(
+            f"number of Dutch words: {nb_dutch}, number of English words: {nb_en}")
+
+        # Set language based on majority
+        if nb_dutch > nb_en:
+            return "Dutch"
+        elif nb_en > nb_dutch:
+            return "English"
+        else:
+            # Default to English if no clear majority
+            return "English"
+
     def process_query(self, query: str, conversation_id: Optional[str] = None) -> str:
         """Process a user query using hybrid approach with Agno multiagent"""
         try:
@@ -669,6 +706,10 @@ class AgentManager:
             if cached_response:
                 logger.info("Using cached response")
                 return cached_response
+
+            # Detect language of the query
+            detected_language = self._detect_language(query)
+            logger.info(f"Detected language: {detected_language}")
 
             # 1. Search for relevant transcriptions using vector search with circuit breaker
             similar_transcripts = self.search_transcriptions_safe(query)
@@ -769,6 +810,19 @@ class AgentManager:
             # Log the generated SQL query
             logger.info(f"Generated SQL query: {sql_query}")
 
+            # Log the first 2 rows of SQL results for debugging
+            if sql_results and isinstance(sql_results, str):
+                # Split the results by newlines to get individual rows
+                result_lines = sql_results.split('\n')
+                # Log the first 2 rows (or fewer if there are less than 2 rows)
+                rows_to_log = min(2, len(result_lines))
+                logger.info(f"First {rows_to_log} rows of SQL results:")
+                for i in range(rows_to_log):
+                    logger.info(f"Row {i+1}: {result_lines[i]}")
+            else:
+                logger.info(
+                    "No SQL results to log or results are not in string format")
+
             # 4. Format examples for the agent
             examples_text = self._format_example_transcriptions(
                 similar_transcripts)
@@ -835,6 +889,8 @@ class AgentManager:
             acknowledge this limitation in your response. Make sure to answer in the language of the question!
             
             Make your response user-friendly by avoiding SQL terminology - present the data in plain language without mentioning SQL, queries, or database terms.
+            
+            IMPORTANT: Respond in {detected_language} language to match the user's question language.
             
             {'' if not entity_corrections else 'IMPORTANT: Make sure to acknowledge the entity correction at the beginning of your response.'}
             """

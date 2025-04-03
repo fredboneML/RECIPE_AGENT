@@ -26,6 +26,43 @@ class ResponseAnalyzerAgent(BaseAgent):
         self.output_parser = PydanticOutputParser(
             pydantic_object=AnalysisOutput)
 
+    def _detect_language(self, text: str) -> str:
+        """Detect if the text is in Dutch or English"""
+        # Get total word count and cleaned words
+        words = text.lower().split()
+        total_words = len(words)
+        logger.info(f"Total words in text: {total_words}")
+
+        # Count English words
+        english_words = ['what', 'which', 'how', 'where', 'when', 'who', 'why', 'did', 'does', 'has', 'had', 'it', 'there', 'they', 'show',
+                         'is', 'are', 'was', 'were', 'the', 'this', 'that', 'these', 'those', 'our', 'your', 'an', 'a', 'top', 'give', 'do']
+        nb_en = sum(1 for word in words if word in english_words)
+        logger.info(
+            f"English words found: {[word for word in words if word in english_words]}")
+
+        # Count Dutch words
+        dutch_words = ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp',
+                       'kun', 'kunt', 'je', 'jij', 'u', 'bent', 'zijn', 'waar', 'wat', 'wie', 'hoe',
+                       'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
+                       'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet', 'met',
+                       'over', 'door', 'om', 'op', 'voor', 'na', 'bij', 'aan', 'in', 'uit', 'te',
+                       'bedrijf', 'waarom', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal']
+        nb_dutch = sum(1 for word in words if word in dutch_words)
+        logger.info(
+            f"Dutch words found: {[word for word in words if word in dutch_words]}")
+
+        logger.info(
+            f"number of Dutch words: {nb_dutch}, number of English words: {nb_en}")
+
+        # Set language based on majority
+        if nb_dutch > nb_en:
+            return "Dutch"
+        elif nb_en > nb_dutch:
+            return "English"
+        else:
+            # Default to English if no clear majority
+            return "English"
+
     async def process(self, question: str, response: Any,
                       conversation_context: Optional[str] = None) -> AgentResponse:
         try:
@@ -34,9 +71,13 @@ class ResponseAnalyzerAgent(BaseAgent):
                 latest_interaction = conversation_context.split('\n\n')[-2:]
                 context_summary = '\n'.join(latest_interaction)
 
+            # Detect language of the question
+            detected_language = self._detect_language(question)
+            logger.info(f"Detected language: {detected_language}")
+
             # Enhanced prompt to generate better insights and follow-up questions
             prompt = ChatPromptTemplate.from_messages([
-                ("system", """You are a professional call center data analyst specializing in customer interaction analysis. 
+                ("system", f"""You are a professional call center data analyst specializing in customer interaction analysis. 
                 Your task is to analyze query results, highlight important patterns, and generate insightful follow-up questions.
                 
                 Return the response in exactly this JSON format:
@@ -69,6 +110,8 @@ class ResponseAnalyzerAgent(BaseAgent):
                 The call transcriptions are meant to help the SQL agent generate the query, not for you to analyze directly.
                 Focus your analysis entirely on the structured data from the SQL results, including metrics, counts, percentages, and trends.
                 Make your response user-friendly by avoiding SQL terminology - present the data in plain language without mentioning SQL, queries, or database terms.
+                
+                IMPORTANT: Respond in {detected_language} language to match the user's question language.
                 """),
                 ("human",
                  """Previous context: {context}
@@ -76,7 +119,6 @@ class ResponseAnalyzerAgent(BaseAgent):
                  Results to analyze: {response}
                  
                  Generate a comprehensive analysis that highlights key issues and metrics, followed by 3-4 relevant follow-up questions.""")
-
             ])
 
             # Create the chain and invoke
