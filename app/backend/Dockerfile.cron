@@ -56,7 +56,7 @@ RUN echo '#!/bin/bash\n\
     && chmod +x /usr/local/bin/cron-wrapper.sh
 
 # Set up cron job with logging using the wrapper
-RUN echo "*/10 * * * * /usr/local/bin/cron-wrapper.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/pipeline-cron \
+RUN echo "*/10 * * * * /usr/local/bin/cron-wrapper.sh >> /var/log/cron.log 2>&1 && echo '=== CRON JOB EXECUTED $(date) ===' >> /var/log/cron.log" > /etc/cron.d/pipeline-cron \
     && chmod 0644 /etc/cron.d/pipeline-cron \
     && crontab /etc/cron.d/pipeline-cron
 
@@ -111,8 +111,8 @@ RUN echo '#!/bin/bash\n\
     echo "Running initial pipeline..." >> /var/log/cron.log\n\
     /usr/local/bin/run-pipeline.sh >> /var/log/cron.log 2>&1\n\
     \n\
-    # Keep container running and tail logs\n\
-    exec tail -f /var/log/cron.log' > /usr/local/bin/start.sh && \
+    # Keep container running and tail logs, also output to stdout/stderr\n\
+    exec tail -f /var/log/cron.log | tee /proc/1/fd/1 /proc/1/fd/2' > /usr/local/bin/start.sh && \
     chmod +x /usr/local/bin/start.sh
 
 # Use exec form of CMD
