@@ -1279,6 +1279,7 @@ class AgentManager:
                 IMPORTANT: The query is asking about: {', '.join(entity_names)}
                 Make sure to filter results to only include records related to these entities.
                 Use ILIKE with wildcards for partial name matching (e.g., '%Hendrik%Stuiver%').
+                For company names or identifiers, check both telephone_number and clid fields.
                 """
 
             # Create a prompt with the context, query, and error information
@@ -1322,6 +1323,12 @@ class AgentManager:
             15. To analyze sentiment, use the clean_sentiment field with values like 'positief', 'negatief', 'neutral'
             16. For calculations involving sentiment, use CASE statements like:
                 CASE WHEN clean_sentiment = 'positief' THEN 1 WHEN clean_sentiment = 'negatief' THEN -1 ELSE 0 END
+            17. When the query mentions a specific company, person, or entity:
+                - ALWAYS add a WHERE clause to filter for that entity
+                - Check both telephone_number and clid fields using ILIKE with wildcards
+                - Example: "WHERE (telephone_number ILIKE '%{{entity}}%' OR clid ILIKE '%{{entity}}%')"
+                - This applies regardless of the query language (English or Dutch)
+            18. For entity-specific queries, focus on finding records that match the entity exactly, not general statistics
             
             Generate ONLY the SQL query, no explanations.
             """
@@ -1509,40 +1516,98 @@ class AgentManager:
     def _execute_sql_query(self, sql_query: str) -> str:
         """Execute SQL query and format results"""
         try:
-            # Execute query
-            logger.info(f"Executing SQL query: {sql_query}")
-            result = self.session.execute(text(sql_query))
-            rows = result.fetchall()
-            column_names = result.keys()
+            # Initialize retry variables
+            max_retries = 3
+            retry_count = 0
+            last_error = None
+            last_sql = sql_query
 
-            # Log result count
-            row_count = len(rows)
-            logger.info(f"Query returned {row_count} rows")
+            while retry_count < max_retries:
+                try:
+                    # Execute query
+                    logger.info(f"Executing SQL query: {last_sql}")
+                    result = self.session.execute(text(last_sql))
+                    rows = result.fetchall()
+                    column_names = result.keys()
 
-            # Format results into readable text
-            if not rows:
-                return "No results found for your query."
+                    # Log result count
+                    row_count = len(rows)
+                    logger.info(f"Query returned {row_count} rows")
 
-            # Format output based on number of rows
-            if len(rows) == 1:
-                # Single row result
-                return "\n".join(f"{k}: {v}" for k, v in zip(column_names, rows[0]))
-            else:
-                # Multiple row result with row numbers
-                output = []
-                # Show first 10 rows with numbers
-                for i, row in enumerate(rows[:10], 1):
-                    row_str = ", ".join(
-                        f"{k}: {v}" for k, v in zip(column_names, row))
-                    output.append(f"{i}. {row_str}")
+                    # If no results found and we haven't reached max retries, try again
+                    if not rows and retry_count < max_retries - 1:
+                        retry_count += 1
+                        logger.warning(
+                            f"No results found (attempt {retry_count}/{max_retries}). Retrying with a different query approach.")
+                        # Add error context for the next retry
+                        error_context = f"""
+                        PREVIOUS QUERY INFORMATION:
+                        The following SQL query returned no results:
+                        ```sql
+                        {last_sql}
+                        ```
+                        
+                        Please try a different approach to find the requested information.
+                        Consider using different columns or conditions in the query.
+                        """
+                        # Generate a new SQL query with the error context
+                        last_sql = self.generate_sql_query(
+                            last_sql, [], error_context)
+                        continue
 
-                # Add note if there are more rows
-                if len(rows) > 10:
-                    extra_count = len(rows) - 10
-                    output.append(
-                        f"\n(Showing top 10 results of {len(rows)} total)")
+                    # Format results into readable text
+                    if not rows:
+                        return "No results found for your query."
 
-                return "\n".join(output)
+                    # Format output based on number of rows
+                    if len(rows) == 1:
+                        # Single row result
+                        return "\n".join(f"{k}: {v}" for k, v in zip(column_names, rows[0]))
+                    else:
+                        # Multiple row result with row numbers
+                        output = []
+                        # Show first 10 rows with numbers
+                        for i, row in enumerate(rows[:10], 1):
+                            row_str = ", ".join(
+                                f"{k}: {v}" for k, v in zip(column_names, row))
+                            output.append(f"{i}. {row_str}")
+
+                        # Add note if there are more rows
+                        if len(rows) > 10:
+                            extra_count = len(rows) - 10
+                            output.append(
+                                f"\n(Showing top 10 results of {len(rows)} total)")
+
+                        return "\n".join(output)
+
+                except Exception as e:
+                    # Store the error for the next retry
+                    last_error = str(e)
+                    retry_count += 1
+                    logger.warning(
+                        f"SQL query execution failed (attempt {retry_count}/{max_retries}): {last_error}")
+
+                    if retry_count >= max_retries:
+                        raise ValueError(f"Error executing query: {str(e)}")
+
+                    # Add error context for the next retry
+                    error_context = f"""
+                    PREVIOUS ERROR INFORMATION:
+                    The following SQL query previously failed:
+                    ```sql
+                    {last_sql}
+                    ```
+                    
+                    Error message:
+                    {last_error}
+                    
+                    Please fix the issues in the query and generate a corrected version.
+                    Make sure to avoid using columns that don't exist and follow the correct database schema.
+                    """
+                    # Generate a new SQL query with the error context
+                    last_sql = self.generate_sql_query(
+                        last_sql, [], error_context)
+
         except Exception as e:
             logger.error(f"Error executing query: {e}")
             raise ValueError(f"Error executing query: {str(e)}")
