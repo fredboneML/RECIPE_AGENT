@@ -1549,6 +1549,11 @@ class AgentManager:
                         
                         Please try a different approach to find the requested information.
                         Consider using different columns or conditions in the query.
+                        For entity-specific queries, make sure to:
+                        1. Check both telephone_number and clid fields
+                        2. Use ILIKE with wildcards for flexible matching
+                        3. Consider searching in topic, summary, and transcription fields
+                        4. Try different variations of the entity name
                         """
                         # Generate a new SQL query with the error context
                         last_sql = self.generate_sql_query(
