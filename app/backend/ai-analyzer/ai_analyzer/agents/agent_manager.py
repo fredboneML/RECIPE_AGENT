@@ -669,19 +669,30 @@ class AgentManager:
         logger.info(f"Total words in text: {total_words}")
 
         # Count English words
-        english_words = ['what', 'which', 'how', 'where', 'when', 'who', 'why', 'did', 'does', 'has', 'had', 'it', 'there', 'they', 'show',
-                         'is', 'are', 'was', 'were', 'the', 'this', 'that', 'these', 'those', 'our', 'your', 'an', 'a', 'top', 'give', 'do']
+        english_words = [
+            'what', 'which', 'how', 'where', 'when', 'who', 'why', 'did', 'does', 'has', 'had', 'it', 'there',
+            'they', 'show', 'is', 'are', 'was', 'were', 'the', 'this', 'that', 'these', 'those', 'our', 'your',
+            'an', 'a', 'top', 'give', 'do', 'i', 'you', 'he', 'she', 'we', 'them', 'his', 'her', 'my', 'me',
+            'mine', 'yours', 'ours', 'their', 'if', 'then', 'and', 'or', 'but', 'because', 'as', 'of', 'with',
+            'from', 'about', 'into', 'on', 'off', 'up', 'down', 'out', 'can', 'could', 'would', 'should',
+            'will', 'shall', 'must', 'may', 'might', 'been', 'being', 'to', 'for', 'at', 'by', 'not'
+        ]
+
         nb_en = sum(1 for word in words if word in english_words)
         logger.info(
             f"English words found: {[word for word in words if word in english_words]}")
 
         # Count Dutch words
-        dutch_words = ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp',
-                       'kun', 'kunt', 'je', 'jij', 'u', 'bent', 'zijn', 'waar', 'wat', 'wie', 'hoe',
-                       'waarom', 'wanneer', 'welk', 'welke', 'het', 'de', 'een', 'het', 'deze', 'dit',
-                       'die', 'dat', 'mijn', 'uw', 'jullie', 'ons', 'onze', 'geen', 'niet', 'met',
-                       'over', 'door', 'om', 'op', 'voor', 'na', 'bij', 'aan', 'in', 'uit', 'te',
-                       'bedrijf', 'waarom', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal']
+        dutch_words = [
+            'wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp', 'kun', 'kunt',
+            'je', 'jij', 'u', 'bent', 'zijn', 'het', 'de', 'een', 'deze', 'dit', 'die', 'dat', 'mijn', 'uw',
+            'jullie', 'ons', 'onze', 'geen', 'niet', 'met', 'over', 'door', 'om', 'op', 'voor', 'na', 'bij',
+            'aan', 'in', 'uit', 'te', 'bedrijf', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal',
+            'wij', 'ik', 'hij', 'zij', 'ze', 'hun', 'hem', 'haar', 'mij', 'me', 'als', 'dan', 'en', 'of',
+            'maar', 'omdat', 'zoals', 'van', 'tot', 'tegen', 'binnen', 'buiten', 'onder', 'boven', 'moet',
+            'mag', 'zou', 'heb', 'hebt', 'heeft', 'hadden', 'waren', 'worden', 'geweest'
+        ]
+
         nb_dutch = sum(1 for word in words if word in dutch_words)
         logger.info(
             f"Dutch words found: {[word for word in words if word in dutch_words]}")
@@ -719,6 +730,10 @@ class AgentManager:
                 # Get conversation history if conversation_id is provided
                 conversation_context = ""
                 previous_identifiers = set()  # Store any identifiers from previous questions
+                previous_messages = []  # Initialize previous_messages as an empty list
+                previous_where_clauses = []  # Store WHERE clauses from previous questions
+                temporal_filters = ""  # Store temporal filters separately
+
                 if conversation_id and self.session:
                     try:
                         # Query previous messages from this conversation
@@ -749,6 +764,14 @@ class AgentManager:
                                 logger.info(
                                     f"Found phone number identifiers: {identifiers}")
 
+                                # Look for names (capitalized words that are not at the start of sentences)
+                                name_pattern = r'(?<!^)(?<!\. )[A-Z][a-z]+'
+                                identifiers = re.findall(
+                                    name_pattern, msg.query)
+                                previous_identifiers.update(identifiers)
+                                logger.info(
+                                    f"Found name identifiers: {identifiers}")
+
                                 # Look for other common identifier patterns
                                 # UUID pattern
                                 id_pattern = r'\b[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}\b'
@@ -757,11 +780,86 @@ class AgentManager:
                                 logger.info(
                                     f"Found UUID identifiers: {identifiers}")
 
+                                # Extract WHERE clauses from previous SQL queries
+                                if hasattr(msg, 'sql') and msg.sql:
+                                    # Extract WHERE clause using regex
+                                    where_pattern = r'WHERE\s+(.*?)(?=\s*(?:GROUP BY|ORDER BY|LIMIT|$))'
+                                    where_match = re.search(
+                                        where_pattern, msg.sql, re.IGNORECASE | re.DOTALL)
+                                    if where_match:
+                                        where_clause = where_match.group(
+                                            1).strip()
+                                        # Remove tenant_code condition as it will be added automatically
+                                        where_clause = re.sub(
+                                            r"tenant_code\s*=\s*'[^']*'", "", where_clause)
+                                        where_clause = re.sub(
+                                            r"AND\s*$", "", where_clause).strip()
+
+                                        # Extract temporal filters
+                                        temporal_pattern = r"processing_date\s*>=\s*date_trunc\('month',\s*current_date\s*-\s*interval\s*'1\s*month'\)\s*AND\s*processing_date\s*<\s*date_trunc\('month',\s*current_date\)"
+                                        temporal_match = re.search(
+                                            temporal_pattern, where_clause, re.IGNORECASE)
+                                        if temporal_match:
+                                            temporal_filters = temporal_match.group(
+                                                0)
+                                            # Remove temporal filters from where_clause
+                                            where_clause = re.sub(
+                                                temporal_pattern, "", where_clause)
+                                            where_clause = re.sub(
+                                                r"AND\s*$", "", where_clause).strip()
+
+                                        # Extract only entity-based conditions
+                                        # Remove conditions containing verbs or non-entity terms
+                                        entity_conditions = []
+                                        for condition in where_clause.split("AND"):
+                                            condition = condition.strip()
+                                            # Skip conditions that contain verbs or non-entity terms
+                                            if any(verb in condition.lower() for verb in ["what", "could", "would", "should", "will", "can", "may", "might", "must", "shall", "wat", "zou", "moet", "kan", "mag", "zal"]):
+                                                continue
+                                            # Keep conditions that contain entity-related terms
+                                            if any(entity_term in condition.lower() for entity_term in ["name", "phone", "address", "company", "email", "naam", "telefoon", "adres", "bedrijf", "e-mail"]):
+                                                entity_conditions.append(
+                                                    condition)
+                                            # Keep conditions that contain identifiers
+                                            elif any(identifier in condition for identifier in previous_identifiers):
+                                                entity_conditions.append(
+                                                    condition)
+
+                                        if entity_conditions:
+                                            entity_where_clause = " AND ".join(
+                                                entity_conditions)
+                                            previous_where_clauses.append(
+                                                entity_where_clause)
+                                            logger.info(
+                                                f"Extracted entity-based WHERE clause: {entity_where_clause}")
+
                             logger.info(
                                 f"Retrieved {len(previous_messages)} previous messages from conversation {conversation_id}")
                             if previous_identifiers:
                                 logger.info(
                                     f"Found previous identifiers: {previous_identifiers}")
+
+                            # Combine all previous WHERE clauses
+                            if previous_where_clauses or temporal_filters:
+                                combined_where = " AND ".join(
+                                    previous_where_clauses)
+                                if temporal_filters:
+                                    if combined_where:
+                                        combined_where += " AND " + temporal_filters
+                                    else:
+                                        combined_where = temporal_filters
+
+                                previous_context = f"""
+                                Previous WHERE clauses from conversation:
+                                {combined_where}
+                                
+                                IMPORTANT: Include ALL these WHERE conditions in your query.
+                                This includes any temporal filters (like date ranges) and entity filters (like names, phone numbers, addresses, or companies).
+                                Only include entity-based conditions that are relevant to the current question.
+                                """
+                                logger.info(
+                                    f"Combined WHERE clauses: {combined_where}")
+
                     except Exception as e:
                         logger.error(
                             f"Error retrieving conversation history: {e}")
@@ -793,18 +891,42 @@ class AgentManager:
                                 f"SQL generation retry attempt {sql_retry_count+1}/{max_sql_retries}")
                             error_context = f"Previous SQL error: {last_sql_error}"
 
-                        # Add context about previous identifiers to the SQL generation
+                        # Add context about previous identifiers and SQL query to the SQL generation
                         identifier_context = ""
                         if previous_identifiers:
                             identifier_context = "\nIMPORTANT: The previous conversation mentioned these identifiers: " + \
                                 ", ".join(previous_identifiers) + \
                                 "\nMake sure to include these in your WHERE clause if relevant to the current query."
+                            logger.info(
+                                f"Adding identifier context to SQL generation: {identifier_context}")
 
-                        # Generate SQL query with error context and identifier context
+                        # Add previous question, answer, and SQL query as context
+                        previous_context = ""
+                        if previous_messages:
+                            # Get the last message's question, answer, and SQL query if available
+                            last_message = previous_messages[-1]
+                            if hasattr(last_message, 'query') and hasattr(last_message, 'response'):
+                                previous_context = f"""
+                                Previous question: {last_message.query}
+                                Previous answer: {last_message.response}
+                                """
+                                if hasattr(last_message, 'sql') and last_message.sql:
+                                    previous_context += f"""
+                                    Previous SQL query:
+                                    {last_message.sql}
+                                    
+                                    IMPORTANT: For follow-up questions, you MUST include ALL relevant WHERE clause conditions from the previous SQL query.
+                                    This includes any filters for specific entities (like names), time periods, or other conditions.
+                                    """
+                                previous_context += "\nUse the same WHERE clause conditions from the previous SQL query if they are relevant to the current question."
+                                logger.info(
+                                    f"Adding previous context: {previous_context}")
+
+                        # Generate SQL query with error context, identifier context, and previous context
                         sql_query = self.generate_sql_query(
                             query,
                             similar_transcripts,
-                            error_context + identifier_context
+                            error_context + identifier_context + previous_context
                         )
 
                         # Try to execute the query - this will validate it
@@ -944,7 +1066,7 @@ class AgentManager:
                     # Store conversation if needed
                     if conversation_id:
                         self._store_conversation(
-                            conversation_id, query, response)
+                            conversation_id, query, response, sql_query)
 
                     # Commit only if we started the transaction
                     if not self.session.in_transaction():
@@ -1368,6 +1490,11 @@ class AgentManager:
                 - Example: "WHERE (telephone_number ILIKE '%{{entity}}%' OR clid ILIKE '%{{entity}}%')"
                 - This applies regardless of the query language (English or Dutch)
             18. For entity-specific queries, focus on finding records that match the entity exactly, not general statistics
+            19. For follow-up questions, ALWAYS include the same entity filters from the previous question:
+                - If the previous question was about a specific person (e.g., "Bram"), include "WHERE (transcription ILIKE '%Bram%' OR summary ILIKE '%Bram%')"
+                - If the previous question was about a specific phone number, include the phone number filter
+                - This ensures the follow-up question analyzes the same subset of data as the original question
+            20. When analyzing a subset of data (e.g., calls from last month), maintain the same time filter in follow-up questions unless explicitly changed
             
             Generate ONLY the SQL query, no explanations.
             """
@@ -1584,7 +1711,7 @@ class AgentManager:
                 self.session.rollback()
             raise ValueError(f"Error executing query: {str(e)}")
 
-    def _store_conversation(self, conversation_id: str, query: str, response: str) -> None:
+    def _store_conversation(self, conversation_id: str, query: str, response: str, sql_query: Optional[str] = None) -> None:
         """Store conversation in database with proper id handling."""
         try:
             # Clean up any existing transaction
