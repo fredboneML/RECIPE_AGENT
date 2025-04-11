@@ -699,231 +699,270 @@ class AgentManager:
             return "English"
 
     def process_query(self, query: str, conversation_id: Optional[str] = None) -> str:
-        """Process a user query using hybrid approach with Agno multiagent"""
+        """Process query with proper transaction handling and context management."""
         try:
-            # Check cache first
-            cached_response = self._check_query_cache(query)
-            if cached_response:
-                logger.info("Using cached response")
-                return cached_response
+            # Start a new transaction for the entire process if none exists
+            if not self.session.in_transaction():
+                self.session.begin()
 
-            # Detect language of the query
-            detected_language = self._detect_language(query)
-            logger.info(f"Detected language: {detected_language}")
-
-            # 1. Search for relevant transcriptions using vector search with circuit breaker
-            similar_transcripts = self.search_transcriptions_safe(query)
-
-            if not similar_transcripts:
-                return "I couldn't find any relevant transcriptions to answer your question. Could you please provide more details or try a different query?"
-
-            # 2. Check for entity corrections (e.g., partial names)
-            entity_corrections = self._detect_entity_corrections(
-                query, similar_transcripts)
-
-            # 3. Generate SQL query based on the natural language query and similar transcripts
-            # Add retry logic for SQL generation
-            max_sql_retries = 3
-            sql_retry_count = 0
-            last_sql_error = None
-            sql_query = None
-
-            while sql_retry_count < max_sql_retries:
-                try:
-                    # Create error context for SQL retries
-                    error_context = ""
-                    if last_sql_error and sql_retry_count > 0:
-                        logger.info(
-                            f"SQL generation retry attempt {sql_retry_count+1}/{max_sql_retries}")
-                        error_context = f"Previous SQL error: {last_sql_error}"
-
-                    # Generate SQL query with error context if available
-                    sql_query = self.generate_sql_query(
-                        query, similar_transcripts, error_context)
-
-                    # Try to execute the query - this will validate it
-                    sql_results = self._execute_sql_query(sql_query)
-
-                    # If we reach here, the query succeeded
-                    logger.info(
-                        f"SQL query executed successfully after {sql_retry_count+1} attempts")
-                    break
-
-                except ValueError as e:
-                    # Store the error for the next retry
-                    last_sql_error = str(e)
-                    sql_retry_count += 1
-                    logger.warning(
-                        f"SQL query execution failed (attempt {sql_retry_count}/{max_sql_retries}): {last_sql_error}")
-
-                    # If we've reached max retries, try with a simplified approach
-                    if sql_retry_count >= max_sql_retries:
-                        logger.error(
-                            f"Failed to generate valid SQL after {max_sql_retries} attempts")
-
-                        # Generate a simple fallback query
-                        try:
-                            # Simple fallback query - just count topics
-                            fallback_query = f"""
-                            WITH base_data AS (
-                                SELECT 
-                                    t.id,
-                                    t.topic,
-                                    LOWER(TRIM(t.topic)) as clean_topic,
-                                    t.sentiment,
-                                    CASE
-                                        WHEN LOWER(TRIM(t.sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'
-                                        ELSE LOWER(TRIM(t.sentiment))
-                                    END AS clean_sentiment
-                                FROM transcription t
-                                WHERE t.processing_date >= CURRENT_DATE - INTERVAL '300 days'
-                                AND t.tenant_code = :tenant_code
-                            )
-                            SELECT 
-                                clean_topic AS topic, 
-                                COUNT(*) AS count,
-                                COUNT(*) FILTER (WHERE clean_sentiment = 'positief') AS positive_count,
-                                COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') AS negative_count
-                            FROM base_data
-                            WHERE clean_topic IS NOT NULL
-                            GROUP BY clean_topic
-                            ORDER BY count DESC
-                            LIMIT 10;
-                            """
-
-                            sql_results = self._execute_sql_query(
-                                fallback_query)
-                            sql_query = fallback_query
-                            logger.info("Executed fallback query successfully")
-
-                        except Exception as fallback_error:
-                            logger.error(
-                                f"Even fallback query failed: {fallback_error}")
-                            sql_results = "I couldn't generate a valid SQL query to answer your question. The system encountered technical difficulties with the database structure."
-
-            # If we somehow got here without a successful query or explicit error handling
-            if sql_query is None:
-                logger.error(
-                    "SQL query generation failed with no valid result")
-                sql_results = "I couldn't generate a valid SQL query to answer your question."
-
-            # Log the generated SQL query
-            logger.info(f"Generated SQL query: {sql_query}")
-
-            # Log the first 2 rows of SQL results for debugging
-            if sql_results and isinstance(sql_results, str):
-                # Split the results by newlines to get individual rows
-                result_lines = sql_results.split('\n')
-                # Log the first 2 rows (or fewer if there are less than 2 rows)
-                rows_to_log = min(2, len(result_lines))
-                logger.info(f"First {rows_to_log} rows of SQL results:")
-                for i in range(rows_to_log):
-                    logger.info(f"Row {i+1}: {result_lines[i]}")
-            else:
-                logger.info(
-                    "No SQL results to log or results are not in string format")
-
-            # 4. Format examples for the agent
-            examples_text = self._format_example_transcriptions(
-                similar_transcripts)
-
-            # 5. Initialize agents if needed
-            self._initialize_agents_if_needed()
-
-            # Get the agent
-            agent = self._get_agent()
-            if agent:
-                logger.info("Using agent for processing query")
-            else:
-                logger.error("No agent available for processing query")
-
-            # 6. Execute SQL query and get results - already done above with retry logic
-
-            # 7. Get conversation history if conversation_id is provided
-            conversation_history = ""
-            if conversation_id and self.session:
-                try:
-                    # Query previous messages from this conversation
-                    previous_messages = self.session.query(UserMemory)\
-                        .filter(
-                            UserMemory.conversation_id == conversation_id,
-                            UserMemory.user_id == self.tenant_code,
-                            UserMemory.is_active == True
-                    )\
-                        .order_by(UserMemory.message_order.desc())\
-                        .limit(10)\
-                        .all()
-
-                    if previous_messages:
-                        conversation_history = "Previous conversation history:\n\n"
-                        # Process in chronological order (oldest first)
-                        for msg in reversed(previous_messages):
-                            conversation_history += f"User: {msg.query}\n"
-                            conversation_history += f"Assistant: {msg.response}\n\n"
-
-                        logger.info(
-                            f"Retrieved {len(previous_messages)} previous messages from conversation {conversation_id}")
-                except Exception as e:
-                    logger.error(f"Error retrieving conversation history: {e}")
-                    logger.exception("Detailed error:")
-                    # Continue without conversation history if there's an error
-
-            # 8. Create a prompt with the context, conversation history, query, entity corrections, and SQL results
-            prompt = f"""
-            I need to answer this user question:
-            "{query}"
-            
-            {conversation_history}
-            
-            {entity_corrections}
-            
-            Here are some relevant call transcriptions that might help:
-            {examples_text}
-            
-            SQL Query Results:
-            {sql_results}
-            
-            Please provide a comprehensive answer based ONLY on the SQL results above.
-            The call transcriptions are provided only to help with context, but your response should be based entirely on the SQL query results.
-            If the SQL results don't contain enough information to answer the question fully, 
-            acknowledge this limitation in your response. Make sure to answer in the language of the question!
-            
-            Make your response user-friendly by avoiding SQL terminology - present the data in plain language without mentioning SQL, queries, or database terms.
-            
-            IMPORTANT: Respond in {detected_language} language to match the user's question language.
-            
-            {'' if not entity_corrections else 'IMPORTANT: Make sure to acknowledge the entity correction at the beginning of your response.'}
-            """
-
-            # 9. Use the agent to generate a response
             try:
-                response_obj = agent.run(prompt)
+                # Check cache first
+                cached_response = self._check_query_cache(query)
+                if cached_response:
+                    logger.info("Using cached response")
+                    return cached_response
 
-                # Extract the text content from the RunResponse object
-                if hasattr(response_obj, 'content'):
-                    response = response_obj.content
-                elif isinstance(response_obj, str):
-                    response = response_obj
+                # Detect language of the query
+                detected_language = self._detect_language(query)
+                logger.info(f"Detected language: {detected_language}")
+
+                # Get conversation history if conversation_id is provided
+                conversation_context = ""
+                previous_identifiers = set()  # Store any identifiers from previous questions
+                if conversation_id and self.session:
+                    try:
+                        # Query previous messages from this conversation
+                        previous_messages = self.session.query(UserMemory)\
+                            .filter(
+                                UserMemory.conversation_id == conversation_id,
+                                UserMemory.user_id == self.tenant_code,
+                                UserMemory.is_active == True
+                        )\
+                            .order_by(UserMemory.message_order.desc())\
+                            .limit(10)\
+                            .all()
+
+                        if previous_messages:
+                            conversation_context = "Previous conversation history:\n\n"
+                            # Process in chronological order (oldest first)
+                            for msg in reversed(previous_messages):
+                                conversation_context += f"User: {msg.query}\n"
+                                conversation_context += f"Assistant: {msg.response}\n\n"
+
+                                # Extract identifiers from previous messages
+                                # Look for phone numbers, IDs, or other specific identifiers
+                                # Match 10 or more digits
+                                phone_pattern = r'\b\d{10,}\b'
+                                identifiers = re.findall(
+                                    phone_pattern, msg.query)
+                                previous_identifiers.update(identifiers)
+                                logger.info(
+                                    f"Found phone number identifiers: {identifiers}")
+
+                                # Look for other common identifier patterns
+                                # UUID pattern
+                                id_pattern = r'\b[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}\b'
+                                identifiers = re.findall(id_pattern, msg.query)
+                                previous_identifiers.update(identifiers)
+                                logger.info(
+                                    f"Found UUID identifiers: {identifiers}")
+
+                            logger.info(
+                                f"Retrieved {len(previous_messages)} previous messages from conversation {conversation_id}")
+                            if previous_identifiers:
+                                logger.info(
+                                    f"Found previous identifiers: {previous_identifiers}")
+                    except Exception as e:
+                        logger.error(
+                            f"Error retrieving conversation history: {e}")
+                        logger.exception("Detailed error:")
+
+                # 1. Search for relevant transcriptions using vector search with circuit breaker
+                similar_transcripts = self.search_transcriptions_safe(query)
+
+                if not similar_transcripts:
+                    return "I couldn't find any relevant transcriptions to answer your question. Could you please provide more details or try a different query?"
+
+                # 2. Check for entity corrections (e.g., partial names)
+                entity_corrections = self._detect_entity_corrections(
+                    query, similar_transcripts)
+
+                # 3. Generate SQL query based on the natural language query and similar transcripts
+                # Add retry logic for SQL generation
+                max_sql_retries = 3
+                sql_retry_count = 0
+                last_sql_error = None
+                sql_query = None
+
+                while sql_retry_count < max_sql_retries:
+                    try:
+                        # Create error context for SQL retries
+                        error_context = ""
+                        if last_sql_error and sql_retry_count > 0:
+                            logger.info(
+                                f"SQL generation retry attempt {sql_retry_count+1}/{max_sql_retries}")
+                            error_context = f"Previous SQL error: {last_sql_error}"
+
+                        # Add context about previous identifiers to the SQL generation
+                        identifier_context = ""
+                        if previous_identifiers:
+                            identifier_context = "\nIMPORTANT: The previous conversation mentioned these identifiers: " + \
+                                ", ".join(previous_identifiers) + \
+                                "\nMake sure to include these in your WHERE clause if relevant to the current query."
+
+                        # Generate SQL query with error context and identifier context
+                        sql_query = self.generate_sql_query(
+                            query,
+                            similar_transcripts,
+                            error_context + identifier_context
+                        )
+
+                        # Try to execute the query - this will validate it
+                        sql_results = self._execute_sql_query(sql_query)
+
+                        # If we reach here, the query succeeded
+                        logger.info(
+                            f"SQL query executed successfully after {sql_retry_count+1} attempts")
+                        break
+
+                    except ValueError as e:
+                        # Store the error for the next retry
+                        last_sql_error = str(e)
+                        sql_retry_count += 1
+                        logger.warning(
+                            f"SQL query execution failed (attempt {sql_retry_count}/{max_sql_retries}): {last_sql_error}")
+
+                        # If we've reached max retries, try with a simplified approach
+                        if sql_retry_count >= max_sql_retries:
+                            logger.error(
+                                f"Failed to generate valid SQL after {max_sql_retries} attempts")
+                            # ... rest of the error handling code ...
+
+                # If we somehow got here without a successful query or explicit error handling
+                if sql_query is None:
+                    logger.error(
+                        "SQL query generation failed with no valid result")
+                    sql_results = "I couldn't generate a valid SQL query to answer your question."
+
+                # Log the generated SQL query
+                logger.info(f"Generated SQL query: {sql_query}")
+
+                # Log the first 2 rows of SQL results for debugging
+                if sql_results and isinstance(sql_results, str):
+                    # Split the results by newlines to get individual rows
+                    result_lines = sql_results.split('\n')
+                    # Log the first 2 rows (or fewer if there are less than 2 rows)
+                    rows_to_log = min(2, len(result_lines))
+                    logger.info(f"First {rows_to_log} rows of SQL results:")
+                    for i in range(rows_to_log):
+                        logger.info(f"Row {i+1}: {result_lines[i]}")
                 else:
-                    # Convert the response object to a string if it's not already a string
-                    response = str(response_obj)
+                    logger.info(
+                        "No SQL results to log or results are not in string format")
 
-                logger.info(f"Final response: {response[:100]}...")
+                # 4. Format examples for the agent
+                examples_text = self._format_example_transcriptions(
+                    similar_transcripts)
 
-                # Cache the response
-                self._cache_query_response(query, response)
+                # 5. Initialize agents if needed
+                self._initialize_agents_if_needed()
 
-                return response
+                # Get the agent
+                agent = self._get_agent()
+                if agent:
+                    logger.info("Using agent for processing query")
+                else:
+                    logger.error("No agent available for processing query")
+
+                # 6. Execute SQL query and get results - already done above with retry logic
+
+                # 7. Get conversation history if conversation_id is provided
+                conversation_history = ""
+                if conversation_id and self.session:
+                    try:
+                        # Query previous messages from this conversation
+                        previous_messages = self.session.query(UserMemory)\
+                            .filter(
+                                UserMemory.conversation_id == conversation_id,
+                                UserMemory.user_id == self.tenant_code,
+                                UserMemory.is_active == True
+                        )\
+                            .order_by(UserMemory.message_order.desc())\
+                            .limit(10)\
+                            .all()
+
+                        if previous_messages:
+                            conversation_history = "Previous conversation history:\n\n"
+                            # Process in chronological order (oldest first)
+                            for msg in reversed(previous_messages):
+                                conversation_history += f"User: {msg.query}\n"
+                                conversation_history += f"Assistant: {msg.response}\n\n"
+
+                            logger.info(
+                                f"Retrieved {len(previous_messages)} previous messages from conversation {conversation_id}")
+                    except Exception as e:
+                        logger.error(
+                            f"Error retrieving conversation history: {e}")
+                        logger.exception("Detailed error:")
+                        # Continue without conversation history if there's an error
+
+                # 8. Create a prompt with the context, conversation history, query, entity corrections, and SQL results
+                prompt = f"""
+                I need to answer this user question:
+                "{query}"
+                
+                {conversation_history}
+                
+                {entity_corrections}
+                
+                Here are some relevant call transcriptions that might help:
+                {examples_text}
+                
+                SQL Query Results:
+                {sql_results}
+                
+                Please provide a comprehensive answer based ONLY on the SQL results above.
+                The call transcriptions are provided only to help with context, but your response should be based entirely on the SQL query results.
+                If the SQL results don't contain enough information to answer the question fully, 
+                acknowledge this limitation in your response. Make sure to answer in the language of the question!
+                
+                Make your response user-friendly by avoiding SQL terminology - present the data in plain language without mentioning SQL, queries, or database terms.
+                
+                IMPORTANT: Respond in {detected_language} language to match the user's question language.
+                
+                {'' if not entity_corrections else 'IMPORTANT: Make sure to acknowledge the entity correction at the beginning of your response.'}
+                """
+
+                # 9. Use the agent to generate a response
+                try:
+                    response_obj = agent.run(prompt)
+
+                    # Extract the text content from the RunResponse object
+                    if hasattr(response_obj, 'content'):
+                        response = response_obj.content
+                    elif isinstance(response_obj, str):
+                        response = response_obj
+                    else:
+                        # Convert the response object to a string if it's not already a string
+                        response = str(response_obj)
+
+                    logger.info(f"Final response: {response[:100]}...")
+
+                    # Cache the response
+                    self._cache_query_response(query, response)
+
+                    # Store conversation if needed
+                    if conversation_id:
+                        self._store_conversation(
+                            conversation_id, query, response)
+
+                    # Commit only if we started the transaction
+                    if not self.session.in_transaction():
+                        self.session.commit()
+                    return response
+
+                except Exception as e:
+                    logger.error(f"Error running agent: {e}")
+                    logger.exception("Detailed error:")
+                    return f"I'm sorry, I couldn't process your query. Error: {str(e)}"
 
             except Exception as e:
-                logger.error(f"Error running agent: {e}")
-                logger.exception("Detailed error:")
-                return f"I'm sorry, I couldn't process your query. Error: {str(e)}"
+                if not self.session.in_transaction():
+                    self.session.rollback()
+                raise ValueError(f"Error processing query: {str(e)}")
 
         except Exception as e:
-            logger.error(f"Error processing query: {e}")
-            logger.exception("Detailed error:")
-            return f"I'm sorry, I couldn't process your query. Error: {str(e)}"
+            raise ValueError(f"Error processing query: {str(e)}")
 
     def _check_query_cache(self, query: str) -> str:
         """Check if a similar query exists in the cache"""
@@ -1424,54 +1463,49 @@ class AgentManager:
             return sql_query  # Return original query if sanitization fails
 
     def _get_database_schema(self) -> str:
-        """Get database schema information for the SQL agent"""
+        """Get database schema with proper transaction handling."""
         try:
-            if not self.session:
-                return "No database connection available."
+            # Clean up any existing transaction
+            if self.session.in_transaction():
+                self.session.rollback()
 
-            # Get table information from the database
-            schema_info = {}
-
-            # Get list of restricted tables
-            restricted_tables = self._get_restricted_tables()
-
-            # Query for table names
-            result = self.session.execute(text("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public'
-            """))
-
-            tables = [row[0]
-                      for row in result if row[0] not in restricted_tables]
-
-            # For each table, get column information
-            for table in tables:
-                result = self.session.execute(text(f"""
-                    SELECT column_name, data_type
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = '{table}'
+            # Start fresh transaction
+            self.session.begin()
+            try:
+                # Get table names and their columns
+                result = self.session.execute(text("""
+                    SELECT 
+                        t.table_name,
+                        string_agg(c.column_name || ' ' || c.data_type, ', ' ORDER BY c.ordinal_position) as columns
+                    FROM 
+                        information_schema.tables t
+                    JOIN 
+                        information_schema.columns c ON t.table_name = c.table_name
+                    WHERE 
+                        t.table_schema = 'public'
+                    GROUP BY 
+                        t.table_name
+                    ORDER BY 
+                        t.table_name
                 """))
 
-                columns = {row[0]: row[1] for row in result}
-                schema_info[table] = columns
+                # Format the schema information
+                schema_info = []
+                for row in result:
+                    table_name = row[0]
+                    columns = row[1]
+                    schema_info.append(
+                        f"Table: {table_name}\nColumns: {columns}\n")
 
-            # Format the schema information
-            formatted_schema = "Available tables and their columns:\n\n"
-
-            for table, columns in schema_info.items():
-                formatted_schema += f"Table: {table}\n"
-                formatted_schema += "Columns:\n"
-                for column, data_type in columns.items():
-                    formatted_schema += f"  - {column} ({data_type})\n"
-                formatted_schema += "\n"
-
-            return formatted_schema
-
+                self.session.commit()
+                return "\n".join(schema_info)
+            except Exception as e:
+                self.session.rollback()
+                raise ValueError(f"Error getting database schema: {str(e)}")
         except Exception as e:
-            logger.error(f"Error getting database schema: {e}")
-            logger.exception("Detailed error:")
-            return "Error retrieving database schema."
+            if self.session.in_transaction():
+                self.session.rollback()
+            raise ValueError(f"Error getting database schema: {str(e)}")
 
     def _get_restricted_tables(self) -> List[str]:
         """Get list of restricted table names"""
@@ -1513,106 +1547,113 @@ class AgentManager:
 
         return entities
 
-    def _execute_sql_query(self, sql_query: str) -> str:
-        """Execute SQL query and format results"""
+    def _execute_sql_query(self, query: str, params: Optional[Dict] = None) -> List[Dict]:
+        """Execute SQL query with proper transaction handling and parameter binding."""
+        if params is None:
+            params = {}
+
         try:
-            # Initialize retry variables
-            max_retries = 3
-            retry_count = 0
-            last_error = None
-            last_sql = sql_query
+            # Clean up any existing transaction
+            if self.session.in_transaction():
+                self.session.rollback()
 
-            while retry_count < max_retries:
-                try:
-                    # Execute query
-                    logger.info(f"Executing SQL query: {last_sql}")
-                    result = self.session.execute(text(last_sql))
-                    rows = result.fetchall()
-                    column_names = result.keys()
+            # Start fresh transaction
+            self.session.begin()
+            try:
+                # Ensure tenant_code is always included
+                if 'tenant_code' not in params:
+                    params['tenant_code'] = self.tenant_code
 
-                    # Log result count
-                    row_count = len(rows)
-                    logger.info(f"Query returned {row_count} rows")
+                # Execute query with proper parameter binding
+                result = self.session.execute(text(query), params)
+                self.session.commit()
 
-                    # If no results found and we haven't reached max retries, try again
-                    if not rows and retry_count < max_retries - 1:
-                        retry_count += 1
-                        logger.warning(
-                            f"No results found (attempt {retry_count}/{max_retries}). Retrying with a different query approach.")
-                        # Add error context for the next retry
-                        error_context = f"""
-                        PREVIOUS QUERY INFORMATION:
-                        The following SQL query returned no results:
-                        ```sql
-                        {last_sql}
-                        ```
-                        
-                        Please try a different approach to find the requested information.
-                        Consider using different columns or conditions in the query.
-                        For entity-specific queries, make sure to:
-                        1. Check both telephone_number and clid fields
-                        2. Use ILIKE with wildcards for flexible matching
-                        3. Consider searching in topic, summary, and transcription fields
-                        4. Try different variations of the entity name
-                        """
-                        # Generate a new SQL query with the error context
-                        last_sql = self.generate_sql_query(
-                            last_sql, [], error_context)
-                        continue
+                # Convert result to list of dictionaries
+                if result.returns_rows:
+                    return [dict(row._mapping) for row in result]
+                return []
 
-                    # Format results into readable text
-                    if not rows:
-                        return "No results found for your query."
-
-                    # Format output based on number of rows
-                    if len(rows) == 1:
-                        # Single row result
-                        return "\n".join(f"{k}: {v}" for k, v in zip(column_names, rows[0]))
-                    else:
-                        # Multiple row result with row numbers
-                        output = []
-                        # Show first 10 rows with numbers
-                        for i, row in enumerate(rows[:10], 1):
-                            row_str = ", ".join(
-                                f"{k}: {v}" for k, v in zip(column_names, row))
-                            output.append(f"{i}. {row_str}")
-
-                        # Add note if there are more rows
-                        if len(rows) > 10:
-                            extra_count = len(rows) - 10
-                            output.append(
-                                f"\n(Showing top 10 results of {len(rows)} total)")
-
-                        return "\n".join(output)
-
-                except Exception as e:
-                    # Store the error for the next retry
-                    last_error = str(e)
-                    retry_count += 1
-                    logger.warning(
-                        f"SQL query execution failed (attempt {retry_count}/{max_retries}): {last_error}")
-
-                    if retry_count >= max_retries:
-                        raise ValueError(f"Error executing query: {str(e)}")
-
-                    # Add error context for the next retry
-                    error_context = f"""
-                    PREVIOUS ERROR INFORMATION:
-                    The following SQL query previously failed:
-                    ```sql
-                    {last_sql}
-                    ```
-                    
-                    Error message:
-                    {last_error}
-                    
-                    Please fix the issues in the query and generate a corrected version.
-                    Make sure to avoid using columns that don't exist and follow the correct database schema.
-                    """
-                    # Generate a new SQL query with the error context
-                    last_sql = self.generate_sql_query(
-                        last_sql, [], error_context)
-
+            except Exception as e:
+                self.session.rollback()
+                if "statement timeout" in str(e).lower():
+                    raise ValueError(
+                        "Query execution timed out. Please try again with a more specific query.")
+                raise ValueError(f"Error executing query: {str(e)}")
         except Exception as e:
-            logger.error(f"Error executing query: {e}")
+            if self.session.in_transaction():
+                self.session.rollback()
             raise ValueError(f"Error executing query: {str(e)}")
+
+    def _store_conversation(self, conversation_id: str, query: str, response: str) -> None:
+        """Store conversation in database with proper id handling."""
+        try:
+            # Clean up any existing transaction
+            if self.session.in_transaction():
+                self.session.rollback()
+
+            # Start fresh transaction
+            self.session.begin()
+            try:
+                # Get the next available message_order for this conversation
+                last_message = self.session.execute(
+                    text("""
+                        SELECT MAX(message_order) 
+                        FROM user_memory 
+                        WHERE conversation_id = :conversation_id
+                    """),
+                    {"conversation_id": conversation_id}
+                ).fetchone()
+
+                next_message_order = (
+                    last_message[0] + 1) if last_message and last_message[0] is not None else 0
+
+                # Check if id column is integer type
+                result = self.session.execute(text("""
+                    SELECT data_type 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'user_memory' 
+                    AND column_name = 'id'
+                """)).fetchone()
+
+                id_is_integer = result and result[0].startswith('int')
+
+                # Generate appropriate ID based on column type
+                if id_is_integer:
+                    # Get the current max ID
+                    max_id_result = self.session.execute(text("""
+                        SELECT MAX(id) FROM user_memory
+                    """)).fetchone()
+
+                    # Start from max_id + 1 or 1000000 if no records exist
+                    memory_id = max(int(max_id_result[0] or 0) + 1, 1000000)
+                else:
+                    # Use UUID for non-integer id columns
+                    memory_id = str(uuid.uuid4())
+
+                # Store the conversation
+                self.session.execute(
+                    text("""
+                        INSERT INTO user_memory 
+                        (id, user_id, conversation_id, query, response, message_order, is_active, timestamp, followup_questions, title, expires_at)
+                        VALUES 
+                        (:id, :user_id, :conversation_id, :query, :response, :message_order, TRUE, NOW(), :followup_questions, :title, NOW() + INTERVAL '30 days')
+                    """),
+                    {
+                        'id': memory_id,
+                        'user_id': self.tenant_code,
+                        'conversation_id': conversation_id,
+                        'query': f"Conversation history for query: {query}",
+                        'response': response,
+                        'message_order': next_message_order,
+                        'followup_questions': [],
+                        'title': 'Conversation History'
+                    }
+                )
+                self.session.commit()
+            except Exception as e:
+                self.session.rollback()
+                raise ValueError(f"Error storing conversation: {str(e)}")
+        except Exception as e:
+            if self.session.in_transaction():
+                self.session.rollback()
+            raise ValueError(f"Error storing conversation: {str(e)}")

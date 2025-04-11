@@ -40,10 +40,12 @@ logger = logging.getLogger(__name__)
 # Create engine with connection pooling
 engine = create_engine(
     DATABASE_URL,
-    pool_size=5,
-    max_overflow=10,
-    pool_timeout=30,
-    pool_pre_ping=True
+    pool_size=20,  # Increased pool size for more concurrent connections
+    max_overflow=30,  # Increased overflow for peak loads
+    pool_timeout=30,  # Timeout for getting a connection from the pool
+    pool_recycle=1800,  # Recycle connections after 30 minutes
+    pool_pre_ping=True,  # Enable connection health checks
+    isolation_level="READ COMMITTED"  # Better concurrency handling
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

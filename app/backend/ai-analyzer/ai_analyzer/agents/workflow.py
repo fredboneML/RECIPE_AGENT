@@ -86,6 +86,8 @@ class CallAnalysisWorkflow:
         kwargs = {}
         if self.base_url:
             kwargs["base_url"] = self.base_url
+        if self.model_provider == "groq":
+            kwargs["groq_api_key"] = self.api_key
 
         self.sql_generator = SQLGeneratorAgent(
             model_provider=self.model_provider,

@@ -69,7 +69,8 @@ class LangChainModelProvider:
                 logger.info("Creating Groq model with OpenAI compatibility")
                 model = ChatOpenAI(
                     model_name=model_name,
-                    api_key=api_key,
+                    # Use groq_api_key if available
+                    api_key=kwargs.get('groq_api_key', api_key),
                     base_url="https://api.groq.com/openai/v1",
                     temperature=kwargs.get('temperature', 0),
                     **kwargs
@@ -78,7 +79,8 @@ class LangChainModelProvider:
                 logger.info("Creating native Groq model")
                 model = ChatGroq(
                     model_name=model_name,
-                    groq_api_key=api_key,
+                    # Use groq_api_key if available
+                    groq_api_key=kwargs.get('groq_api_key', api_key),
                     temperature=kwargs.get('temperature', 0),
                     **kwargs
                 )

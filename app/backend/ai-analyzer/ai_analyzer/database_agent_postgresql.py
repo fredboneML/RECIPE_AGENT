@@ -14,6 +14,7 @@ from ai_analyzer.cache_manager import DatabaseCacheManager
 import os
 import time
 import json
+import contextlib
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -250,21 +251,28 @@ class DatabaseAgentValidator:
         return fixed_query if fixed_query != query else None
 
 
-def get_db_connection(max_retries=5, retry_delay=5):
-    """Get database connection with retry logic"""
-    for attempt in range(max_retries):
-        try:
-            engine = create_engine(DATABASE_URL)
-            engine.connect()
-            return SQLDatabase.from_uri(DATABASE_URL)
-        except OperationalError as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"Database connection attempt {
-                               attempt + 1} failed. Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-            else:
-                raise Exception(
-                    "Failed to connect to the database after multiple attempts") from e
+def get_db_connection():
+    """Get a database connection with proper cleanup."""
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=3,  # Reduced from 5
+        max_overflow=5,  # Reduced from 10
+        pool_timeout=30,
+        pool_pre_ping=True,
+        pool_recycle=1800  # Recycle connections after 30 minutes
+    )
+    try:
+        with engine.connect() as connection:
+            yield connection
+    finally:
+        engine.dispose()
+
+
+def execute_query(query: str, params: dict = None):
+    """Execute a query with proper connection handling."""
+    with contextlib.closing(get_db_connection()) as connection:
+        result = connection.execute(text(query), params or {})
+        return result.fetchall()
 
 
 # Initialize cache manager
