@@ -932,7 +932,16 @@ class AgentManager:
                         # Try to execute the query - this will validate it
                         sql_results = self._execute_sql_query(sql_query)
 
-                        # If we reach here, the query succeeded
+                        # Check if the results are empty
+                        if not sql_results and isinstance(sql_results, list):
+                            logger.warning(
+                                f"SQL query returned no results: {sql_query}")
+                            if sql_retry_count < max_sql_retries - 1:
+                                last_sql_error = "Query returned no results"
+                                sql_retry_count += 1
+                                continue
+
+                        # If we reach here, the query succeeded or we've accepted empty results on final retry
                         logger.info(
                             f"SQL query executed successfully after {sql_retry_count+1} attempts")
                         break
