@@ -1514,6 +1514,13 @@ class AgentManager:
             # Clean up the SQL query
             sql_query = self._sanitize_sql_query(sql_query)
 
+            # Final check to ensure LIMIT 20 is present
+            if not re.search(r'\bLIMIT\s+\d+', sql_query, re.IGNORECASE):
+                # Remove any trailing semicolon
+                sql_query = sql_query.rstrip(';').strip()
+                # Add LIMIT 20 to the end
+                sql_query = f"{sql_query} LIMIT 20"
+
             return sql_query
         except Exception as e:
             logger.error(f"Error generating SQL query: {e}")
@@ -1552,6 +1559,9 @@ class AgentManager:
                 parts = sql_query.split("LIMIT")
                 if len(parts) > 2:
                     sql_query = parts[0] + "LIMIT" + parts[-1]
+            else:
+                # Add LIMIT 20 if no LIMIT clause is present
+                sql_query = f"{sql_query} LIMIT 20"
 
             # Convert exact matches for phone numbers to LIKE statements
             # Look for patterns like: telephone_number = '1234567890' or telephone_number='1234567890'

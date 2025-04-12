@@ -61,61 +61,15 @@ sudo ufw enable
 
 ## Application Deployment
 
-### 1. Infrastructure Setup
-First, deploy the infrastructure using infrastructure-compose.yml:
+### 1. Create Project Directory
 ```bash
-# Deploy infrastructure (database and cron)
-docker-compose -f infrastructure-compose.yml up -d
+# Create directory
+mkdir -p ~/ai-analyzer/app
+cd ~/ai-analyzer/app
 ```
 
-### 2. Database Initialization
-Create `init-db.sh`:
-```bash
-#!/bin/bash
-
-# Wait for database to be ready
-echo "Waiting for database to be ready..."
-until PGPASSWORD=$POSTGRES_PASSWORD psql -h $DB_HOST -U $POSTGRES_USER -d $POSTGRES_DB -c '\q'; do
-  echo "Database is unavailable - sleeping"
-  sleep 1
-done
-echo "Database is ready!"
-
-# Run database migrations
-echo "Running database migrations..."
-python -m alembic upgrade head
-
-# Create admin user if it doesn't exist
-echo "Creating admin user..."
-python -c "
-from ai_analyzer.models import User
-from ai_analyzer.database import SessionLocal
-from ai_analyzer.security import get_password_hash
-
-db = SessionLocal()
-if not db.query(User).filter_by(username='admin').first():
-    admin_user = User(
-        username='admin',
-        password_hash=get_password_hash('${ADMIN_PASSWORD}'),
-        role='admin',
-        tenant_code='tientelecom'
-    )
-    db.add(admin_user)
-    db.commit()
-    print('Admin user created successfully')
-else:
-    print('Admin user already exists')
-db.close()
-"
-```
-
-Make it executable:
-```bash
-chmod +x init-db.sh
-```
-
-### 3. Update Environment File
-Update the `.env` file to include admin credentials:
+### 2. Create Environment File
+Create a `.env` file with the following content:
 ```env
 POSTGRES_USER=your_postgres_user
 POSTGRES_PASSWORD=your_secure_password
@@ -124,12 +78,9 @@ DB_HOST=database
 DB_PORT=5432
 OPENAI_API_KEY=your_openai_api_key
 AI_ANALYZER_OPENAI_API_KEY=your_openai_api_key
-
-# Add admin credentials
-ADMIN_PASSWORD=your_secure_admin_password
 ```
 
-### 4. Create Application Docker Compose File
+### 3. Create Docker Compose File
 Create `docker-compose.yml`:
 ```yaml
 version: '3.8'
@@ -165,37 +116,47 @@ services:
       - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
     volumes:
       - ./backend:/usr/src/app
-    depends_on:
-      - database
-    command: >
-      sh -c "./init-db.sh &&
-             uvicorn ai_analyzer.main:app --host 0.0.0.0 --port 8000"
+    command: ["uvicorn", "ai_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
     networks:
       - app-network
 
+  database:
+    image: postgres:13
+    container_name: postgres_db
+    ports:
+      - "5433:5432"
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+    name: ai_analyzer_postgres_data
+
 networks:
   app-network:
-    external: true
-    name: infrastructure_app-network
+    driver: bridge
 ```
 
-### 5. Create Deployment Script
+### 4. Create Deployment Script
 Create `deploy.sh`:
 ```bash
 #!/bin/bash
 
-# Ensure infrastructure is running
-if ! docker network ls | grep -q infrastructure_app-network; then
-    echo "Infrastructure network not found. Starting infrastructure..."
-    docker-compose -f infrastructure-compose.yml up -d
-    sleep 10  # Wait for infrastructure to initialize
-fi
-
-# Stop running application containers
+# Stop running containers
 docker-compose down
 
-# Build and start application containers
+# Build and start containers
 docker-compose up -d --build
 
 # Show container status
@@ -214,15 +175,6 @@ Run deployment
 ```bash
 ./deploy.sh
 ```
-
-chmod +x deploy-infrastructure.sh
-chmod +x deploy-app.sh
-
-# First deploy infrastructure
-# ./deploy-infrastructure.sh
-
-# Once infrastructure is running, deploy the application
-./deploy-app.sh
 
 ## Backup Configuration
 

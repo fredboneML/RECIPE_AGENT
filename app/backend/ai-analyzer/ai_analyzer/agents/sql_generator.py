@@ -144,6 +144,7 @@ class SQLGeneratorAgent(BaseAgent):
                         FROM base_data
                         GROUP BY call_date
                         ORDER BY sentiment_score DESC
+                        LIMIT 20
                     )
 
                     3. For trending topics with issue analysis, always use this pattern:
@@ -173,6 +174,7 @@ class SQLGeneratorAgent(BaseAgent):
                         GROUP BY clean_topic
                         HAVING COUNT(*) > 5
                         ORDER BY recent_mentions DESC, mention_count DESC
+                        LIMIT 20
                     )
 
                     4. For time-based analysis, include percentage changes:
@@ -209,6 +211,8 @@ class SQLGeneratorAgent(BaseAgent):
                             END as weekly_percentage_change
                         FROM time_periods
                         GROUP BY clean_topic, clean_sentiment
+                        ORDER BY weekly_percentage_change DESC
+                        LIMIT 20
                     )
 
                     Available tables: {table_info}
@@ -221,7 +225,7 @@ class SQLGeneratorAgent(BaseAgent):
                     4. INCLUDE percentages, aggregated metrics, and counts whenever possible
                     5. Include insights about specific issues within topics when relevant
                     6. ALWAYS include trend comparisons or time-based patterns when possible
-                    7. Limit results appropriately (e.g., TOP N, LIMIT)
+                    7. ALWAYS add LIMIT 20 at the end of the query to prevent context length issues
                     8. NEVER use tables or columns that are not explicitly listed in the table_info above
                     9. If a required table or column is not available in table_info, you must acknowledge this limitation and suggest an alternative approach using only available tables and columns
 
@@ -321,6 +325,23 @@ class SQLGeneratorAgent(BaseAgent):
             # Check for score column usage and provide clear error
             if "score" in sql.lower():
                 return False, "The 'score' column does not exist. Use 'clean_sentiment' instead and convert to numeric values using CASE statement as shown in the examples."
+
+            # CRITICAL FIX: Always ensure LIMIT is present
+            has_limit = bool(re.search(r'\bLIMIT\s+\d+', sql, re.IGNORECASE))
+            if not has_limit:
+                # Remove any trailing semicolon
+                sql = sql.rstrip(';').strip()
+
+                # Check if there's an ORDER BY clause
+                if "ORDER BY" in sql.upper():
+                    # Add LIMIT after ORDER BY
+                    sql = f"{sql} LIMIT 20"
+                else:
+                    # Add ORDER BY and LIMIT at the end
+                    sql = f"{sql} ORDER BY 1 LIMIT 20"
+
+                column_errors.append(
+                    "Added LIMIT 20 clause to prevent context length issues")
 
             # Fix incorrect TRIM function with multiple arguments
             if "TRIM(t.topic," in sql:
@@ -469,8 +490,8 @@ class SQLGeneratorAgent(BaseAgent):
                                                 sql = sql.replace(
                                                     f"{group_by_clause}{group_by_columns}", new_group_by)
 
-                                    column_errors.append(
-                                        "Added call_direction to phone number query results")
+                                        column_errors.append(
+                                            "Added call_direction to phone number query results")
 
                         # We found and replaced a pattern, so break the loop
                         break
@@ -588,6 +609,7 @@ class SQLGeneratorAgent(BaseAgent):
                     Base CTE present: {has_base_cte}\n\
                     Tenant filter present: {has_tenant_filter} (pattern: {tenant_filter_pattern})\n\
                     Correct table name: {has_correct_table}\n\
+                    Has LIMIT clause: {has_limit}\n\
                     SQL Being Validated:\n\
                     {sql}\n\
                     {column_errors if column_errors else ''}")
@@ -600,6 +622,30 @@ class SQLGeneratorAgent(BaseAgent):
 
             if not has_correct_table:
                 return False, f"SQL must use the correct table name: {table_name}"
+
+            # CRITICAL FIX: Ensure LIMIT is present as final check
+            # At this point, we should already have a LIMIT clause from the earlier check,
+            # but let's do a final verification to be absolutely sure
+            if not re.search(r'\bLIMIT\s+\d+', sql, re.IGNORECASE):
+                # Remove any trailing semicolon
+                sql = sql.rstrip(';').strip()
+
+                # Add LIMIT 20 to the end
+                sql = f"{sql} LIMIT 20"
+
+                column_errors.append(
+                    "Added final LIMIT 20 clause to prevent context length issues")
+
+            # Add semicolon at the end if not present
+            if not sql.rstrip().endswith(';'):
+                sql = f"{sql};"
+
+            # Final check to ensure LIMIT 20 is present
+            if not re.search(r'\bLIMIT\s+\d+', sql, re.IGNORECASE):
+                # Remove any trailing semicolon
+                sql = sql.rstrip(';').strip()
+                # Add LIMIT 20 to the end
+                sql = f"{sql} LIMIT 20;"
 
             return True, sql
 
@@ -661,6 +707,7 @@ class SQLGeneratorAgent(BaseAgent):
                         7. Do not modify these requirements under any circumstances
                         8. NEVER use columns that don't exist in the database schema
                         9. The 'score' column DOES NOT EXIST - use sentiment-related columns instead
+                        10. EVERY query MUST end with: LIMIT 20;
                         
                         Example of correct format:
                         WITH base_data AS (
@@ -675,7 +722,7 @@ class SQLGeneratorAgent(BaseAgent):
                             FROM base_data
                             GROUP BY clean_topic
                         )
-                        SELECT * FROM analysis;
+                        SELECT * FROM analysis LIMIT 20;
                         """},
                     {"role": "user", "content": query}
                 ]
@@ -722,6 +769,11 @@ class SQLGeneratorAgent(BaseAgent):
                         if retry_count > 0:
                             logger.info(
                                 f"Successfully generated valid SQL after {retry_count+1} attempts")
+
+                        # Ensure LIMIT 20 is present in the final output
+                        if not re.search(r'\bLIMIT\s+20\b', validation_result, re.IGNORECASE):
+                            validation_result = f"{validation_result.rstrip(';').strip()} LIMIT 20;"
+
                         return validation_result
                     else:
                         # Store the error for the next retry
