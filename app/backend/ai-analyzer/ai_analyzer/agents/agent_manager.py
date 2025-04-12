@@ -224,6 +224,13 @@ class AgentManager:
             
             {conversation}
             
+            IMPORTANT GUIDELINES:
+            1. Maintain the same entities (people, companies, phone numbers) mentioned in the previous questions and responses
+            2. Keep the same temporal context (time period, date range) from the original questions
+            3. Dig deeper into specific aspects mentioned in the previous responses
+            4. Focus on details that were not fully explored in the previous answers
+            5. Ensure questions build naturally on what has already been discussed
+            
             {'Genereer 3 vervolgvragen in het Nederlands:' if is_dutch else 'FOLLOW-UP QUESTIONS:'}
             """
 
