@@ -977,6 +977,10 @@ class AgentManager:
                     logger.info(f"First {rows_to_log} rows of SQL results:")
                     for i in range(rows_to_log):
                         logger.info(f"Row {i+1}: {result_lines[i]}")
+
+                    # Log the first 50 characters of SQL results
+                    logger.info(
+                        f"First 50 characters of SQL results: {sql_results[:50]}...")
                 else:
                     logger.info(
                         "No SQL results to log or results are not in string format")
