@@ -718,6 +718,8 @@ class AgentManager:
 
     def process_query(self, query: str, conversation_id: Optional[str] = None) -> str:
         """Process query with proper transaction handling and context management."""
+        import time
+        start_time_total = time.time()
         try:
             # Start a new transaction for the entire process if none exists
             if not self.session.in_transaction():
@@ -725,22 +727,31 @@ class AgentManager:
 
             try:
                 # Check cache first
+                start_time_cache = time.time()
                 cached_response = self._check_query_cache(query)
                 if cached_response:
                     logger.info("Using cached response")
+                    logger.info(
+                        f"TIMING: Cache check took {time.time() - start_time_cache:.3f} seconds")
                     return cached_response
+                logger.info(
+                    f"TIMING: Cache check took {time.time() - start_time_cache:.3f} seconds")
 
                 # Detect language of the query
+                start_time_lang = time.time()
                 detected_language = self._detect_language(query)
                 logger.info(f"Detected language: {detected_language}")
+                logger.info(
+                    f"TIMING: Language detection took {time.time() - start_time_lang:.3f} seconds")
 
                 # Get conversation history if conversation_id is provided
                 conversation_context = ""
                 previous_identifiers = set()  # Store any identifiers from previous questions
                 previous_messages = []  # Initialize previous_messages as an empty list
                 previous_where_clauses = []  # Store WHERE clauses from previous questions
-                temporal_filters = ""  # Store temporal filters separately
+                temporal_filters = ""
 
+                start_time_history = time.time()
                 if conversation_id and self.session:
                     try:
                         # Query previous messages from this conversation
@@ -871,19 +882,28 @@ class AgentManager:
                         logger.error(
                             f"Error retrieving conversation history: {e}")
                         logger.exception("Detailed error:")
+                logger.info(
+                    f"TIMING: Conversation history loading took {time.time() - start_time_history:.3f} seconds")
 
                 # 1. Search for relevant transcriptions using vector search with circuit breaker
+                start_time_search = time.time()
                 similar_transcripts = self.search_transcriptions_safe(query)
+                logger.info(
+                    f"TIMING: Vector search took {time.time() - start_time_search:.3f} seconds")
 
                 if not similar_transcripts:
                     return "I couldn't find any relevant transcriptions to answer your question. Could you please provide more details or try a different query?"
 
                 # 2. Check for entity corrections (e.g., partial names)
+                start_time_entity = time.time()
                 entity_corrections = self._detect_entity_corrections(
                     query, similar_transcripts)
+                logger.info(
+                    f"TIMING: Entity correction detection took {time.time() - start_time_entity:.3f} seconds")
 
                 # 3. Generate SQL query based on the natural language query and similar transcripts
                 # Add retry logic for SQL generation
+                start_time_sql = time.time()
                 max_sql_retries = 3
                 sql_retry_count = 0
                 last_sql_error = None
@@ -992,6 +1012,9 @@ class AgentManager:
                     logger.info(
                         "No SQL results to log or results are not in string format")
 
+                logger.info(
+                    f"TIMING: SQL generation and execution took {time.time() - start_time_sql:.3f} seconds")
+
                 # 4. Format examples for the agent
                 examples_text = self._format_example_transcriptions(
                     similar_transcripts)
@@ -1066,6 +1089,7 @@ class AgentManager:
                 """
 
                 # 9. Use the agent to generate a response
+                start_time_response = time.time()
                 try:
                     response_obj = agent.run(prompt)
 
@@ -1079,6 +1103,10 @@ class AgentManager:
                         response = str(response_obj)
 
                     logger.info(f"Final response: {response[:100]}...")
+                    logger.info(
+                        f"TIMING: Response generation took {time.time() - start_time_response:.3f} seconds")
+                    logger.info(
+                        f"TIMING: Total query processing took {time.time() - start_time_total:.3f} seconds")
 
                     # Cache the response
                     self._cache_query_response(query, response)

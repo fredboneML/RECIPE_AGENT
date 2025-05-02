@@ -33,8 +33,13 @@ def get_model_config_from_env() -> Dict[str, Any]:
         "api_key": os.getenv("API_KEY", ""),
         "groq_model_name": os.getenv("GROQ_MODEL_NAME"),
         "groq_api_key": os.getenv("GROQ_API_KEY"),
-        "groq_use_openai_compatibility": os.getenv("GROQ_USE_OPENAI_COMPATIBILITY", "false").lower() == "true"
+        "groq_use_openai_compatibility": os.getenv("GROQ_USE_OPENAI_COMPATIBILITY", "false").lower() == "true",
     }
+
+    # If using Groq with OpenAI compatibility, ensure base_url is set
+    if config['provider'] == 'groq' and config['groq_use_openai_compatibility']:
+        config['base_url'] = "https://api.groq.com/openai/v1"
+        logger.info("Setting base_url for Groq OpenAI compatibility mode")
 
     # Log configuration (excluding sensitive data)
     logger.info("Model configuration loaded:")
@@ -44,5 +49,7 @@ def get_model_config_from_env() -> Dict[str, Any]:
         logger.info(f"Groq model: {config['groq_model_name']}")
         logger.info(
             f"Groq OpenAI compatibility: {config['groq_use_openai_compatibility']}")
+        if config['groq_use_openai_compatibility']:
+            logger.info(f"Using Groq base_url: {config['base_url']}")
 
     return config

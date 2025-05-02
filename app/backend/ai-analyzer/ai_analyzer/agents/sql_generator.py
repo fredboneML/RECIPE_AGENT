@@ -7,6 +7,8 @@ import json
 import re
 from .base import BaseAgent, AgentResponse, DatabaseContext
 from ai_analyzer.utils.model_logger import ModelLogger
+import os
+from openai import OpenAI
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,8 +23,37 @@ class SQLGeneratorAgent(BaseAgent):
 
     def __init__(self, model_provider: str, model_name: str, api_key: Optional[str] = None,
                  base_context: Optional[str] = None):
-        # Call parent's __init__ with all required arguments
-        super().__init__(model_provider, model_name, api_key)
+        # Prepare kwargs for parent init
+        kwargs = {}
+
+        # Only add temperature to kwargs if not in parent method signature
+        # We'll let the parent class handle temperature directly
+
+        # Add Groq-specific settings
+        if model_provider == "groq":
+            groq_api_key = os.getenv("GROQ_API_KEY", api_key)
+            use_openai_compatibility = os.getenv(
+                "GROQ_USE_OPENAI_COMPATIBILITY", "false").lower() == "true"
+
+            # Ensure we're using the groq_api_key for the API key parameter
+            api_key = groq_api_key
+
+            # Pass OpenAI compatibility settings
+            kwargs["groq_api_key"] = groq_api_key
+            kwargs["use_openai_compatibility"] = use_openai_compatibility
+
+            # Store for later use in generate_sql_query
+            self.use_openai_compatibility = use_openai_compatibility
+
+            logger.info(
+                f"SQLGeneratorAgent: Using Groq with OpenAI compatibility: {use_openai_compatibility}")
+            logger.info(
+                "SQLGeneratorAgent: Using Groq API key (masked for security)")
+            # Don't log API keys, even partially!
+
+        # Call parent's __init__ with all required arguments and temperature as a direct parameter
+        super().__init__(model_provider, model_name, api_key, temperature=0.1, **kwargs)
+
         # Store base_context as instance variable
         self.base_context = base_context or ""
         self.days_lookback = DEFAULT_DAYS_LOOKBACK
@@ -668,6 +699,31 @@ class SQLGeneratorAgent(BaseAgent):
             last_error = None
             last_sql = None
 
+            # Ensure we have a properly configured client
+            if self.model_provider == "groq":
+                # Always use Groq for this model provider regardless of compatibility setting
+                groq_api_key = os.getenv("GROQ_API_KEY", "")
+                # Use the Groq model name from environment if available
+                model_name = os.getenv("GROQ_MODEL_NAME", self.model_name)
+
+                # Create an OpenAI client with Groq's base URL
+                client = OpenAI(
+                    api_key=groq_api_key,
+                    base_url="https://api.groq.com/openai/v1"
+                )
+                # Keep existing logging format to match other logs
+                logger.info(
+                    f"Using Groq OpenAI compatibility mode with model: {model_name}")
+                # Add extra log for debugging
+                logger.info(
+                    f"Configured API base URL: https://api.groq.com/openai/v1")
+            else:
+                # Use standard OpenAI client
+                model_name = self.model_name
+                client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                logger.info(
+                    f"Using standard OpenAI client with model: {model_name}")
+
             while retry_count < max_retries:
                 # Prepare error context for retries
                 error_context = ""
@@ -733,8 +789,8 @@ class SQLGeneratorAgent(BaseAgent):
                         f"Generating SQL query - attempt {retry_count+1}/{max_retries}")
 
                 try:
-                    response = self.client.chat.completions.create(
-                        model=self.model_name,
+                    response = client.chat.completions.create(
+                        model=model_name,
                         messages=messages,
                         temperature=0.1
                     )

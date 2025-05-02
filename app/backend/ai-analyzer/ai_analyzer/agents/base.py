@@ -15,6 +15,8 @@ from langchain.chains import LLMChain
 from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
 from langchain_groq import ChatGroq
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+import os
+from openai import OpenAI
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,36 +56,48 @@ class LangChainModelProvider:
         logger.info(
             f"Creating model with provider: {provider}, model: {model_name}")
 
-        if provider == "openai":
+        # Check environment variables for Groq compatibility
+        use_openai_compatibility = os.getenv(
+            "GROQ_USE_OPENAI_COMPATIBILITY", "false").lower() == "true"
+        if provider == "groq" and not kwargs.get('use_openai_compatibility', False):
+            kwargs['use_openai_compatibility'] = use_openai_compatibility
+            logger.info(
+                f"Setting use_openai_compatibility from environment: {use_openai_compatibility}")
+
+        # Handle Groq provider with direct OpenAI interface
+        if provider == "groq":
+            # Force use of Groq API
+            groq_model_name = os.getenv("GROQ_MODEL_NAME", model_name)
+            groq_api_key = os.getenv("GROQ_API_KEY", api_key)
+
+            # Create direct OpenAI client for Groq
+            openai_client = OpenAI(
+                api_key=groq_api_key,
+                base_url="https://api.groq.com/openai/v1"
+            )
+
+            # Use ChatOpenAI with client parameter
+            temp = kwargs.pop('temperature', 0)
+            model = ChatOpenAI(
+                model_name=groq_model_name,
+                client=openai_client,
+                temperature=temp,
+                **kwargs
+            )
+            logger.info(
+                f"Created OpenAI-compatible model with Groq backend using model: {groq_model_name}")
+            return model
+        elif provider == "openai":
+            # Remove temperature from kwargs to avoid duplicate parameter
+            temp = kwargs.pop('temperature', 0)
+
             model = ChatOpenAI(
                 model_name=model_name,
                 openai_api_key=api_key,
-                temperature=kwargs.get('temperature', 0),
+                temperature=temp,
                 **kwargs
             )
             logger.info("Created OpenAI model")
-            return model
-        elif provider == "groq":
-            # Support both native Groq and OpenAI compatibility
-            if kwargs.get('use_openai_compatibility', False):
-                logger.info("Creating Groq model with OpenAI compatibility")
-                model = ChatOpenAI(
-                    model_name=model_name,
-                    # Use groq_api_key if available
-                    api_key=kwargs.get('groq_api_key', api_key),
-                    base_url="https://api.groq.com/openai/v1",
-                    temperature=kwargs.get('temperature', 0),
-                    **kwargs
-                )
-            else:
-                logger.info("Creating native Groq model")
-                model = ChatGroq(
-                    model_name=model_name,
-                    # Use groq_api_key if available
-                    groq_api_key=kwargs.get('groq_api_key', api_key),
-                    temperature=kwargs.get('temperature', 0),
-                    **kwargs
-                )
             return model
         elif provider == "ollama":
             logger.info("Creating Ollama model")
@@ -117,6 +131,25 @@ class BaseAgent(ABC):
         # Log agent initialization
         logger.info(
             f"Initializing {self.__class__.__name__} with model provider: {model_provider}, model: {model_name}")
+
+        # Add Groq OpenAI compatibility setting from environment if not in kwargs
+        if model_provider == "groq" and "use_openai_compatibility" not in kwargs:
+            use_openai_compatibility = os.getenv(
+                "GROQ_USE_OPENAI_COMPATIBILITY", "false").lower() == "true"
+            kwargs["use_openai_compatibility"] = use_openai_compatibility
+            logger.info(
+                f"Using Groq OpenAI compatibility from environment: {use_openai_compatibility}")
+
+        # Also get the Groq API key from environment if not provided
+        if model_provider == "groq" and api_key is None:
+            api_key = os.getenv("GROQ_API_KEY", "")
+            logger.info("Using Groq API key from environment")
+
+        # Special handling for Groq to ensure direct creation with OpenAI compatibility
+        if model_provider == "groq":
+            # We'll set a flag for use_openai_compatibility that will be used for logging
+            self.use_openai_compatibility = kwargs.get(
+                'use_openai_compatibility', False)
 
         self.llm = LangChainModelProvider.create_model(
             model_provider,
