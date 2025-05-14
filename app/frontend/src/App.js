@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect, useRef } from 'react';
-
+import { useLanguage } from './LanguageContext';
 import './App.css';
 
 function App() {
@@ -21,6 +21,7 @@ function App() {
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const { t, language, setLanguage } = useLanguage();
   
   const backendUrl = window.location.hostname === 'localhost' 
     ? 'http://localhost:8000'
@@ -97,13 +98,19 @@ function App() {
     }
   }, [query]);
 
-
+  // Add effect to refetch initial questions when language changes
+  useEffect(() => {
+    if (!isAuthChecking) {
+      fetchInitialQuestions();
+    }
+  }, [language]);
 
 // In App.js, update the API call functions to include tenant code header:
 const getHeaders = () => ({
   'Content-Type': 'application/json',
   'X-Tenant-Code': localStorage.getItem('tenantCode'),
   'Accept': 'application/json',
+  'X-UI-Language': language // Add UI language preference
 });
 
 const fetchInitialQuestions = async () => {
@@ -280,7 +287,7 @@ const fetchInitialQuestions = async () => {
       <div className="sidebar">
         <img src="/logo.png" alt="Company Logo" className="small-logo" />
         <div className="new-conversation">
-          <button onClick={handleNewConversation}>New Conversation</button>
+          <button onClick={handleNewConversation}>{t('newConversation')}</button>
         </div>
         <div className="conversations">
           {conversations.map((conv) => (
@@ -303,12 +310,17 @@ const fetchInitialQuestions = async () => {
 
       <div className="content">
         <div className="top-bar">
+          <div className="language-toggle">
+            <button onClick={() => setLanguage(language === 'nl' ? 'en' : 'nl')}>
+              {language === 'nl' ? 'EN' : 'NL'}
+            </button>
+          </div>
           <div className="user-initial" onClick={() => setShowPopup(!showPopup)}>
             <button>{userInitial}</button>
           </div>
           {showPopup && (
             <div className="popup">
-              <button onClick={handleSignOff}>Sign Off</button>
+              <button onClick={handleSignOff}>{t('signOff')}</button>
             </div>
           )}
         </div>
@@ -318,7 +330,7 @@ const fetchInitialQuestions = async () => {
             <>
               <img src="/logo.png" alt="Company Logo" className="large-logo" />
               {isLoadingQuestions ? (
-                <div className="loading-questions">Loading suggestions...</div>
+                <div className="loading-questions">{t('loadingSuggestions')}</div>
               ) : (
                 <div className="question-categories">
                   {Object.entries(categories).map(([category, data]) => (
@@ -363,7 +375,7 @@ const fetchInitialQuestions = async () => {
                     </div>
                     {message.followup_questions && message.followup_questions.length > 0 && (
                       <div className="followup-suggestions">
-                        <h4>Follow-up Questions:</h4>
+                        <h4>{t('followupQuestions')}</h4>
                         <div className="common-questions">
                           {message.followup_questions.map((question, idx) => (
                             <div
@@ -383,7 +395,7 @@ const fetchInitialQuestions = async () => {
                 {/* Error message with reformulated question */}
                 {message.error && (
                   <div className="error-suggestion">
-                    <h4>Query Suggestion:</h4>
+                    <h4>{t('querySuggestion')}</h4>
                     {message.reformulated_question && (
                       <div
                         className="question-box"
@@ -394,7 +406,7 @@ const fetchInitialQuestions = async () => {
                     )}
                     {message.followup_questions && message.followup_questions.length > 0 && (
                       <div className="followup-suggestions">
-                        <h4>Try these instead:</h4>
+                        <h4>{t('tryTheseInstead')}</h4>
                         <div className="common-questions">
                           {message.followup_questions.map((question, idx) => (
                             <div
@@ -417,7 +429,7 @@ const fetchInitialQuestions = async () => {
 
           {isProcessing && (
             <div className="processing-message">
-              Processing your request...
+              {t('processingRequest')}
             </div>
           )}
 
@@ -428,13 +440,13 @@ const fetchInitialQuestions = async () => {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask your question... (Press Enter to send, Shift+Enter for new line)"
+                placeholder={t('askQuestion')}
               />
               <button 
                 onClick={isProcessing ? handleStopRequest : handleSubmit}
                 className={isProcessing ? 'stop-button' : ''}
               >
-                {isProcessing ? 'Stop' : 'Send'}
+                {isProcessing ? t('stop') : t('send')}
               </button>
             </div>
           </div>

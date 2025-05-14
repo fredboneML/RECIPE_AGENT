@@ -1,0 +1,40 @@
+export const translations = {
+  en: {
+    newConversation: "New Conversation",
+    signOff: "Sign Off",
+    processingRequest: "Processing your request...",
+    send: "Send",
+    stop: "Stop",
+    askQuestion: "Ask your question... (Press Enter to send, Shift+Enter for new line)",
+    loadingSuggestions: "Loading suggestions...",
+    followupQuestions: "Follow-up Questions:",
+    querySuggestion: "Query Suggestion:",
+    tryTheseInstead: "Try these instead:",
+    username: "Username",
+    password: "Password",
+    login: "Login",
+    loggingIn: "Logging in...",
+    enterUsername: "Enter your username",
+    enterPassword: "Enter your password",
+    connectionError: "Connection error. Please try again."
+  },
+  nl: {
+    newConversation: "Nieuw Gesprek",
+    signOff: "Afmelden",
+    processingRequest: "Verwerken van uw verzoek...",
+    send: "Versturen",
+    stop: "Stoppen",
+    askQuestion: "Stel uw vraag... (Druk op Enter om te verzenden, Shift+Enter voor nieuwe regel)",
+    loadingSuggestions: "Suggesties laden...",
+    followupQuestions: "Vervolgvragen:",
+    querySuggestion: "Vraag Suggestie:",
+    tryTheseInstead: "Probeer in plaats daarvan:",
+    username: "Gebruikersnaam",
+    password: "Wachtwoord",
+    login: "Inloggen",
+    loggingIn: "Bezig met inloggen...",
+    enterUsername: "Voer uw gebruikersnaam in",
+    enterPassword: "Voer uw wachtwoord in",
+    connectionError: "Verbindingsfout. Probeer het opnieuw."
+  }
+}; 

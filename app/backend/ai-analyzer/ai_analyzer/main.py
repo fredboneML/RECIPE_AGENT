@@ -701,6 +701,9 @@ async def get_initial_questions(
         if not tenant_code:
             raise HTTPException(status_code=401, detail="Tenant code required")
 
+        # Get UI language preference from headers (default to Dutch)
+        ui_language = request.headers.get('X-UI-Language', 'nl')
+
         # Create a hardcoded response with categories structured exactly as the frontend expects
         categories = {
             "Trending Topics": {
@@ -765,10 +768,74 @@ async def get_initial_questions(
             }
         }
 
+        # Dutch translations
+        dutch_categories = {
+            "Trending Onderwerpen": {
+                "description": "Analyseer populaire gespreksonderwerpen",
+                "questions": [
+                    "Wat zijn de meest besproken onderwerpen deze maand?",
+                    "Welke onderwerpen vertonen stijgende trends?",
+                    "Welke onderwerpen worden vaak genoemd in positieve gesprekken?",
+                    "Hoe zijn onderwerppatronen in de loop van de tijd veranderd?",
+                    "Wat zijn de opkomende onderwerpen uit recente gesprekken?"
+                ]
+            },
+            "Klantsentiment": {
+                "description": "Begrijp trends in klanttevredenheid",
+                "questions": [
+                    "Hoe is het algehele sentiment in de loop van de tijd veranderd?",
+                    "What topics generate the most positive feedback?",
+                    "Which issues need immediate attention based on sentiment?",
+                    "Show me the distribution of sentiments across topics",
+                    "What topics have improving sentiment trends?"
+                ]
+            },
+            "Gesprekanalyse": {
+                "description": "Analyseer gesprekspatronen en -duur",
+                "questions": [
+                    "Wat is de gemiddelde gespreksduur per onderwerp?",
+                    "Welke onderwerpen leiden meestal tot langere gesprekken?",
+                    "Toon me de trends in gespreksvolume per dagdeel",
+                    "Wat is de verdeling van gespreksrichtingen per onderwerp?",
+                    "Welke dagen hebben de hoogste gespreksvolumes?"
+                ]
+            },
+            "Onderwerpscorrelaties": {
+                "description": "Ontdek relaties tussen onderwerpen",
+                "questions": [
+                    "Welke onderwerpen komen vaak samen voor?",
+                    "Welke onderwerpen zijn gerelateerd aan technische problemen?",
+                    "Toon me onderwerpen die vaak leiden tot vervolgoproepen",
+                    "Welke onderwerpen komen vaak voor bij klachten?",
+                    "Welke onderwerpen hebben vergelijkbare sentimentpatronen?"
+                ]
+            },
+            "Prestatiemetrieken": {
+                "description": "Analyseer belangrijke prestatie-indicatoren",
+                "questions": [
+                    "Wat is ons algemene percentage klanttevredenheid?",
+                    "Toon me onderwerpen met de hoogste oplossingspercentages",
+                    "Welke onderwerpen hebben meer aandacht nodig op basis van metrieken?",
+                    "Wat zijn onze best presterende gebieden?",
+                    "Toon me trends in efficiëntie van gespreksafhandeling"
+                ]
+            },
+            "Tijdgebaseerde Analyse": {
+                "description": "Begrijp tijdelijke patronen",
+                "questions": [
+                    "Wat zijn de drukste tijden voor gesprekken?",
+                    "Hoe variëren onderwerpen per tijdstip van de dag?",
+                    "Toon me wekelijkse trends in gespreksvolumes",
+                    "Welke patronen ontstaan tijdens piekuren?",
+                    "Welke dagen tonen de beste sentimentscores?"
+                ]
+            }
+        }
+
         # Return in the exact format the frontend expects
         return {
             "success": True,
-            "categories": categories
+            "categories": dutch_categories if ui_language == 'nl' else categories
         }
     except Exception as e:
         logger.error(f"Error generating initial questions: {e}")
@@ -782,6 +849,15 @@ async def get_initial_questions(
                     "What are the most common topics in our calls?",
                     "How has customer sentiment changed over time?",
                     "Show me the breakdown of call topics by sentiment"
+                ]
+            }
+        } if ui_language == 'en' else {
+            "Algemene Analyse": {
+                "description": "Basis analysevragen",
+                "questions": [
+                    "Wat zijn de meest voorkomende onderwerpen in onze gesprekken?",
+                    "Hoe is het klantsentiment veranderd in de loop van de tijd?",
+                    "Toon me de verdeling van gespreksonderwerpen per sentiment"
                 ]
             }
         }
