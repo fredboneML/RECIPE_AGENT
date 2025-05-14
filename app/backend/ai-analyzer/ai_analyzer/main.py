@@ -784,10 +784,10 @@ async def get_initial_questions(
                 "description": "Begrijp trends in klanttevredenheid",
                 "questions": [
                     "Hoe is het algehele sentiment in de loop van de tijd veranderd?",
-                    "What topics generate the most positive feedback?",
-                    "Which issues need immediate attention based on sentiment?",
-                    "Show me the distribution of sentiments across topics",
-                    "What topics have improving sentiment trends?"
+                    "Welke onderwerpen genereren de meeste positieve feedback?",
+                    "Welke kwesties vereisen onmiddellijke aandacht op basis van sentiment?",
+                    "Toon me de verdeling van sentimenten over onderwerpen",
+                    "Welke onderwerpen hebben verbeterende sentimenttrends?"
                 ]
             },
             "Gesprekanalyse": {
