@@ -59,6 +59,9 @@ def load_env_once():
             'READ_USER_PASSWORD': os.getenv('READ_USER_PASSWORD'),
             'TENANT_CODE': os.getenv('TENANT_CODE'),
             'LAST_ID': os.getenv('LAST_ID'),
+            'OPENAI_MODEL': os.getenv('OPENAI_MODEL'),
+            # Added default value
+            'MODEL_NAME': os.getenv('MODEL_NAME', 'gpt-4o-mini-2024-07-18'),
         }
 
         # Validate required configuration
@@ -88,6 +91,8 @@ try:
     DATABASE_URL = f"postgresql://{config['POSTGRES_USER']}:{config['POSTGRES_PASSWORD']}@{
         config['DB_HOST']}:{config['DB_PORT']}/{config['POSTGRES_DB']}"
     DATA_DIR = config['DATA_DIR']
+    # Export MODEL_NAME for other modules to use
+    MODEL_NAME = config['MODEL_NAME']
 
 except Exception as e:
     logger.error(f"Failed to initialize configuration: {e}")

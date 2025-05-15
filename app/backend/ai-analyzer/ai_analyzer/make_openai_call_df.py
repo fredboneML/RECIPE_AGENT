@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime
 import os
 from pathlib import Path
-from ai_analyzer.config import DATA_DIR
+from ai_analyzer.config import DATA_DIR, MODEL_NAME
 
 # Get the current date
 current_date = datetime.now().date().strftime("%Y-%m-%d")
@@ -34,7 +34,7 @@ def debug_paths():
         print(f"Directory not found: {os.path.dirname(PROMPT_TEMPLATE_PATH)}")
 
 
-def make_openai_call_df(df, model="gpt-4o-mini-2024-07-18", n=None):
+def make_openai_call_df(df, model=MODEL_NAME, n=None):
     # Print debug information
     debug_paths()
 

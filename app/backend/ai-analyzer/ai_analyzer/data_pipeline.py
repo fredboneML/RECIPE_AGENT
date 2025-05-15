@@ -13,6 +13,8 @@ import logging
 from psycopg2 import connect
 import time
 from ai_analyzer.utils import update_tenant_vector_db
+from contextlib import contextmanager
+from pybreaker import CircuitBreaker
 
 # Enhanced logging setup
 logging.basicConfig(
@@ -28,32 +30,59 @@ logger = logging.getLogger('data_pipeline')
 # Get the current date
 current_date = datetime.now().date().strftime("%Y-%m-%d")
 
-# Create engine and session factories
+# Create circuit breaker for database operations
+db_breaker = CircuitBreaker(fail_max=5, reset_timeout=60)
+
+# Create engine and session factories with optimized pooling settings
 engine = create_engine(
     DATABASE_URL,
-    pool_size=5,
+    pool_size=5,  # Keep pool size modest
     max_overflow=10,
     pool_timeout=30,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    pool_recycle=1800  # Recycle connections after 30 minutes
 )
 Session = sessionmaker(bind=engine)
 
 # Base for ORM models
 Base = declarative_base()
 
-# Add the missing get_db_session function
 
-
+@contextmanager
 def get_db_session():
     """
-    Create and return a database session.
-
-    Returns:
-        sqlalchemy.orm.Session: A database session
+    Create and return a database session with proper resource management.
+    Uses context manager to ensure proper cleanup.
     """
-    engine = create_engine(DATABASE_URL)
-    Session = sessionmaker(bind=engine)
-    return Session()
+    session = None
+    try:
+        session = Session()
+        yield session
+    except Exception as e:
+        if session:
+            session.rollback()
+        logger.error(f"Database session error: {e}")
+        raise
+    finally:
+        if session:
+            session.close()
+
+
+def cleanup_idle_connections():
+    """Close idle database connections."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                AND pid <> pg_backend_pid()
+                AND state = 'idle'
+                AND state_change < current_timestamp - INTERVAL '30 minutes'
+            """))
+            logger.info("Cleaned up idle database connections")
+    except Exception as e:
+        logger.error(f"Error cleaning up idle connections: {e}")
 
 
 class Transcription(Base):
@@ -200,7 +229,7 @@ def load_data_from_csv():
 
 
 def process_data_pipeline(session, tenant_code):
-    """Process data pipeline for a specific tenant"""
+    """Process data pipeline for a specific tenant with proper session management"""
     try:
         logger.info(f"Processing pipeline for tenant: {tenant_code}")
 
@@ -430,8 +459,11 @@ def main():
             logger.error("Failed to connect to database")
             sys.exit(1)
 
-        # Create session and process each tenant
-        with Session() as session:
+        # Clean up any idle connections before starting
+        cleanup_idle_connections()
+
+        # Process each tenant with proper session management
+        with get_db_session() as session:
             try:
                 # Get all active tenants
                 tenant_results = session.execute(text("""
@@ -479,6 +511,8 @@ def main():
             f"Pipeline execution failed after {elapsed_time:.2f} seconds: {str(e)}")
         raise
     finally:
+        # Clean up any remaining idle connections
+        cleanup_idle_connections()
         logger.info("==========  DATA PIPELINE EXECUTION FINISHED  ==========")
 
 
