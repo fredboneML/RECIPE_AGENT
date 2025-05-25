@@ -110,7 +110,8 @@ const getHeaders = () => ({
   'Content-Type': 'application/json',
   'X-Tenant-Code': localStorage.getItem('tenantCode'),
   'Accept': 'application/json',
-  'X-UI-Language': language // Add UI language preference
+  'X-UI-Language': language,
+  'Authorization': `Bearer ${localStorage.getItem('token')}`, // Add this line
 });
 
 const fetchInitialQuestions = async () => {
@@ -176,9 +177,15 @@ const fetchInitialQuestions = async () => {
     abortControllerRef.current = new AbortController();
     
     try {
+      // Get the token from localStorage
+      const token = localStorage.getItem('token');
+      
       const response = await fetch(`${backendUrl}/api/query`, {
         method: 'POST',
-        headers: getHeaders(),
+        headers: {
+          ...getHeaders(),
+          'Authorization': `Bearer ${token}`, // Add this line
+        },
         body: JSON.stringify({ 
           query,
           conversation_id: currentConversation?.id 

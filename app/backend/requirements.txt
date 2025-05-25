@@ -80,3 +80,6 @@ pybreaker>=0.8.0
 
 langchain-groq
 groq
+
+# JWT Authentication
+python-jose[cryptography]==3.3.0

@@ -43,7 +43,8 @@ function Login() {
             const data = await response.json();
 
             if (response.ok && data.success) {
-                localStorage.setItem('token', data.token || 'dummy-token');
+                // Store the access token
+                localStorage.setItem('token', data.access_token);
                 localStorage.setItem('userName', username.trim());
                 localStorage.setItem('tenantCode', data.tenant_code);
                 localStorage.setItem('user', JSON.stringify({

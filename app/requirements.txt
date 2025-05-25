@@ -81,3 +81,6 @@ tzdata==2024.2
 urllib3>=1.26.14,<3
 uvicorn==0.32.0
 yarl==1.15.4
+
+# JWT Authentication
+python-jose[cryptography]==3.3.0

@@ -1,4 +1,18 @@
 # ai_analyzer/main.py
+from ai_analyzer.utils.singleton_resources import ResourceManager  # Fix the import path
+from ai_analyzer.data_pipeline import get_db_session
+from ai_analyzer.agents.workflow import CallAnalysisWorkflow  # Add this import
+from ai_analyzer.agents import AgentManager  # Import our new AgentManager
+from ai_analyzer.cache_manager import DatabaseCacheManager
+from ai_analyzer.data_import_postgresql import (
+    run_data_import,
+    User,
+    UserMemory,
+    store_conversation,
+    get_user_conversations,
+    get_conversation_messages
+)
+from ai_analyzer.config import config, DATABASE_URL
 from fastapi import FastAPI, Request, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, text, func, and_, UniqueConstraint, Boolean
@@ -11,27 +25,100 @@ import logging
 import uuid
 from datetime import datetime, timezone, timedelta
 from psycopg2 import connect
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 import psycopg2
 import json
 import os
+from jose import JWTError, jwt
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional
+
+# JWT Configuration
+# Change this in production!
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+
+# Security scheme for token authentication
+security = HTTPBearer()
+
+# Token models
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    username: str
+    tenant_code: str
+    role: str
+
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+    tenant_code: Optional[str] = None
+    role: Optional[str] = None
+
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Create a new JWT token"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+# Dependency to get the database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)) -> User:
+    logger = logging.getLogger(__name__)
+    logger.info(f"get_current_user: Received credentials: {credentials}")
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        token = credentials.credentials
+        logger.info(f"get_current_user: Decoding token: {token}")
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        logger.info(f"get_current_user: Token payload: {payload}")
+        if username is None:
+            logger.warning(
+                "get_current_user: Username missing in token payload")
+            raise credentials_exception
+        token_data = TokenData(
+            username=username,
+            tenant_code=payload.get("tenant_code"),
+            role=payload.get("role")
+        )
+    except JWTError as e:
+        logger.error(f"get_current_user: JWTError: {e}")
+        raise credentials_exception
+
+    user = db.query(User).filter(User.username == token_data.username).first()
+    if user is None:
+        logger.warning(
+            f"get_current_user: No user found for username: {token_data.username}")
+        raise credentials_exception
+    logger.info(
+        f"get_current_user: Authenticated user: {user.username}, tenant: {user.tenant_code}, role: {user.role}")
+    return user
+
 
 # Update internal imports
-from ai_analyzer.config import config, DATABASE_URL
-from ai_analyzer.data_import_postgresql import (
-    run_data_import,
-    User,
-    UserMemory,
-    store_conversation,
-    get_user_conversations,
-    get_conversation_messages
-)
-from ai_analyzer.cache_manager import DatabaseCacheManager
-from ai_analyzer.agents import AgentManager  # Import our new AgentManager
-from ai_analyzer.agents.workflow import CallAnalysisWorkflow  # Add this import
-from ai_analyzer.data_pipeline import get_db_session
-from ai_analyzer.utils.singleton_resources import ResourceManager  # Fix the import path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -329,16 +416,6 @@ class User(Base):
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-# Dependency to get the database session
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 # Hashing passwords
 
 
@@ -482,14 +559,27 @@ async def login(request: Request, db: Session = Depends(get_db)):
                 detail="Invalid credentials"
             )
 
+        # Create access token
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={
+                "sub": user.username,
+                "tenant_code": user.tenant_code,
+                "role": user.role
+            },
+            expires_delta=access_token_expires
+        )
+
         # If we get here, authentication is successful
         logger.info(
             f"Successful login for user {username} with tenant {user.tenant_code}")
         return {
             "success": True,
-            "role": user.role,
+            "access_token": access_token,
+            "token_type": "bearer",
             "username": user.username,
-            "tenant_code": user.tenant_code,  # Return tenant_code from user record
+            "tenant_code": user.tenant_code,
+            "role": user.role,
             "permissions": {
                 "canWrite": user.has_write_permission()
             }
@@ -544,26 +634,34 @@ class QueryRequest(BaseModel):
 
 
 @app.post("/api/query")
-async def process_query(request: Request, db_session: Session = Depends(get_db)):
-    """Process a natural language query"""
+async def process_query(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db_session: Session = Depends(get_db)
+):
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"/api/query: Received request from user: {getattr(current_user, 'username', None)} tenant: {getattr(current_user, 'tenant_code', None)} role: {getattr(current_user, 'role', None)}")
     try:
         # Parse request body
         body = await request.json()
+        logger.info(f"/api/query: Request body: {body}")
         query = body.get("query", "")
-        tenant_code = body.get("tenant_code", "")
         conversation_id = body.get("conversation_id", "")
+
+        # Use tenant code from the authenticated user
+        tenant_code = current_user.tenant_code
 
         # Validate input
         if not query:
+            logger.warning("/api/query: Query is missing in request body")
             raise HTTPException(status_code=400, detail="Query is required")
 
-        # Get tenant code from request or use default
-        if not tenant_code:
-            tenant_code = get_tenant_code_from_request(request)
-
-        logger.info(f"Processing query: '{query}' for tenant: {tenant_code}")
+        logger.info(
+            f"/api/query: Processing query: '{query}' for tenant: {tenant_code}")
         if conversation_id:
-            logger.info(f"Continuing conversation: {conversation_id}")
+            logger.info(
+                f"/api/query: Continuing conversation: {conversation_id}")
 
         # Create agent manager
         agent_manager = AgentManager(
@@ -581,7 +679,8 @@ async def process_query(request: Request, db_session: Session = Depends(get_db))
             conversation_id = str(uuid.uuid4())
 
         try:
-            logger.info(f"Storing conversation with ID: {conversation_id}")
+            logger.info(
+                f"/api/query: Storing conversation with ID: {conversation_id}")
             store_conversation(
                 db_session,
                 tenant_code,  # Use tenant_code as user_id
@@ -590,13 +689,15 @@ async def process_query(request: Request, db_session: Session = Depends(get_db))
                 response,
                 followup_questions=followup_questions
             )
-            logger.info("Conversation stored successfully")
+            logger.info("/api/query: Conversation stored successfully")
         except Exception as e:
-            logger.error(f"Error storing conversation: {e}")
-            logger.exception("Detailed error:")
+            logger.error(f"/api/query: Error storing conversation: {e}")
+            logger.exception("/api/query: Detailed error:")
             # Continue even if storage fails
 
         # Return a response with the exact fields the frontend expects
+        logger.info(
+            f"/api/query: Returning response for conversation_id: {conversation_id}")
         return {
             "response": response,
             "conversation_id": conversation_id,
@@ -604,8 +705,8 @@ async def process_query(request: Request, db_session: Session = Depends(get_db))
         }
 
     except Exception as e:
-        logger.error(f"Error processing query: {e}")
-        logger.exception("Detailed error:")
+        logger.error(f"/api/query: Error processing query: {e}")
+        logger.exception("/api/query: Detailed error:")
         raise HTTPException(status_code=500, detail=str(e))
 
 

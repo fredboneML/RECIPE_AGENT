@@ -6,3 +6,4 @@ model/bertopic_model
 __pycache__/
 app/database/data/base
 .venv
+venv
