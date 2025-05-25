@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from './LanguageContext';
 import './App.css';
+import tokenManager from './tokenManager';
 
 function App() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -105,40 +106,43 @@ function App() {
     }
   }, [language]);
 
-// In App.js, update the API call functions to include tenant code header:
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-  'X-Tenant-Code': localStorage.getItem('tenantCode'),
-  'Accept': 'application/json',
-  'X-UI-Language': language,
-  'Authorization': `Bearer ${localStorage.getItem('token')}`, // Add this line
-});
+  useEffect(() => {
+    tokenManager.scheduleRefresh();
+  }, []);
 
-const fetchInitialQuestions = async () => {
-  try {
-    const response = await fetch(`${backendUrl}/api/initial-questions`, {
-      headers: getHeaders()
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success) {
-        setCategories(data.categories);
+  // Replace getHeaders with tokenManager logic
+  const getHeaders = () => ({
+    'Content-Type': 'application/json',
+    'X-Tenant-Code': localStorage.getItem('tenantCode'),
+    'Accept': 'application/json',
+    'X-UI-Language': language,
+    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+  });
+
+  // Update fetchInitialQuestions to use tokenManager
+  const fetchInitialQuestions = async () => {
+    try {
+      const response = await tokenManager.fetchWithAuth(`${backendUrl}/api/initial-questions`, {
+        headers: {
+          'X-UI-Language': language,
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setCategories(data.categories);
+        }
       }
+    } catch (error) {
+      console.error('Error fetching initial questions:', error);
+    } finally {
+      setIsLoadingQuestions(false);
     }
-  } catch (error) {
-    console.error('Error fetching initial questions:', error);
-  } finally {
-    setIsLoadingQuestions(false);
-  }
-};
-
+  };
 
   const fetchConversations = async () => {
     try {
-      const response = await fetch(`${backendUrl}/api/conversations`, {
-        headers: getHeaders()
-      });
+      const response = await tokenManager.fetchWithAuth(`${backendUrl}/api/conversations`);
       if (response.ok) {
         const data = await response.json();
         setConversations(data);
@@ -155,13 +159,11 @@ const fetchInitialQuestions = async () => {
 
   const fetchConversationMessages = async (conversationId) => {
     try {
-      const response = await fetch(`${backendUrl}/api/conversations/${conversationId}`, {
-        headers: getHeaders()
-      });
+      const response = await tokenManager.fetchWithAuth(`${backendUrl}/api/conversations/${conversationId}`);
       if (response.ok) {
         const data = await response.json();
         setMessages(data);
-        setTimeout(scrollToBottom, 100); // Add scroll after loading messages
+        setTimeout(scrollToBottom, 100);
       }
     } catch (error) {
       console.error('Error fetching messages:', error);
@@ -177,18 +179,11 @@ const fetchInitialQuestions = async () => {
     abortControllerRef.current = new AbortController();
     
     try {
-      // Get the token from localStorage
-      const token = localStorage.getItem('token');
-      
-      const response = await fetch(`${backendUrl}/api/query`, {
+      const response = await tokenManager.fetchWithAuth(`${backendUrl}/api/query`, {
         method: 'POST',
-        headers: {
-          ...getHeaders(),
-          'Authorization': `Bearer ${token}`, // Add this line
-        },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           query,
-          conversation_id: currentConversation?.id 
+          conversation_id: currentConversation?.id
         }),
         signal: abortControllerRef.current.signal
       });

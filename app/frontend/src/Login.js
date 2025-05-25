@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
 import './Login.css';
+import tokenManager from './tokenManager';
 
 function Login() {
     const [username, setUsername] = useState('');
@@ -44,7 +45,7 @@ function Login() {
 
             if (response.ok && data.success) {
                 // Store the access token
-                localStorage.setItem('token', data.access_token);
+                tokenManager.setToken(data.access_token);
                 localStorage.setItem('userName', username.trim());
                 localStorage.setItem('tenantCode', data.tenant_code);
                 localStorage.setItem('user', JSON.stringify({
@@ -53,6 +54,7 @@ function Login() {
                     tenant_code: data.tenant_code,
                     permissions: data.permissions
                 }));
+                tokenManager.scheduleRefresh();
                 navigate('/');
             } else {
                 setError(data.detail || 'Invalid credentials');

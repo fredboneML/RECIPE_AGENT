@@ -12,7 +12,7 @@ from ai_analyzer.data_import_postgresql import (
     get_user_conversations,
     get_conversation_messages
 )
-from ai_analyzer.config import config, DATABASE_URL
+from ai_analyzer.config import config, DATABASE_URL, JWT_SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from fastapi import FastAPI, Request, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, text, func, and_, UniqueConstraint, Boolean
@@ -34,13 +34,12 @@ from jose import JWTError, jwt
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 
-# JWT Configuration
-# Change this in production!
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
-# Security scheme for token authentication
+# JWT Configuration
+SECRET_KEY = JWT_SECRET_KEY
+ALGORITHM = JWT_ALGORITHM
+
+# Security scheme for token authenticatio
 security = HTTPBearer()
 
 # Token models
@@ -1207,6 +1206,50 @@ def create_conversation_tables(engine):
         logger.error(f"Error creating conversation tables: {e}")
         logger.exception("Detailed error:")
         return False
+
+
+@app.post("/api/refresh-token")
+async def refresh_token(request: Request, db: Session = Depends(get_db)):
+    try:
+        auth_header = request.headers.get('authorization')
+        if not auth_header or not auth_header.lower().startswith('bearer '):
+            raise HTTPException(
+                status_code=401, detail="Missing or invalid authorization header")
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            username = payload.get("sub")
+            tenant_code = payload.get("tenant_code")
+            role = payload.get("role")
+            if not username or not tenant_code or not role:
+                raise HTTPException(
+                    status_code=401, detail="Invalid token payload")
+        except JWTError:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        # Optionally, check user still exists and is active
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        # Issue new token
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        new_token = create_access_token(
+            data={
+                "sub": user.username,
+                "tenant_code": user.tenant_code,
+                "role": user.role
+            },
+            expires_delta=access_token_expires
+        )
+        return {
+            "access_token": new_token,
+            "token_type": "bearer",
+            "expires_in": access_token_expires.total_seconds()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Refresh token error: {e}")
+        raise HTTPException(status_code=401, detail="Could not refresh token")
 
 
 if __name__ == "__main__":

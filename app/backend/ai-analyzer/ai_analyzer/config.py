@@ -62,6 +62,9 @@ def load_env_once():
             'OPENAI_MODEL': os.getenv('OPENAI_MODEL'),
             # Added default value
             'MODEL_NAME': os.getenv('MODEL_NAME', 'gpt-4o-mini-2024-07-18'),
+            'JWT_SECRET_KEY': os.getenv('JWT_SECRET_KEY'),
+            'JWT_ALGORITHM': os.getenv('JWT_ALGORITHM', "HS256"),
+            'ACCESS_TOKEN_EXPIRE_MINUTES': int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 60 * 24))
         }
 
         # Validate required configuration
@@ -93,6 +96,11 @@ try:
     DATA_DIR = config['DATA_DIR']
     # Export MODEL_NAME for other modules to use
     MODEL_NAME = config['MODEL_NAME']
+
+    # Export JWT configuration constants
+    JWT_SECRET_KEY = config['JWT_SECRET_KEY']
+    JWT_ALGORITHM = config['JWT_ALGORITHM']
+    ACCESS_TOKEN_EXPIRE_MINUTES = config['ACCESS_TOKEN_EXPIRE_MINUTES']
 
 except Exception as e:
     logger.error(f"Failed to initialize configuration: {e}")

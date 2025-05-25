@@ -54,9 +54,6 @@ RUN chown -R ${USER_ID}:${GROUP_ID} /usr/src/app && \
 # Copy the rest of the application
 COPY --chown=${USER_ID}:${GROUP_ID} . .
 
-# Add this line after the WORKDIR command
-RUN npm install axios
-
 # Switch to appropriate user
 USER ${USER_ID}:${GROUP_ID}
 
