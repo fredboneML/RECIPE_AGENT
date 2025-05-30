@@ -1,4 +1,5 @@
-agno>=1.0.0
+# Language detection
+langdetect==1.0.9
 aiohappyeyeballs==2.4.3 ; python_version >= "3.12" and python_version < "4.0"
 aiohttp==3.10.10 ; python_version >= "3.12" and python_version < "4.0"
 aiosignal==1.3.1 ; python_version >= "3.12" and python_version < "4.0"
@@ -12,7 +13,6 @@ colorama==0.4.6 ; python_version >= "3.12" and python_version < "4.0" and platfo
 dataclasses-json==0.6.7 ; python_version >= "3.12" and python_version < "4.0"
 distro==1.9.0 ; python_version >= "3.12" and python_version < "4.0"
 fastapi==0.115.2 ; python_version >= "3.12" and python_version < "4.0"
-fastembed==0.3.6
 filelock==3.16.1 ; python_version >= "3.12" and python_version < "4.0"
 frozenlist==1.4.1 ; python_version >= "3.12" and python_version < "4.0"
 fsspec==2024.12.0 ; python_version >= "3.12" and python_version < "4.0"
@@ -26,33 +26,28 @@ jinja2==3.1.4 ; python_version >= "3.12" and python_version < "4.0"
 jiter==0.6.1 ; python_version >= "3.12" and python_version < "4.0"
 jsonpatch==1.33 ; python_version >= "3.12" and python_version < "4.0"
 jsonpointer==3.0.0 ; python_version >= "3.12" and python_version < "4.0"
-
-# Updated LangChain packages with compatible versions
-langchain==0.2.0
-langchain-core>=0.2.0
-langchain-community==0.2.0
-langchain-experimental==0.0.55
-langchain-openai==0.1.0
-langchain-groq==0.1.10
-
-# Model providers
-openai>=1.52.0
-groq==0.4.1
-
+langchain-community
+langchain-core
+langchain-experimental
+langchain-openai
+langchain-text-splitters
+langchain-qdrant
 langchain-qdrant==0.2.0
-langchain-text-splitters==0.2.0
+langchain-text-splitters==0.3.0
+langchain==0.3.3
 langsmith==0.1.135
 markupsafe==3.0.2
 marshmallow==3.23.0
 multidict==6.1.0
 mypy-extensions==1.0.0
 numpy==1.26.4
+openai>=1.52.0 
 orjson==3.10.7
 packaging==24.1
 pandas==2.2.3
 propcache==0.2.0
 psycopg2-binary==2.9.10
-pybreaker>=0.8.0
+psycopg2==2.9.10
 pydantic-core==2.23.4
 pydantic-settings==2.6.0
 pydantic==2.9.2
@@ -60,7 +55,6 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 pytz==2024.2
 pyyaml==6.0.2
-qdrant-client==1.13.2
 regex==2024.9.11
 requests-toolbelt==1.0.0
 requests==2.32.3
@@ -70,17 +64,24 @@ sniffio==1.3.1
 sqlalchemy==2.0.36
 starlette==0.40.0
 tenacity==8.5.0
-tiktoken==0.5.2
+tiktoken==0.8.0
 tokenizers==0.21.0
-torch==2.2.0
 tqdm==4.66.5
 transformers==4.48.0
 typing-extensions==4.12.2
 typing-inspect==0.9.0
 tzdata==2024.2
-urllib3>=1.26.14,<3
+urllib3<2.0.0,>=1.26.14
 uvicorn==0.32.0
 yarl==1.15.4
+qdrant-client==1.13.2
+fastembed==0.3.6
+torch==2.2.0
+agno>=1.0.0
+pybreaker>=0.8.0
+
+langchain-groq
+groq
 
 # JWT Authentication
 python-jose[cryptography]==3.3.0

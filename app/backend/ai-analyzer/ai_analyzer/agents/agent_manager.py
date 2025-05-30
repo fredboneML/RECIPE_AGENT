@@ -24,6 +24,8 @@ from ai_analyzer.utils.qdrant_client import get_qdrant_client, get_embedding_mod
 from pybreaker import CircuitBreaker
 from ai_analyzer.utils.singleton_resources import get_qdrant_client, get_embedding_model
 from ai_analyzer.utils.resilience import search_qdrant_safely
+from langdetect import detect, DetectorFactory, LangDetectException
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -670,51 +672,29 @@ class AgentManager:
 
     def _detect_language(self, text: str) -> str:
         """Detect if the text is in Dutch or English"""
-        # Get total word count and cleaned words
-        words = text.lower().split()
-        total_words = len(words)
-        logger.info(f"Total words in text: {total_words}")
 
-        # Count English words
-        english_words = [
-            'what', 'which', 'how', 'where', 'when', 'who', 'why', 'did', 'does', 'has', 'had', 'it', 'there',
-            'they', 'show', 'is', 'are', 'was', 'were', 'the', 'this', 'that', 'these', 'those', 'our', 'your',
-            'an', 'a', 'top', 'give', 'do', 'i', 'you', 'he', 'she', 'we', 'them', 'his', 'her', 'my', 'me',
-            'mine', 'yours', 'ours', 'their', 'if', 'then', 'and', 'or', 'but', 'because', 'as', 'of', 'with',
-            'from', 'about', 'into', 'on', 'off', 'up', 'down', 'out', 'can', 'could', 'would', 'should',
-            'will', 'shall', 'must', 'may', 'might', 'been', 'being', 'to', 'for', 'at', 'by', 'not'
-        ]
+        # Set seed for consistent results
+        DetectorFactory.seed = 0
 
-        nb_en = sum(1 for word in words if word in english_words)
-        logger.info(
-            f"English words found: {[word for word in words if word in english_words]}")
+        logger.info(f"Total words in text: {len(text.split())}")
 
-        # Count Dutch words
-        dutch_words = [
-            'wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp', 'kun', 'kunt',
-            'je', 'jij', 'u', 'bent', 'zijn', 'het', 'de', 'een', 'deze', 'dit', 'die', 'dat', 'mijn', 'uw',
-            'jullie', 'ons', 'onze', 'geen', 'niet', 'met', 'over', 'door', 'om', 'op', 'voor', 'na', 'bij',
-            'aan', 'in', 'uit', 'te', 'bedrijf', 'tevreden', 'graag', 'gaan', 'wordt', 'komen', 'zal',
-            'wij', 'ik', 'hij', 'zij', 'ze', 'hun', 'hem', 'haar', 'mij', 'me', 'als', 'dan', 'en', 'of',
-            'maar', 'omdat', 'zoals', 'van', 'tot', 'tegen', 'binnen', 'buiten', 'onder', 'boven', 'moet',
-            'mag', 'zou', 'heb', 'hebt', 'heeft', 'hadden', 'waren', 'worden', 'geweest'
-        ]
+        try:
+            # Detect language
+            detected_lang = detect(text)
+            logger.info(f"Detected language code: {detected_lang}")
 
-        nb_dutch = sum(1 for word in words if word in dutch_words)
-        logger.info(
-            f"Dutch words found: {[word for word in words if word in dutch_words]}")
+            # Map language codes to full names
+            if detected_lang == 'en':
+                return "English"
+            else:
+                # Default to Dutch for any non-English detection
+                # This maintains compatibility with the previous implementation
+                return "Dutch"
 
-        logger.info(
-            f"number of Dutch words: {nb_dutch}, number of English words: {nb_en}")
-
-        # Set language based on majority
-        if nb_dutch > nb_en:
+        except LangDetectException as e:
+            logger.warning(f"Language detection failed: {str(e)}")
+            # Default to Dutch on error, changing from previous English default
             return "Dutch"
-        elif nb_en > nb_dutch:
-            return "English"
-        else:
-            # Default to English if no clear majority
-            return "English"
 
     def process_query(self, query: str, conversation_id: Optional[str] = None) -> str:
         """Process query with proper transaction handling and context management."""
