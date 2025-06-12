@@ -40,7 +40,6 @@ X-UI-Language: nl|en  # For language preference (defaults to 'nl')
 #### POST /api/login
 Authenticate user and receive JWT token.
 
-**Authentication Required**: ❌ No
 
 **Request Body:**
 ```json
@@ -501,7 +500,6 @@ The API supports both English and Dutch:
 
 | Endpoint | Authentication Required | Notes |
 |----------|------------------------|-------|
-| `POST /api/login` | ❌ No | Login endpoint |
 | `POST /api/refresh-token` | ✅ Yes | Token refresh |
 | `POST /api/query` | ✅ Yes | Main query processing |
 | `GET /api/initial-questions` | ✅ Yes | Get question categories |
