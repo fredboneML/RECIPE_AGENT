@@ -10,14 +10,10 @@ function Login() {
     const [isLoading, setIsLoading] = useState(false);
     const navigate = useNavigate();
 
-    // Dynamically determine the backend URL
-    const backendUrl = window.location.hostname === 'localhost' 
-        ? 'http://localhost:8000'
-        : `http://${window.location.hostname}:8000`;
-
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        if (token) {
+        // Check if user is already logged in
+        if (tokenManager.isLoggedIn()) {
+            console.log('User already logged in, redirecting to dashboard');
             navigate('/');
         }
     }, [navigate]);
@@ -28,8 +24,8 @@ function Login() {
         setIsLoading(true);
 
         try {
-            console.log('Attempting to connect to:', backendUrl);
-            const response = await fetch(`${backendUrl}/api/login`, {
+            // Login endpoint doesn't need authentication, so we use a special method
+            const response = await fetch(`${tokenManager.getBackendUrl()}/api/login`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -42,10 +38,15 @@ function Login() {
             });
 
             const data = await response.json();
+            console.log('Login response:', data);
 
             if (response.ok && data.success) {
-                // Store the access token
+                console.log('Login successful, storing token and user data');
+                
+                // Store the access token using tokenManager
                 tokenManager.setToken(data.access_token);
+                
+                // Store additional user data in localStorage
                 localStorage.setItem('userName', username.trim());
                 localStorage.setItem('tenantCode', data.tenant_code);
                 localStorage.setItem('user', JSON.stringify({
@@ -54,9 +55,22 @@ function Login() {
                     tenant_code: data.tenant_code,
                     permissions: data.permissions
                 }));
-                tokenManager.scheduleRefresh();
-                navigate('/');
+                
+                // Verify token is working by making an authenticated request
+                try {
+                    const healthCheck = await tokenManager.get('/health');
+                    if (!healthCheck.ok) {
+                        throw new Error('Health check failed');
+                    }
+                    console.log('Authentication verified, navigating to dashboard');
+                    navigate('/');
+                } catch (healthError) {
+                    console.error('Authentication verification failed:', healthError);
+                    setError('Authentication failed. Please try again.');
+                    tokenManager.clearToken();
+                }
             } else {
+                console.error('Login failed:', data);
                 setError(data.detail || 'Invalid credentials');
             }
         } catch (err) {
@@ -82,6 +96,7 @@ function Login() {
                             onChange={(e) => setUsername(e.target.value)}
                             required
                             placeholder="Enter your username"
+                            disabled={isLoading}
                         />
                     </div>
                     <div className="input-group">
@@ -92,6 +107,7 @@ function Login() {
                             onChange={(e) => setPassword(e.target.value)}
                             required
                             placeholder="Enter your password"
+                            disabled={isLoading}
                         />
                     </div>
                     {error && <p className="error">{error}</p>}

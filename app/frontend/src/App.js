@@ -62,13 +62,7 @@ function App() {
         setUserInitial(userName.charAt(0).toUpperCase());
         
         console.log('App.js - Fetching conversations...');
-        const conversationsResponse = await fetch(`${backendUrl}/api/conversations`, {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Tenant-Code': tenantCode,
-            'Accept': 'application/json',
-          }
-        });
+        const conversationsResponse = await tokenManager.get('/api/conversations');
   
         if (!conversationsResponse.ok) {
           throw new Error('Auth verification failed');
@@ -122,7 +116,7 @@ function App() {
   // Update fetchInitialQuestions to use tokenManager
   const fetchInitialQuestions = async () => {
     try {
-      const response = await tokenManager.fetchWithAuth(`${backendUrl}/api/initial-questions`, {
+      const response = await tokenManager.get('/api/initial-questions', {
         headers: {
           'X-UI-Language': language,
         }
@@ -142,7 +136,7 @@ function App() {
 
   const fetchConversations = async () => {
     try {
-      const response = await tokenManager.fetchWithAuth(`${backendUrl}/api/conversations`);
+      const response = await tokenManager.get('/api/conversations');
       if (response.ok) {
         const data = await response.json();
         setConversations(data);
@@ -159,7 +153,7 @@ function App() {
 
   const fetchConversationMessages = async (conversationId) => {
     try {
-      const response = await tokenManager.fetchWithAuth(`${backendUrl}/api/conversations/${conversationId}`);
+      const response = await tokenManager.get(`/api/conversations/${conversationId}`);
       if (response.ok) {
         const data = await response.json();
         setMessages(data);
@@ -179,12 +173,10 @@ function App() {
     abortControllerRef.current = new AbortController();
     
     try {
-      const response = await tokenManager.fetchWithAuth(`${backendUrl}/api/query`, {
-        method: 'POST',
-        body: JSON.stringify({
-          query,
-          conversation_id: currentConversation?.id
-        }),
+      const response = await tokenManager.post('/api/query', {
+        query,
+        conversation_id: currentConversation?.id
+      }, {
         signal: abortControllerRef.current.signal
       });
   

@@ -13,7 +13,7 @@ The AI Analyzer is a call center analytics application that provides insights in
 
 ## Authentication
 
-The API uses JWT (JSON Web Token) based authentication with Bearer token scheme.
+The API uses JWT (JSON Web Token) based authentication with Bearer token scheme. **ALL API endpoints require authentication** except for the login endpoint.
 
 ### Login Flow
 1. User submits credentials to `/api/login`
@@ -21,12 +21,16 @@ The API uses JWT (JSON Web Token) based authentication with Bearer token scheme.
 3. Client includes token in `Authorization` header for subsequent requests
 4. Token automatically refreshes before expiration
 
-### Required Headers
+### Required Headers for ALL Authenticated Endpoints
 ```http
 Authorization: Bearer <jwt_token>
-X-Tenant-Code: <tenant_code>
 Content-Type: application/json
 Accept: application/json
+```
+
+### Optional Headers
+```http
+X-UI-Language: nl|en  # For language preference (defaults to 'nl')
 ```
 
 ## API Endpoints
@@ -35,6 +39,8 @@ Accept: application/json
 
 #### POST /api/login
 Authenticate user and receive JWT token.
+
+**Authentication Required**: ❌ No
 
 **Request Body:**
 ```json
@@ -69,6 +75,8 @@ Authenticate user and receive JWT token.
 #### POST /api/refresh-token
 Refresh JWT token before expiration.
 
+**Authentication Required**: ✅ Yes
+
 **Headers:**
 ```http
 Authorization: Bearer <current_token>
@@ -88,10 +96,11 @@ Authorization: Bearer <current_token>
 #### POST /api/query
 Process natural language queries about call data.
 
+**Authentication Required**: ✅ Yes
+
 **Headers:**
 ```http
 Authorization: Bearer <jwt_token>
-X-Tenant-Code: <tenant_code>
 ```
 
 **Request Body:**
@@ -118,9 +127,11 @@ X-Tenant-Code: <tenant_code>
 #### GET /api/initial-questions
 Get categorized initial questions for analysis.
 
+**Authentication Required**: ✅ Yes
+
 **Headers:**
 ```http
-X-Tenant-Code: <tenant_code>
+Authorization: Bearer <jwt_token>
 X-UI-Language: nl|en (optional, defaults to 'nl')
 ```
 
@@ -154,9 +165,11 @@ X-UI-Language: nl|en (optional, defaults to 'nl')
 #### GET /api/conversations
 Get user's conversation history.
 
+**Authentication Required**: ✅ Yes
+
 **Headers:**
 ```http
-X-Tenant-Code: <tenant_code>
+Authorization: Bearer <jwt_token>
 ```
 
 **Response:**
@@ -173,9 +186,11 @@ X-Tenant-Code: <tenant_code>
 #### GET /api/conversations/{conversation_id}
 Get messages from a specific conversation.
 
+**Authentication Required**: ✅ Yes
+
 **Headers:**
 ```http
-X-Tenant-Code: <tenant_code>
+Authorization: Bearer <jwt_token>
 ```
 
 **Response:**
@@ -200,9 +215,11 @@ X-Tenant-Code: <tenant_code>
 #### POST /api/analyze-response
 Analyze a response to extract insights.
 
+**Authentication Required**: ✅ Yes
+
 **Headers:**
 ```http
-X-Tenant-Code: <tenant_code>
+Authorization: Bearer <jwt_token>
 ```
 
 **Request Body:**
@@ -225,9 +242,11 @@ X-Tenant-Code: <tenant_code>
 #### POST /api/generate-followup
 Generate follow-up questions based on conversation history.
 
+**Authentication Required**: ✅ Yes
+
 **Headers:**
 ```http
-X-Tenant-Code: <tenant_code>
+Authorization: Bearer <jwt_token>
 ```
 
 **Request Body:**
@@ -246,7 +265,7 @@ X-Tenant-Code: <tenant_code>
 **Response:**
 ```json
 {
-  "success": true,
+  "success": True,
   "followup_questions": [
     "What specific billing problems are customers reporting?",
     "Which technical support issues take the longest to resolve?",
@@ -260,13 +279,22 @@ X-Tenant-Code: <tenant_code>
 #### GET /health
 Check application health status.
 
+**Authentication Required**: ✅ Yes
+
+**Headers:**
+```http
+Authorization: Bearer <jwt_token>
+```
+
 **Response:**
 ```json
 {
   "status": "healthy",
   "database": "connected",
   "qdrant": "connected",
-  "collections": ["tenant_example1", "tenant_example2"]
+  "collections": ["tenant_example1", "tenant_example2"],
+  "user": "authenticated_username",
+  "tenant": "user_tenant_code"
 }
 ```
 
@@ -309,7 +337,7 @@ Check application health status.
 ### HTTP Status Codes
 - `200 OK` - Request successful
 - `400 Bad Request` - Invalid request data
-- `401 Unauthorized` - Invalid or missing authentication
+- `401 Unauthorized` - Invalid, missing, or expired authentication token
 - `403 Forbidden` - Insufficient permissions
 - `404 Not Found` - Resource not found
 - `500 Internal Server Error` - Server error
@@ -324,19 +352,21 @@ Check application health status.
 ```
 
 ### Common Error Scenarios
-1. **Invalid Token**: `401 Unauthorized` - Token expired or invalid
-2. **Missing Tenant**: `401 Unauthorized` - X-Tenant-Code header missing
-3. **Query Processing Error**: `500 Internal Server Error` - SQL generation or execution failure
-4. **Context Length Exceeded**: Special error for conversation limit reached
+1. **Missing Token**: `401 Unauthorized` - Authorization header missing
+2. **Invalid Token**: `401 Unauthorized` - Token expired, malformed, or invalid
+3. **Insufficient Permissions**: `403 Forbidden` - User lacks required permissions
+4. **Query Processing Error**: `500 Internal Server Error` - SQL generation or execution failure
+5. **Context Length Exceeded**: Special error for conversation limit reached
 
 ## Multi-Tenant Architecture
 
 The application supports multiple tenants with data isolation:
 
 - Each tenant has isolated data in the database
-- Tenant code must be provided in `X-Tenant-Code` header
+- Tenant code is automatically extracted from the authenticated user's JWT token
 - Vector search collections are tenant-specific (`tenant_{tenant_code}`)
 - All SQL queries include automatic tenant filtering
+- **No manual tenant code headers are needed** - authentication handles this automatically
 
 ## Rate Limiting and Performance
 
@@ -366,7 +396,6 @@ const queryResponse = await fetch('http://37.97.226.251:8000/api/query', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${access_token}`,
-    'X-Tenant-Code': tenant_code,
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
@@ -377,6 +406,37 @@ const queryResponse = await fetch('http://37.97.226.251:8000/api/query', {
 const result = await queryResponse.json();
 console.log(result.response); // Analysis results
 console.log(result.followup_questions); // Suggested next questions
+
+// 3. Get conversation history
+const conversationsResponse = await fetch('http://37.97.226.251:8000/api/conversations', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${access_token}`
+  }
+});
+
+const conversations = await conversationsResponse.json();
+
+// 4. Get initial questions
+const questionsResponse = await fetch('http://37.97.226.251:8000/api/initial-questions', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${access_token}`,
+    'X-UI-Language': 'nl'
+  }
+});
+
+const questions = await questionsResponse.json();
+
+// 5. Check health status
+const healthResponse = await fetch('http://37.97.226.251:8000/health', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${access_token}`
+  }
+});
+
+const healthStatus = await healthResponse.json();
 ```
 
 ### Using with Docker Environment Variables
@@ -427,11 +487,29 @@ The API supports both English and Dutch:
 
 ## Security Considerations
 
-1. **JWT Token Security**: Tokens auto-refresh before expiration
-2. **Tenant Isolation**: Strict data separation between tenants
+1. **JWT Token Security**: 
+   - Tokens auto-refresh before expiration
+   - All endpoints require valid JWT authentication
+   - Tokens contain user identity and tenant information
+2. **Tenant Isolation**: Strict data separation between tenants via JWT claims
 3. **SQL Injection Protection**: Parameterized queries and validation
 4. **CORS Configuration**: Configured for specific origins
 5. **Input Validation**: All inputs are validated before processing
+6. **Access Control**: Role-based permissions enforced via JWT tokens
+
+## Authentication Requirements Summary
+
+| Endpoint | Authentication Required | Notes |
+|----------|------------------------|-------|
+| `POST /api/login` | ❌ No | Login endpoint |
+| `POST /api/refresh-token` | ✅ Yes | Token refresh |
+| `POST /api/query` | ✅ Yes | Main query processing |
+| `GET /api/initial-questions` | ✅ Yes | Get question categories |
+| `GET /api/conversations` | ✅ Yes | List conversations |
+| `GET /api/conversations/{id}` | ✅ Yes | Get conversation messages |
+| `POST /api/analyze-response` | ✅ Yes | Analyze responses |
+| `POST /api/generate-followup` | ✅ Yes | Generate follow-up questions |
+| `GET /health` | ✅ Yes | Health check with auth |
 
 ## Deployment Notes
 
@@ -443,6 +521,8 @@ POSTGRES_DB=your_db_name
 OPENAI_API_KEY=your_openai_key
 AI_ANALYZER_OPENAI_API_KEY=your_openai_key
 JWT_SECRET_KEY=your_secret_key
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
 ADMIN_USER=admin_username
 ADMIN_PASSWORD=admin_password
 HOST=37.97.226.251  # For server deployment
@@ -471,3 +551,10 @@ The application will be available at:
 - API Documentation: This document
 
 For local development, use `localhost` instead of the server IP address.
+
+### Important Security Notes
+- **All endpoints now require JWT authentication** for enhanced security
+- Tenant isolation is automatically handled through JWT token claims
+- No manual tenant headers are needed - the system extracts tenant information from the authenticated user
+- Health checks are now protected and will show authenticated user information
+- All requests must include the `Authorization: Bearer <token>` header (except login)

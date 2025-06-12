@@ -1,4 +1,4 @@
-# ai_analyzer/main.py
+# app/backend/ai-analyzer/ai_analyzer/main.py
 from ai_analyzer.utils.singleton_resources import ResourceManager  # Fix the import path
 from ai_analyzer.data_pipeline import get_db_session
 from ai_analyzer.agents.workflow import CallAnalysisWorkflow  # Add this import
@@ -494,9 +494,9 @@ async def startup_event():
         logger.error(f"Error during startup: {e}")
 
 
-# Health check endpoint with detailed debugging
+# Health check endpoint with JWT authentication
 @app.get("/health")
-async def health_check():
+async def health_check(current_user: User = Depends(get_current_user)):
     try:
         # Check database connection
         db = SessionLocal()
@@ -520,7 +520,9 @@ async def health_check():
             "status": "healthy",
             "database": "connected",
             "qdrant": "connected",
-            "collections": [c.name for c in collections.collections]
+            "collections": [c.name for c in collections.collections],
+            "user": current_user.username,
+            "tenant": current_user.tenant_code
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -648,8 +650,8 @@ async def process_query(
         query = body.get("query", "")
         conversation_id = body.get("conversation_id", "")
 
-        # Use tenant code from the authenticated user
-        tenant_code = current_user.tenant_code
+        # Use tenant code from the authenticated user - ensure we get the string value
+        tenant_code = str(current_user.tenant_code)
 
         # Validate input
         if not query:
@@ -739,28 +741,42 @@ async def query_sql(request: Request, db_session: Session = Depends(get_db)):
 
 
 @app.get("/api/conversations")
-async def get_conversations(request: Request, db: Session = Depends(get_db)):
+async def get_conversations(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    logger.info(
+        f"get_conversations: Endpoint called with user: {current_user.username if current_user else 'None'}")
     try:
-        # Get tenant code from headers
-        tenant_code = request.headers.get('X-Tenant-Code')
-        if not tenant_code:
-            raise HTTPException(status_code=401, detail="Tenant code required")
+        # Use tenant code from the authenticated user - ensure we get the string value
+        tenant_code = str(current_user.tenant_code)
+        logger.info(f"Getting conversations for tenant: {tenant_code}")
 
         # Get distinct conversation IDs with their first message (for title)
         # First, get all distinct conversation IDs
-        distinct_conversations = db.query(
-            UserMemory.conversation_id,
-            func.min(UserMemory.message_order).label('first_message_order'),
-            func.max(UserMemory.timestamp).label('latest_timestamp')
-        ).filter(
-            UserMemory.is_active == True,
-            UserMemory.expires_at > datetime.utcnow(),
-            UserMemory.user_id == tenant_code
-        ).group_by(
-            UserMemory.conversation_id
-        ).order_by(
-            func.max(UserMemory.timestamp).desc()
-        ).limit(10).all()
+        try:
+            distinct_conversations = db.query(
+                UserMemory.conversation_id,
+                func.min(UserMemory.message_order).label(
+                    'first_message_order'),
+                func.max(UserMemory.timestamp).label('latest_timestamp')
+            ).filter(
+                UserMemory.is_active == True,
+                UserMemory.expires_at > datetime.utcnow(),
+                UserMemory.user_id == tenant_code
+            ).group_by(
+                UserMemory.conversation_id
+            ).order_by(
+                func.max(UserMemory.timestamp).desc()
+            ).limit(10).all()
+        except Exception as db_error:
+            logger.error(f"Database query error in conversations: {db_error}")
+            logger.exception("Database error details:")
+            # Return empty list if there's a database error
+            return []
+
+        logger.info(
+            f"Found {len(distinct_conversations)} conversations for tenant {tenant_code}")
 
         # Now get the first message of each conversation for the title
         result = []
@@ -779,9 +795,11 @@ async def get_conversations(request: Request, db: Session = Depends(get_db)):
                     "timestamp": latest_ts.isoformat()  # Use the latest timestamp for sorting
                 })
 
+        logger.info(f"Returning {len(result)} conversations")
         return result
     except Exception as e:
         logger.error(f"Error retrieving conversations: {e}")
+        logger.exception("Detailed error:")
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve conversations"
@@ -791,15 +809,14 @@ async def get_conversations(request: Request, db: Session = Depends(get_db)):
 @app.get("/api/initial-questions")
 async def get_initial_questions(
     request: Request,
+    current_user: User = Depends(get_current_user),
     transcription_id: str = None,
     db_session: Session = Depends(get_db)
 ):
     """Generate initial questions for a transcription"""
     try:
-        # Get tenant code from headers
-        tenant_code = request.headers.get('X-Tenant-Code')
-        if not tenant_code:
-            raise HTTPException(status_code=401, detail="Tenant code required")
+        # Use tenant code from the authenticated user - ensure we get the string value
+        tenant_code = str(current_user.tenant_code)
 
         # Get UI language preference from headers (default to Dutch)
         ui_language = request.headers.get('X-UI-Language', 'nl')
@@ -969,7 +986,11 @@ async def get_initial_questions(
 
 
 @app.post("/api/analyze-response")
-async def analyze_response(request: Request, db_session: Session = Depends(get_db)):
+async def analyze_response(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db_session: Session = Depends(get_db)
+):
     """Analyze a response to a question"""
     try:
         data = await request.json()
@@ -978,12 +999,14 @@ async def analyze_response(request: Request, db_session: Session = Depends(get_d
         transcription_id = data.get("transcription_id")
         question_id = data.get("question_id")
         response_text = data.get("response")
-        tenant_code = request.headers.get('X-Tenant-Code')
 
-        if not all([transcription_id, question_id, response_text, tenant_code]):
+        # Use tenant code from the authenticated user - ensure we get the string value
+        tenant_code = str(current_user.tenant_code)
+
+        if not all([transcription_id, question_id, response_text]):
             raise HTTPException(
                 status_code=400,
-                detail="Missing required parameters: transcription_id, question_id, response, tenant_code"
+                detail="Missing required parameters: transcription_id, question_id, response"
             )
 
         # Create agent manager
@@ -1009,7 +1032,11 @@ async def analyze_response(request: Request, db_session: Session = Depends(get_d
 
 
 @app.post("/api/generate-followup")
-async def generate_followup(request: Request, db_session: Session = Depends(get_db)):
+async def generate_followup(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db_session: Session = Depends(get_db)
+):
     """Generate follow-up questions based on previous conversation"""
     try:
         data = await request.json()
@@ -1018,10 +1045,9 @@ async def generate_followup(request: Request, db_session: Session = Depends(get_
         conversation_type = data.get("conversation_type", "system")
         questions = data.get("questions", [])
         responses = data.get("responses", [])
-        tenant_code = request.headers.get('X-Tenant-Code')
 
-        if not tenant_code:
-            raise HTTPException(status_code=401, detail="Tenant code required")
+        # Use tenant code from the authenticated user - ensure we get the string value
+        tenant_code = str(current_user.tenant_code)
 
         if not questions or not responses:
             raise HTTPException(
@@ -1055,14 +1081,14 @@ async def generate_followup(request: Request, db_session: Session = Depends(get_
 @app.get("/api/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
-    request: Request,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
-        # Get tenant code from headers
-        tenant_code = request.headers.get('X-Tenant-Code')
-        if not tenant_code:
-            raise HTTPException(status_code=401, detail="Tenant code required")
+        # Use tenant code from the authenticated user - ensure we get the string value
+        tenant_code = str(current_user.tenant_code)
+        logger.info(
+            f"Getting conversation {conversation_id} for tenant: {tenant_code}")
 
         # Get messages for conversation with tenant isolation
         messages = db.query(UserMemory)\
@@ -1123,7 +1149,7 @@ async def get_conversation(
 
 # Optional: API to add a new user
 @app.post("/api/add_user")
-async def add_user(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_db)):
+async def add_user(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # Check if current user has admin privileges
     if not current_user.has_write_permission():
         raise HTTPException(status_code=403, detail="Insufficient permissions")
