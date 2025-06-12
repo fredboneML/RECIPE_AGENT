@@ -106,10 +106,10 @@ class ResponseAnalyzerAgent(BaseAgent):
                 - Phrase questions as a call center analyst would
                 - Include references to specific values from the results
                 
-                IMPORTANT: When analyzing SQL query results, base your analysis ONLY on the SQL results provided, not on any call transcriptions that may be included in the prompt.
-                The call transcriptions are meant to help the SQL agent generate the query, not for you to analyze directly.
-                Focus your analysis entirely on the structured data from the SQL results, including metrics, counts, percentages, and trends.
-                Make your response user-friendly by avoiding SQL terminology - present the data in plain language without mentioning SQL, queries, or database terms.
+                IMPORTANT: When analyzing data results, base your analysis ONLY on the structured data provided, not on any call transcriptions that may be included in the prompt.
+                The call transcriptions are meant to help with context, not for you to analyze directly.
+                Focus your analysis entirely on the structured data from the results, including metrics, counts, percentages, and trends.
+                Make your response user-friendly by avoiding technical terminology - present the data in plain language without mentioning SQL, queries, database terms, or any technical implementation details.
                 
                 IMPORTANT: Respond in {detected_language} language to match the user's question language.
                 """),
@@ -134,6 +134,10 @@ class ResponseAnalyzerAgent(BaseAgent):
                 result, 'content') else str(result)
             parsed_output = self.output_parser.parse(content)
 
+            # Clean SQL terminology from the summary
+            parsed_output.summary = self._remove_sql_terminology(
+                parsed_output.summary)
+
             # Ensure we have follow-up questions
             if not parsed_output.followup_questions or len(parsed_output.followup_questions) == 0:
                 parsed_output.followup_questions = self._generate_default_followups(
@@ -155,6 +159,53 @@ class ResponseAnalyzerAgent(BaseAgent):
                 suggested_followup=self._generate_default_followups(
                     question, response)
             )
+
+    def _remove_sql_terminology(self, text: str) -> str:
+        """Remove SQL and technical terminology from text"""
+        import re
+
+        # Dictionary of SQL/technical terms and their user-friendly replacements
+        replacements = {
+            # SQL specific terms
+            r'\bSQL\s+query\s+results?\b': 'available data',
+            r'\bSQL\s+results?\b': 'available data',
+            r'\bquery\s+results?\b': 'available data',
+            r'\bdatabase\s+results?\b': 'available data',
+            r'\bthe\s+SQL\b': 'the available data',
+            r'\bSQL\s+data\b': 'available data',
+            r'\bquery\s+data\b': 'available data',
+            r'\bdatabase\s+data\b': 'available data',
+            r'\bSQL\s+analysis\b': 'data analysis',
+            r'\bquery\s+analysis\b': 'data analysis',
+            r'\bdatabase\s+analysis\b': 'data analysis',
+            r'\bSQL\s+information\b': 'available information',
+            r'\bquery\s+information\b': 'available information',
+            r'\bdatabase\s+information\b': 'available information',
+
+            # More generic replacements
+            r'\bSQL\b': 'data',
+            r'\bquery\b': 'analysis',
+            r'\bdatabase\b': 'system',
+            r'\btable\b': 'records',
+            r'\bcolumn\b': 'field',
+            r'\brow\b': 'record',
+
+            # Dutch equivalents
+            r'\bSQL\s+query\s+resultaten\b': 'beschikbare gegevens',
+            r'\bSQL\s+resultaten\b': 'beschikbare gegevens',
+            r'\bquery\s+resultaten\b': 'beschikbare gegevens',
+            r'\bdatabase\s+resultaten\b': 'beschikbare gegevens',
+            r'\bde\s+SQL\b': 'de beschikbare gegevens',
+            r'\bSQL\s+gegevens\b': 'beschikbare gegevens',
+            r'\bquery\s+gegevens\b': 'beschikbare gegevens',
+            r'\bdatabase\s+gegevens\b': 'beschikbare gegevens',
+        }
+
+        # Apply replacements (case insensitive)
+        for pattern, replacement in replacements.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+        return text
 
     def _generate_default_followups(self, question: str, response: str) -> List[str]:
         """Generate context-aware default follow-up questions"""

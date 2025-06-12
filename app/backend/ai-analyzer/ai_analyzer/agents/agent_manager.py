@@ -492,6 +492,61 @@ class AgentManager:
             "Is there a particular time period you'd like to analyze?"
         ]
 
+    def _remove_sql_terminology(self, text: str) -> str:
+        """Remove SQL and technical terminology from text"""
+        import re
+
+        # Dictionary of SQL/technical terms and their user-friendly replacements
+        replacements = {
+            # SQL specific terms
+            r'\bSQL\s+query\s+results?\b': 'available data',
+            r'\bSQL\s+results?\b': 'available data',
+            r'\bquery\s+results?\b': 'available data',
+            r'\bdatabase\s+results?\b': 'available data',
+            r'\bthe\s+SQL\b': 'the available data',
+            r'\bSQL\s+data\b': 'available data',
+            r'\bquery\s+data\b': 'available data',
+            r'\bdatabase\s+data\b': 'available data',
+            r'\bSQL\s+analysis\b': 'data analysis',
+            r'\bquery\s+analysis\b': 'data analysis',
+            r'\bdatabase\s+analysis\b': 'data analysis',
+            r'\bSQL\s+information\b': 'available information',
+            r'\bquery\s+information\b': 'available information',
+            r'\bdatabase\s+information\b': 'available information',
+
+            # More generic replacements
+            r'\bSQL\b': 'data',
+            r'\bquery\b': 'analysis',
+            r'\bdatabase\b': 'system',
+            r'\btable\b': 'records',
+            r'\bcolumn\b': 'field',
+            r'\brow\b': 'record',
+
+            # Dutch equivalents
+            r'\bSQL\s+query\s+resultaten\b': 'beschikbare gegevens',
+            r'\bSQL\s+resultaten\b': 'beschikbare gegevens',
+            r'\bquery\s+resultaten\b': 'beschikbare gegevens',
+            r'\bdatabase\s+resultaten\b': 'beschikbare gegevens',
+            r'\bde\s+SQL\b': 'de beschikbare gegevens',
+            r'\bSQL\s+gegevens\b': 'beschikbare gegevens',
+            r'\bquery\s+gegevens\b': 'beschikbare gegevens',
+            r'\bdatabase\s+gegevens\b': 'beschikbare gegevens',
+
+            # Additional patterns that might slip through
+            r'\bthe\s+SQL\s+query\s+results?\b': 'the available data',
+            r'\bfrom\s+the\s+SQL\b': 'from the available data',
+            r'\bin\s+the\s+SQL\b': 'in the available data',
+            r'\bSQL\s+dataset\b': 'available dataset',
+            r'\bquery\s+dataset\b': 'available dataset',
+            r'\bdatabase\s+dataset\b': 'available dataset',
+        }
+
+        # Apply replacements (case insensitive)
+        for pattern, replacement in replacements.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+        return text
+
     def _get_question_from_db(self, question_id: str) -> str:
         """Get question text from user_memory table"""
         if not self.session:
@@ -1041,7 +1096,7 @@ class AgentManager:
                         logger.exception("Detailed error:")
                         # Continue without conversation history if there's an error
 
-                # 8. Create a prompt with the context, conversation history, query, entity corrections, and SQL results
+                # 8. Create a prompt with the context, conversation history, query, entity corrections, and data results
                 prompt = f"""
                 I need to answer this user question:
                 "{query}"
@@ -1053,15 +1108,15 @@ class AgentManager:
                 Here are some relevant call transcriptions that might help:
                 {examples_text}
                 
-                SQL Query Results:
+                Available Data Results:
                 {sql_results}
                 
-                Please provide a comprehensive answer based ONLY on the SQL results above.
-                The call transcriptions are provided only to help with context, but your response should be based entirely on the SQL query results.
-                If the SQL results don't contain enough information to answer the question fully, 
+                Please provide a comprehensive answer based ONLY on the available data results above.
+                The call transcriptions are provided only to help with context, but your response should be based entirely on the structured data results.
+                If the available data doesn't contain enough information to answer the question fully, 
                 acknowledge this limitation in your response. Make sure to answer in the language of the question!
                 
-                Make your response user-friendly by avoiding SQL terminology - present the data in plain language without mentioning SQL, queries, or database terms.
+                Make your response user-friendly by avoiding technical terminology - present the data in plain language without mentioning SQL, queries, database terms, or any technical implementation details.
                 
                 IMPORTANT: Respond in {detected_language} language to match the user's question language.
                 
@@ -1081,6 +1136,9 @@ class AgentManager:
                     else:
                         # Convert the response object to a string if it's not already a string
                         response = str(response_obj)
+
+                    # Clean SQL terminology from the response
+                    response = self._remove_sql_terminology(response)
 
                     logger.info(f"Final response: {response[:100]}...")
                     logger.info(
