@@ -61,6 +61,13 @@ function App() {
   
         setUserInitial(userName.charAt(0).toUpperCase());
         
+        // First verify health check
+        console.log('App.js - Checking health status...');
+        const healthResponse = await tokenManager.get('/health');
+        if (!healthResponse.ok) {
+          throw new Error('Health check failed');
+        }
+        
         console.log('App.js - Fetching conversations...');
         const conversationsResponse = await tokenManager.get('/api/conversations');
   

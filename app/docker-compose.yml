@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   frontend_app:
     build:
@@ -73,7 +75,10 @@ services:
         "--reload",
       ]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: >
+        /bin/sh -c '
+        TOKEN=$$(curl -s -X POST http://localhost:8000/api/login -H "Content-Type: application/json" -d "{\"username\":\"$$ADMIN_USER\",\"password\":\"$$ADMIN_PASSWORD\"}" | jq -r .access_token) &&
+        curl -f -H "Authorization: Bearer $$TOKEN" http://localhost:8000/health || exit 1'
       interval: 30s
       timeout: 30s
       retries: 5
@@ -178,6 +183,8 @@ volumes:
     name: ai_analyzer_cron_logs
     driver: local
   qdrant_data:
+    name: ai_analyzer_qdrant_data
+    driver: local
 
 networks:
   app-network:

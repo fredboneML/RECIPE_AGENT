@@ -153,8 +153,17 @@ class TokenManager {
     if (!this.isTokenValid(token)) {
       console.log('Token expired or expiring soon, refreshing...');
       try {
-        await this.refreshToken();
-        token = this.getToken();
+        // If a refresh is already in progress, wait for it to complete
+        if (this.isRefreshing) {
+          console.log('Token refresh already in progress, waiting...');
+          await new Promise((resolve) => {
+            this.subscribe(resolve);
+          });
+          token = this.getToken();
+        } else {
+          await this.refreshToken();
+          token = this.getToken();
+        }
       } catch (error) {
         console.error('Failed to refresh expired token');
         window.location.href = '/login';
@@ -196,8 +205,15 @@ class TokenManager {
       if ((response.status === 401 || response.status === 403) && retry) {
         console.log(`Received ${response.status}, attempting token refresh...`);
         try {
-          // Try to refresh the token
-          await this.refreshToken();
+          // If a refresh is already in progress, wait for it to complete
+          if (this.isRefreshing) {
+            console.log('Token refresh already in progress, waiting...');
+            await new Promise((resolve) => {
+              this.subscribe(resolve);
+            });
+          } else {
+            await this.refreshToken();
+          }
           // Retry the request with the new token
           return this.fetchWithAuth(url, options, false);
         } catch (refreshError) {

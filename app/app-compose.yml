@@ -50,6 +50,9 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - READ_USER=${READ_USER}
       - READ_USER_PASSWORD=${READ_USER_PASSWORD}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
       # Add CORS allowed origins
       - ALLOWED_ORIGINS=http://localhost:3000,http://37.97.226.251:3000,http://127.0.0.1:3000
       # Add host environment variable
@@ -67,7 +70,10 @@ services:
         "--reload",
       ]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: >
+        /bin/sh -c '
+        TOKEN=$$(curl -s -X POST http://localhost:8000/api/login -H "Content-Type: application/json" -d "{\"username\":\"$$ADMIN_USER\",\"password\":\"$$ADMIN_PASSWORD\"}" | jq -r .access_token) &&
+        curl -f -H "Authorization: Bearer $$TOKEN" http://localhost:8000/health || exit 1'
       interval: 30s
       timeout: 30s
       retries: 5
