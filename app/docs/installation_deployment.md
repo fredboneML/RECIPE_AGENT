@@ -163,7 +163,7 @@ chmod +x deploy-app.sh
 
 #### 2. Environment Configuration
 ```bash
-# Create and configure environment file
+# Create and configure environment file inside the app and backend directories
 nano .env
 
 # Add all required environment variables (see Local Development Setup above)
@@ -334,8 +334,8 @@ docker-compose -f docker-compose.prod.yml up -d
 ### External API Configuration
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `URL` | External API URL | ❌ | - |
-| `API_KEY` | External API key | ❌ | - |
+| `URL` | External API URL | ✅ | - |
+| `API_KEY` | External API key | ✅ | - |
 
 ## Troubleshooting
 

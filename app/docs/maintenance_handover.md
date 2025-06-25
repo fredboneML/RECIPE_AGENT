@@ -103,7 +103,7 @@
 **Temporary Workaround**: Manual monitoring of API usage  
 **Permanent Solution**: Implement rate limiting and queue management  
 **Assigned To**: AI/ML Engineer  
-**Timeline**: Next major release  
+**Timeline**: to implement once Cloud deployment is in place 
 
 
 ## Configuration Management

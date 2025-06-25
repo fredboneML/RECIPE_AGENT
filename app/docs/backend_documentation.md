@@ -396,7 +396,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 ### Role-Based Access Control
 - **Admin Users**: Full access to all resources and user management
-- **Write Users**: Can create and modify data
 - **Read-Only Users**: Can only view data and run queries
 - **Tenant Isolation**: Users can only access data within their tenant
 
