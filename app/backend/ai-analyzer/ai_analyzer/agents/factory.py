@@ -6,6 +6,8 @@ from typing import List, Dict, Any, Optional
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from agno.knowledge.langchain import LangChainKnowledgeBase
+#  from agno.cookbook.agent_concepts.knowledge.langchain_kb import LangChainKnowledgeBase
+
 
 # Remove the FastEmbedEmbeddings import
 # from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
@@ -289,5 +291,113 @@ class AgentFactory:
             )
         except Exception as e:
             logger.error(f"Error creating SQL agent: {e}")
+            logger.exception("Detailed error:")
+            return None
+
+    @staticmethod
+    def create_recipe_search_manager(recipe_manager,
+                                     model_provider: str = "openai",
+                                     model_name: str = "gpt-4",
+                                     api_key: Optional[str] = None,
+                                     default_top_k: int = 3):
+        """
+        Create a Recipe Search Manager with all coordinated agents
+
+        Args:
+            recipe_manager: Instance of EnhancedTwoStepRecipeManager
+            model_provider: Model provider (openai, groq, etc.)
+            model_name: Model name to use
+            api_key: API key for the model
+            default_top_k: Default number of top results to return
+
+        Returns:
+            RecipeSearchManager instance
+        """
+        try:
+            from ai_analyzer.agents.recipe_search_manager import RecipeSearchManager
+
+            api_key = api_key or OPENAI_API_KEY
+
+            manager = RecipeSearchManager(
+                recipe_manager=recipe_manager,
+                model_provider=model_provider,
+                model_name=model_name,
+                api_key=api_key,
+                default_top_k=default_top_k
+            )
+
+            logger.info(
+                f"Successfully created Recipe Search Manager with {model_name}")
+            return manager
+
+        except Exception as e:
+            logger.error(f"Error creating Recipe Search Manager: {e}")
+            logger.exception("Detailed error:")
+            return None
+
+    @staticmethod
+    def create_data_extractor_router_agent(model_provider: str = "openai",
+                                           model_name: str = "gpt-4",
+                                           api_key: Optional[str] = None):
+        """Create a Data Extractor & Router Agent"""
+        try:
+            from ai_analyzer.agents.data_extractor_router import DataExtractorRouterAgent
+
+            api_key = api_key or OPENAI_API_KEY
+
+            agent = DataExtractorRouterAgent(
+                model_provider=model_provider,
+                model_name=model_name,
+                api_key=api_key
+            )
+
+            logger.info(f"Successfully created Data Extractor & Router Agent")
+            return agent
+
+        except Exception as e:
+            logger.error(f"Error creating Data Extractor & Router Agent: {e}")
+            logger.exception("Detailed error:")
+            return None
+
+    @staticmethod
+    def create_search_reranker_agent(recipe_manager, default_top_k: int = 3):
+        """Create a Search & Reranker Agent"""
+        try:
+            from ai_analyzer.agents.search_reranker import SearchRerankerAgent
+
+            agent = SearchRerankerAgent(
+                recipe_manager=recipe_manager,
+                default_top_k=default_top_k
+            )
+
+            logger.info(f"Successfully created Search & Reranker Agent")
+            return agent
+
+        except Exception as e:
+            logger.error(f"Error creating Search & Reranker Agent: {e}")
+            logger.exception("Detailed error:")
+            return None
+
+    @staticmethod
+    def create_recipe_generator_agent(model_provider: str = "openai",
+                                      model_name: str = "gpt-4",
+                                      api_key: Optional[str] = None):
+        """Create a Recipe Generator Agent"""
+        try:
+            from ai_analyzer.agents.recipe_generator import RecipeGeneratorAgent
+
+            api_key = api_key or OPENAI_API_KEY
+
+            agent = RecipeGeneratorAgent(
+                model_provider=model_provider,
+                model_name=model_name,
+                api_key=api_key
+            )
+
+            logger.info(f"Successfully created Recipe Generator Agent")
+            return agent
+
+        except Exception as e:
+            logger.error(f"Error creating Recipe Generator Agent: {e}")
             logger.exception("Detailed error:")
             return None

@@ -18,9 +18,8 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             username = payload.get("sub")
-            tenant_code = payload.get("tenant_code")
             role = payload.get("role")
-            if not username or not tenant_code or not role:
+            if not username or not role:
                 raise HTTPException(
                     status_code=401, detail="Invalid token payload")
         except JWTError:
@@ -34,7 +33,6 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         new_token = create_access_token(
             data={
                 "sub": user.username,
-                "tenant_code": user.tenant_code,
                 "role": user.role
             },
             expires_delta=access_token_expires

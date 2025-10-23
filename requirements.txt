@@ -1,7 +1,0 @@
-nltk==3.9.1
-matplotlib==3.9.2
-wordcloud==1.9.3
-numpy==2.1.1
-pandas==2.2.3
-jinja2==3.1.4
-openai==1.48.0

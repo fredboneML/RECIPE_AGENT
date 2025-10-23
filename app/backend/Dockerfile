@@ -16,13 +16,14 @@ WORKDIR /usr/src/app
 # Copy requirements.txt and install dependencies
 COPY requirements.txt .
 RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+# RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # Copy the entire application directory including all subdirectories
 COPY . .
 
 # Create necessary directories and ensure they exist
-RUN mkdir -p /usr/src/app/ai-analyzer/prompt_template /usr/src/app/ai-analyzer/data
+RUN mkdir -p /usr/src/app/ai-analyzer/prompt_template /usr/src/app/data
 
 # Move prompt_template directory to the correct location if it exists at the root
 RUN if [ -d "/usr/src/app/prompt_template" ]; then \

@@ -7,3 +7,4 @@ __pycache__/
 app/database/data/base
 .venv
 venv
+app/backend/ai-analyzer/data

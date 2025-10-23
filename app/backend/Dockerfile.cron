@@ -17,7 +17,7 @@ RUN apt-get update && \
 WORKDIR /usr/src/app
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /usr/src/app/ai-analyzer/data \
+RUN mkdir -p /usr/src/app/data \
     /usr/src/app/ai-analyzer/prompt_template \
     /var/log \
     && touch /var/log/cron.log \
@@ -29,11 +29,12 @@ COPY . /usr/src/app/
 RUN pip install --upgrade pip
 # Modify requirements to use psycopg2-binary instead of psycopg2
 RUN sed -i 's/psycopg2==/psycopg2-binary==/g' requirements.txt && \
-    pip install --no-cache-dir -r requirements.txt
+    # pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --upgrade -r requirements.txt
 
 # Set correct permissions
 RUN chmod -R 755 /usr/src/app \
-    && chmod -R 777 /usr/src/app/ai-analyzer/data
+    && chmod -R 777 /usr/src/app/data
 
 # Set environment variables
 ENV PYTHONPATH=/usr/src/app/ai-analyzer \

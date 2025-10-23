@@ -77,8 +77,13 @@ yarl==1.15.4
 qdrant-client==1.13.2
 fastembed==0.3.6
 torch==2.2.0
-agno>=1.0.0
+agno==1.7.3
 pybreaker>=0.8.0
+
+# Recipe Search Dependencies
+sentence-transformers==3.2.0
+scikit-learn==1.5.2
+openpyxl==3.1.2
 
 langchain-groq
 groq

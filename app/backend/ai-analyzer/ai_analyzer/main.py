@@ -1,38 +1,29 @@
 # app/backend/ai-analyzer/ai_analyzer/main.py
 from ai_analyzer.utils.singleton_resources import ResourceManager  # Fix the import path
-from ai_analyzer.data_pipeline import get_db_session
 from ai_analyzer.agents.workflow import CallAnalysisWorkflow  # Add this import
 from ai_analyzer.agents import AgentManager  # Import our new AgentManager
 from ai_analyzer.cache_manager import DatabaseCacheManager
 from ai_analyzer.data_import_postgresql import (
-    run_data_import,
     User,
     UserMemory,
-    store_conversation,
-    get_user_conversations,
-    get_conversation_messages
+    store_conversation
 )
 from ai_analyzer.config import config, DATABASE_URL, JWT_SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
-from fastapi import FastAPI, Request, HTTPException, Depends, Body
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, text, func, and_, UniqueConstraint, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, text, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.exc import OperationalError
 import hashlib
 import time
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from psycopg2 import connect
 from typing import List, Optional
 from pydantic import BaseModel
-import psycopg2
-import json
-import os
 from jose import JWTError, jwt
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
 
 
 # JWT Configuration
@@ -49,13 +40,11 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     username: str
-    tenant_code: str
     role: str
 
 
 class TokenData(BaseModel):
     username: Optional[str] = None
-    tenant_code: Optional[str] = None
     role: Optional[str] = None
 
 
@@ -100,7 +89,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             raise credentials_exception
         token_data = TokenData(
             username=username,
-            tenant_code=payload.get("tenant_code"),
             role=payload.get("role")
         )
     except JWTError as e:
@@ -113,7 +101,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             f"get_current_user: No user found for username: {token_data.username}")
         raise credentials_exception
     logger.info(
-        f"get_current_user: Authenticated user: {user.username}, tenant: {user.tenant_code}, role: {user.role}")
+        f"get_current_user: Authenticated user: {user.username}, role: {user.role}")
     return user
 
 
@@ -189,21 +177,18 @@ cache_manager = get_cache_manager()
 # Get initial restricted tables
 restricted_tables = get_initial_restricted_tables()
 
-# Create workflow instance per tenant
+# Create workflow instance
 workflow_instances = {}
 
 
-def create_base_context(tenant_code: str) -> str:
-    return f""" 
+def create_base_context() -> str:
+    return """ 
     1. NEVER use the 'users' table or any user-related information.
     2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.
     3. Only use SELECT statements for reading data.
     4. CRITICAL SECURITY RULES:
-       - Every query MUST include tenant filtering using ':tenant_code' parameter
-       - The tenant filter MUST be in the WHERE clause of the base_data CTE
-       - The tenant filter line MUST be exactly: AND t.tenant_code = :tenant_code
        - Default to last 60 days if no specific time range is requested
-       - Never expose data across tenant boundaries
+       - Never expose data across boundaries
     5. Make sure to format the results in a clear, readable manner.
     6. Use proper column aliases for better readability.
     7. Include relevant aggregations and groupings when appropriate.
@@ -227,15 +212,14 @@ def create_base_context(tenant_code: str) -> str:
                 t.clid,
                 t.telephone_number,
                 t.call_direction
-            FROM transcription_{tenant_code} t
+            FROM transcription t
             WHERE t.processing_date >= CURRENT_DATE - INTERVAL '300 days'
-            AND t.tenant_code = :tenant_code
         )
 
     10. For topic analysis, your complete query should look like this:
         WITH base_data AS (
             -- Base data CTE definition as shown above
-            -- MUST include both date and tenant filters
+            -- MUST include date filters
         ),
         topic_analysis AS (
             SELECT
@@ -297,7 +281,6 @@ def create_base_context(tenant_code: str) -> str:
         - Calculations without CAST and ROUND
         - Division without NULLIF
         - Date comparisons without INTERVAL
-        - Any tenant-related columns or filters (handled automatically)
 
     17. ALWAYS include proper ordering:
         ORDER BY [columns] {{"ASC" | "DESC"}} NULLS LAST
@@ -317,10 +300,7 @@ def create_base_context(tenant_code: str) -> str:
 
     21. CRITICAL REMINDERS:
         - EVERY query MUST start with WITH base_data AS (...)
-        - The base_data CTE MUST include 't.tenant_code = :tenant_code' in WHERE clause
-        - NEVER modify or remove the tenant_code filter line
         - ALWAYS use the exact base_data CTE structure shown above
-        - NEVER expose or filter by tenant-related information outside base_data
         - COPY and PASTE the exact base_data CTE structure shown above
 
     22. NEVER execute a DELETE, UPDATE, INSERT, DROP, or any other data modification statements.
@@ -336,27 +316,25 @@ def create_base_context(tenant_code: str) -> str:
         - Call direction statistics
         
     24. NEVER generate questions about:
-        - Tenant-specific data
         - User access or permissions
         - Data partitioning
         - System administration
     """
 
 
-def get_workflow_for_tenant(tenant_code: str) -> CallAnalysisWorkflow:
-    """Get or create a workflow instance for a tenant"""
+def get_workflow() -> CallAnalysisWorkflow:
+    """Get or create a workflow instance"""
     try:
-        logger.info(f"Creating workflow instance for tenant: {tenant_code}")
+        logger.info("Creating workflow instance")
         # Create a new workflow instance
-        workflow = CallAnalysisWorkflow(tenant_code=tenant_code)
-        logger.info(
-            f"Successfully created workflow instance for tenant: {tenant_code}")
+        workflow = CallAnalysisWorkflow()
+        logger.info("Successfully created workflow instance")
         return workflow
     except Exception as e:
-        logger.error(f"Error creating workflow for tenant {tenant_code}: {e}")
+        logger.error(f"Error creating workflow: {e}")
         logger.exception("Detailed error:")
         # Return a basic workflow as fallback
-        return CallAnalysisWorkflow(tenant_code=tenant_code)
+        return CallAnalysisWorkflow()
 
 
 def wait_for_db(max_retries=10, delay=10):
@@ -397,16 +375,9 @@ def wait_for_db(max_retries=10, delay=10):
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
-    username = Column(String, nullable=False)
+    username = Column(String, nullable=False, unique=True)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default='read_only')
-    tenant_code = Column(String, nullable=False)
-
-    # Username should be unique per tenant
-    __table_args__ = (
-        UniqueConstraint('username', 'tenant_code',
-                         name='uix_username_tenant'),
-    )
 
     def has_write_permission(self):
         return self.role in ['admin', 'write']
@@ -420,47 +391,6 @@ Base.metadata.create_all(bind=engine)
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
-
-
-def store_conversation(session, user_id, conversation_id, query, response, message_order=None, followup_questions=None):
-    """Store a conversation message with followup questions"""
-    try:
-        if message_order is None:
-            # Get the last message order for this conversation
-            last_message = session.query(UserMemory)\
-                .filter(UserMemory.conversation_id == conversation_id)\
-                .order_by(UserMemory.message_order.desc())\
-                .first()
-            message_order = (last_message.message_order +
-                             1) if last_message else 0
-
-        # Create a title from the query for new conversations
-        title = query[:50] + "..." if len(query) > 50 else query
-
-        # Store in UserMemory table
-        memory = UserMemory(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            query=query,
-            response=response,
-            title=title if message_order == 0 else None,  # Only set title for first message
-            message_order=message_order,
-            # Handle followup_questions
-            followup_questions=followup_questions if followup_questions else []
-        )
-
-        session.add(memory)
-        session.commit()
-
-        logger.info(
-            f"Stored conversation in UserMemory: {conversation_id}, order: {message_order}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Error storing conversation: {e}")
-        logger.exception("Detailed error:")
-        session.rollback()
-        return False
 
 
 def generate_title(query: str) -> str:
@@ -521,8 +451,7 @@ async def health_check(current_user: User = Depends(get_current_user)):
             "database": "connected",
             "qdrant": "connected",
             "collections": [c.name for c in collections.collections],
-            "user": current_user.username,
-            "tenant": current_user.tenant_code
+            "user": current_user.username
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -541,7 +470,7 @@ async def login(request: Request, db: Session = Depends(get_db)):
         username = data['username']
         password = data['password']
 
-        # Find user and their tenant code
+        # Find user
         user = db.query(User).filter(User.username == username).first()
 
         if not user:
@@ -565,7 +494,6 @@ async def login(request: Request, db: Session = Depends(get_db)):
         access_token = create_access_token(
             data={
                 "sub": user.username,
-                "tenant_code": user.tenant_code,
                 "role": user.role
             },
             expires_delta=access_token_expires
@@ -573,13 +501,12 @@ async def login(request: Request, db: Session = Depends(get_db)):
 
         # If we get here, authentication is successful
         logger.info(
-            f"Successful login for user {username} with tenant {user.tenant_code}")
+            f"Successful login for user {username}")
         return {
             "success": True,
             "access_token": access_token,
             "token_type": "bearer",
             "username": user.username,
-            "tenant_code": user.tenant_code,
             "role": user.role,
             "permissions": {
                 "canWrite": user.has_write_permission()
@@ -642,7 +569,7 @@ async def process_query(
 ):
     logger = logging.getLogger(__name__)
     logger.info(
-        f"/api/query: Received request from user: {getattr(current_user, 'username', None)} tenant: {getattr(current_user, 'tenant_code', None)} role: {getattr(current_user, 'role', None)}")
+        f"/api/query: Received request from user: {getattr(current_user, 'username', None)} role: {getattr(current_user, 'role', None)}")
     try:
         # Parse request body
         body = await request.json()
@@ -650,23 +577,19 @@ async def process_query(
         query = body.get("query", "")
         conversation_id = body.get("conversation_id", "")
 
-        # Use tenant code from the authenticated user - ensure we get the string value
-        tenant_code = str(current_user.tenant_code)
-
         # Validate input
         if not query:
             logger.warning("/api/query: Query is missing in request body")
             raise HTTPException(status_code=400, detail="Query is required")
 
         logger.info(
-            f"/api/query: Processing query: '{query}' for tenant: {tenant_code}")
+            f"/api/query: Processing query: '{query}' ")
         if conversation_id:
             logger.info(
                 f"/api/query: Continuing conversation: {conversation_id}")
 
         # Create agent manager
-        agent_manager = AgentManager(
-            tenant_code=tenant_code, session=db_session)
+        agent_manager = AgentManager(session=db_session)
 
         # Process the query using the hybrid approach
         response = agent_manager.process_query(query, conversation_id)
@@ -675,7 +598,7 @@ async def process_query(
         followup_questions = agent_manager.generate_followup_questions(
             "query", [query], [response])
 
-        # Store conversation in database using tenant_code as user_id
+        # Store conversation in database using user_id
         if not conversation_id:
             conversation_id = str(uuid.uuid4())
 
@@ -684,7 +607,7 @@ async def process_query(
                 f"/api/query: Storing conversation with ID: {conversation_id}")
             store_conversation(
                 db_session,
-                tenant_code,  # Use tenant_code as user_id
+                current_user.id,  # Use user ID
                 conversation_id,
                 query,
                 response,
@@ -719,14 +642,12 @@ async def query_sql(request: Request, db_session: Session = Depends(get_db)):
         data = await request.json()
         question = data.get("question", "")
         conversation_id = data.get("conversation_id", "")
-        tenant_code = data.get("tenant_code", "")
 
-        workflow = get_workflow_for_tenant(tenant_code)
+        workflow = get_workflow()
         result = await workflow.process_user_question(
             question,
             conversation_id,
-            db_session,
-            tenant_code
+            db_session
         )
 
         logger.info(f"Workflow result: {result}")
@@ -748,9 +669,7 @@ async def get_conversations(
     logger.info(
         f"get_conversations: Endpoint called with user: {current_user.username if current_user else 'None'}")
     try:
-        # Use tenant code from the authenticated user - ensure we get the string value
-        tenant_code = str(current_user.tenant_code)
-        logger.info(f"Getting conversations for tenant: {tenant_code}")
+        logger.info(f"Getting conversations for user: {current_user.username}")
 
         # Get distinct conversation IDs with their first message (for title)
         # First, get all distinct conversation IDs
@@ -761,9 +680,9 @@ async def get_conversations(
                     'first_message_order'),
                 func.max(UserMemory.timestamp).label('latest_timestamp')
             ).filter(
-                UserMemory.is_active == True,
+                UserMemory.is_active,
                 UserMemory.expires_at > datetime.utcnow(),
-                UserMemory.user_id == tenant_code
+                UserMemory.user_id == current_user.id
             ).group_by(
                 UserMemory.conversation_id
             ).order_by(
@@ -776,7 +695,7 @@ async def get_conversations(
             return []
 
         logger.info(
-            f"Found {len(distinct_conversations)} conversations for tenant {tenant_code}")
+            f"Found {len(distinct_conversations)} conversations for user {current_user.username}")
 
         # Now get the first message of each conversation for the title
         result = []
@@ -785,7 +704,7 @@ async def get_conversations(
             first_message = db.query(UserMemory).filter(
                 UserMemory.conversation_id == conv_id,
                 UserMemory.message_order == first_order,
-                UserMemory.user_id == tenant_code
+                UserMemory.user_id == current_user.id
             ).first()
 
             if first_message:
@@ -815,9 +734,6 @@ async def get_initial_questions(
 ):
     """Generate initial questions for a transcription"""
     try:
-        # Use tenant code from the authenticated user - ensure we get the string value
-        tenant_code = str(current_user.tenant_code)
-
         # Get UI language preference from headers (default to Dutch)
         ui_language = request.headers.get('X-UI-Language', 'nl')
 
@@ -1000,9 +916,6 @@ async def analyze_response(
         question_id = data.get("question_id")
         response_text = data.get("response")
 
-        # Use tenant code from the authenticated user - ensure we get the string value
-        tenant_code = str(current_user.tenant_code)
-
         if not all([transcription_id, question_id, response_text]):
             raise HTTPException(
                 status_code=400,
@@ -1010,8 +923,7 @@ async def analyze_response(
             )
 
         # Create agent manager
-        agent_manager = AgentManager(
-            tenant_code=tenant_code, session=db_session)
+        agent_manager = AgentManager(session=db_session)
 
         # Analyze response
         analysis = agent_manager.analyze_response(
@@ -1046,9 +958,6 @@ async def generate_followup(
         questions = data.get("questions", [])
         responses = data.get("responses", [])
 
-        # Use tenant code from the authenticated user - ensure we get the string value
-        tenant_code = str(current_user.tenant_code)
-
         if not questions or not responses:
             raise HTTPException(
                 status_code=400,
@@ -1056,8 +965,7 @@ async def generate_followup(
             )
 
         # Create agent manager
-        agent_manager = AgentManager(
-            tenant_code=tenant_code, session=db_session)
+        agent_manager = AgentManager(session=db_session)
 
         # Generate follow-up questions
         followup_questions = agent_manager.generate_followup_questions(
@@ -1085,17 +993,15 @@ async def get_conversation(
     db: Session = Depends(get_db)
 ):
     try:
-        # Use tenant code from the authenticated user - ensure we get the string value
-        tenant_code = str(current_user.tenant_code)
         logger.info(
-            f"Getting conversation {conversation_id} for tenant: {tenant_code}")
+            f"Getting conversation {conversation_id} for user: {current_user.username}")
 
-        # Get messages for conversation with tenant isolation
+        # Get messages for conversation with user isolation
         messages = db.query(UserMemory)\
             .filter(
                 UserMemory.conversation_id == conversation_id,
-                UserMemory.user_id == tenant_code,  # Add tenant isolation
-                UserMemory.is_active == True
+                UserMemory.user_id == current_user.id,  # Add user isolation
+                UserMemory.is_active
         )\
             .order_by(UserMemory.message_order.asc())\
             .all()
@@ -1178,26 +1084,6 @@ async def add_user(request: Request, db: Session = Depends(get_db), current_user
     return {"success": True, "message": "User added successfully"}
 
 
-# Add this function to extract tenant code from request
-def get_tenant_code_from_request(request: Request) -> str:
-    """Extract tenant code from request headers or default to a fallback tenant"""
-    # Try to get from headers first
-    tenant_code = request.headers.get('X-Tenant-Code', '')
-
-    # If not in headers, try to get from cookies
-    if not tenant_code:
-        cookies = request.cookies
-        tenant_code = cookies.get('tenant_code', '')
-
-    # If still not found, use a default tenant
-    if not tenant_code:
-        tenant_code = config.get('DEFAULT_TENANT', 'default')
-        logger.warning(
-            f"No tenant code found in request, using default: {tenant_code}")
-
-    return tenant_code
-
-
 # Add this function to create conversation tables
 def create_conversation_tables(engine):
     """Create tables for storing conversations if they don't exist"""
@@ -1245,9 +1131,8 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             username = payload.get("sub")
-            tenant_code = payload.get("tenant_code")
             role = payload.get("role")
-            if not username or not tenant_code or not role:
+            if not username or not role:
                 raise HTTPException(
                     status_code=401, detail="Invalid token payload")
         except JWTError:
@@ -1261,7 +1146,6 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         new_token = create_access_token(
             data={
                 "sub": user.username,
-                "tenant_code": user.tenant_code,
                 "role": user.role
             },
             expires_delta=access_token_expires

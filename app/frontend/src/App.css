@@ -22,7 +22,7 @@
 }
 
 .new-conversation button {
-  background-color: #4caf50;
+  background-color: #9f1a15;
   color: white;
   border: none;
   padding: 15px;
@@ -39,7 +39,7 @@
 }
 
 .new-conversation button:hover {
-  background-color: #45a049;
+  background-color: #851612;
 }
 
 /* Conversation summaries */
@@ -93,12 +93,17 @@
 }
 
 .user-initial button {
-  background-color: #4caf50;
+  background-color: #9f1a15;
   color: white;
   border: none;
   padding: 10px;
   cursor: pointer;
   border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.user-initial button:hover {
+  background-color: #851612;
 }
 
 /* Popup for Sign Off */
@@ -115,12 +120,16 @@
 }
 
 .popup button {
-  background-color: #f44336;
+  background-color: #9f1a15;
   color: white;
   border: none;
   padding: 5px 10px;
   cursor: pointer;
   border-radius: 3px;
+}
+
+.popup button:hover {
+  background-color: #851612;
 }
 
 /* Landing Section */
@@ -134,6 +143,21 @@
 .large-logo {
   width: 150px;
   margin: 50px auto 20px;
+}
+
+.landing-title {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 600;
+  color: #333;
+  margin: 20px 0 10px;
+}
+
+.landing-subtitle {
+  text-align: center;
+  font-size: 1.1rem;
+  color: #666;
+  margin: 0 0 40px;
 }
 
 /* Question Categories */
@@ -311,7 +335,7 @@
 
 .query-input button {
   padding: 12px 24px;
-  background-color: #4caf50;
+  background-color: #9f1a15;
   color: white;
   border: none;
   border-radius: 5px;
@@ -320,7 +344,7 @@
 }
 
 .query-input button:hover {
-  background-color: #45a049;
+  background-color: #851612;
 }
 
 .query-input button.stop-button {

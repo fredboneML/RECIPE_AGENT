@@ -15,8 +15,6 @@ function App() {
   const [showPopup, setShowPopup] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRequestCanceled, setIsRequestCanceled] = useState(false);
-  const [categories, setCategories] = useState({});
-  const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
   
   const navigate = useNavigate();
   const textareaRef = useRef(null);
@@ -77,7 +75,6 @@ function App() {
   
         const conversationsData = await conversationsResponse.json();
         setConversations(conversationsData);
-        await fetchInitialQuestions();
   
       } catch (error) {
         console.error('App.js - Auth verification failed:', error);
@@ -100,13 +97,6 @@ function App() {
     }
   }, [query]);
 
-  // Add effect to refetch initial questions when language changes
-  useEffect(() => {
-    if (!isAuthChecking) {
-      fetchInitialQuestions();
-    }
-  }, [language]);
-
   useEffect(() => {
     tokenManager.scheduleRefresh();
   }, []);
@@ -119,27 +109,6 @@ function App() {
     'X-UI-Language': language,
     'Authorization': `Bearer ${localStorage.getItem('token')}`,
   });
-
-  // Update fetchInitialQuestions to use tokenManager
-  const fetchInitialQuestions = async () => {
-    try {
-      const response = await tokenManager.get('/api/initial-questions', {
-        headers: {
-          'X-UI-Language': language,
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setCategories(data.categories);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching initial questions:', error);
-    } finally {
-      setIsLoadingQuestions(false);
-    }
-  };
 
   const fetchConversations = async () => {
     try {
@@ -311,11 +280,6 @@ function App() {
 
       <div className="content">
         <div className="top-bar">
-          <div className="language-toggle">
-            <button onClick={() => setLanguage(language === 'nl' ? 'en' : 'nl')}>
-              {language === 'nl' ? 'EN' : 'NL'}
-            </button>
-          </div>
           <div className="user-initial" onClick={() => setShowPopup(!showPopup)}>
             <button>{userInitial}</button>
           </div>
@@ -330,29 +294,8 @@ function App() {
           {!currentConversation && !messages.length && (
             <>
               <img src="/logo.png" alt="Company Logo" className="large-logo" />
-              {isLoadingQuestions ? (
-                <div className="loading-questions">{t('loadingSuggestions')}</div>
-              ) : (
-                <div className="question-categories">
-                  {Object.entries(categories).map(([category, data]) => (
-                    <div key={category} className="category-section">
-                      <h3 className="category-title">{category}</h3>
-                      <p className="category-description">{data.description}</p>
-                      <div className="common-questions">
-                        {data.questions.map((question, index) => (
-                          <div
-                            key={index}
-                            className="question-box"
-                            onClick={() => handleQuestionClick(question)}
-                          >
-                            {question}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <h1 className="landing-title">Recipes Search Agent</h1>
+              <p className="landing-subtitle">Upload a customer brief or write your search description in the field bellow</p>
             </>
           )}
 
