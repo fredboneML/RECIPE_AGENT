@@ -9,7 +9,6 @@ import uuid
 from jose import JWTError, jwt
 from datetime import timedelta
 
-from ai_analyzer.agents import AgentManager
 from ai_analyzer.data_pipeline import get_db_session
 from ai_analyzer.config import JWT_SECRET_KEY, JWT_ALGORITHM
 
@@ -39,18 +38,16 @@ app.add_middleware(
 
 
 class User:
-    def __init__(self, username: str, tenant_code: str, role: str):
+    def __init__(self, username: str, role: str):
         self.username = username
-        self.tenant_code = tenant_code
         self.role = role
 
 # Token data model
 
 
 class TokenData:
-    def __init__(self, username: str = None, tenant_code: str = None, role: str = None):
+    def __init__(self, username: str = None, role: str = None):
         self.username = username
-        self.tenant_code = tenant_code
         self.role = role
 
 # Dependency to get database session
@@ -85,7 +82,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             raise credentials_exception
         token_data = TokenData(
             username=username,
-            tenant_code=payload.get("tenant_code"),
             role=payload.get("role")
         )
     except JWTError as e:
@@ -94,18 +90,17 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
     # For this simplified version, we'll create a User object from token data
     # In a real implementation, you'd query the database to verify the user exists
-    if not all([token_data.username, token_data.tenant_code, token_data.role]):
+    if not all([token_data.username, token_data.role]):
         logger.warning(f"get_current_user: Incomplete token data")
         raise credentials_exception
 
     user = User(
         username=token_data.username,
-        tenant_code=token_data.tenant_code,
         role=token_data.role
     )
 
     logger.info(
-        f"get_current_user: Authenticated user: {user.username}, tenant: {user.tenant_code}, role: {user.role}")
+        f"get_current_user: Authenticated user: {user.username}, role: {user.role}")
     return user
 
 
@@ -114,8 +109,7 @@ def health_check(current_user: User = Depends(get_current_user)):
     """Health check endpoint with JWT authentication"""
     return {
         "status": "healthy",
-        "user": current_user.username,
-        "tenant": current_user.tenant_code
+        "user": current_user.username
     }
 
 
@@ -128,9 +122,6 @@ async def get_initial_questions(
 ):
     """Generate initial questions for a transcription"""
     try:
-        # Use tenant code from the authenticated user
-        tenant_code = current_user.tenant_code
-
         # Create a hardcoded response with unique IDs for each question
         initial_questions = {
             "Trending Topics": {
@@ -242,80 +233,3 @@ async def get_initial_questions(
                 }
             }
         }
-
-
-@app.post("/api/analyze-response")
-def analyze_response(
-    request: Dict[str, Any],
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
-):
-    """Analyze a response to a question"""
-    try:
-        # Use tenant code from the authenticated user
-        tenant_code = current_user.tenant_code
-        transcription_id = request.get("transcription_id")
-        question_id = request.get("question_id")
-        response_text = request.get("response")
-
-        if not all([transcription_id, question_id, response_text]):
-            raise HTTPException(
-                status_code=400, detail="Missing required fields: transcription_id, question_id, response")
-
-        # Create agent manager
-        agent_manager = AgentManager(tenant_code=tenant_code, session=session)
-
-        # Analyze response
-        analysis = agent_manager.analyze_response(
-            transcription_id, question_id, response_text)
-
-        return {
-            "success": True,
-            "analysis": analysis
-        }
-    except Exception as e:
-        logger.error(f"Error analyzing response: {e}")
-        logger.exception("Detailed error:")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/generate-followup-questions")
-def generate_followup_questions(
-    request: Dict[str, Any],
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
-):
-    """Generate follow-up questions based on previous responses"""
-    try:
-        # Use tenant code from the authenticated user
-        tenant_code = current_user.tenant_code
-        transcription_id = request.get("transcription_id")
-        previous_questions = request.get("previous_questions", [])
-        previous_responses = request.get("previous_responses", [])
-
-        if not transcription_id:
-            raise HTTPException(
-                status_code=400, detail="Missing transcription_id")
-
-        if len(previous_questions) != len(previous_responses):
-            raise HTTPException(
-                status_code=400, detail="Mismatched questions and responses")
-
-        # Create agent manager
-        agent_manager = AgentManager(tenant_code=tenant_code, session=session)
-
-        # Generate follow-up questions
-        questions = agent_manager.generate_followup_questions(
-            transcription_id,
-            previous_questions,
-            previous_responses
-        )
-
-        return {
-            "success": True,
-            "questions": questions
-        }
-    except Exception as e:
-        logger.error(f"Error generating follow-up questions: {e}")
-        logger.exception("Detailed error:")
-        raise HTTPException(status_code=500, detail=str(e))

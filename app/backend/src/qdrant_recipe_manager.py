@@ -52,7 +52,7 @@ class QdrantRecipeManager:
             logger.error(f"Failed to connect to Qdrant: {e}")
             raise
 
-        # Initialize embedding model
+        # Initialize embedding model - use SentenceTransformer (same as indexing)
         try:
             self.embedding_model = SentenceTransformer(embedding_model)
             logger.info(f"Loaded embedding model: {embedding_model}")
@@ -98,7 +98,7 @@ class QdrantRecipeManager:
             List of matching recipes with scores
         """
         try:
-            # Create embedding for query
+            # Create embedding for query using SentenceTransformer
             query_vector = self.embedding_model.encode(text_description)
 
             # Search in Qdrant

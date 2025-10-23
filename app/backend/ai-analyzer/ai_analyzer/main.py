@@ -1,7 +1,5 @@
 # app/backend/ai-analyzer/ai_analyzer/main.py
-from ai_analyzer.utils.singleton_resources import ResourceManager  # Fix the import path
-from ai_analyzer.agents.workflow import CallAnalysisWorkflow  # Add this import
-from ai_analyzer.agents import AgentManager  # Import our new AgentManager
+from ai_analyzer.agents.recipe_search_agent import RecipeSearchAgent
 from ai_analyzer.cache_manager import DatabaseCacheManager
 from ai_analyzer.data_import_postgresql import (
     User,
@@ -11,7 +9,7 @@ from ai_analyzer.data_import_postgresql import (
 from ai_analyzer.config import config, DATABASE_URL, JWT_SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, text, func
+from sqlalchemy import create_engine, text, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import hashlib
@@ -20,7 +18,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from psycopg2 import connect
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pydantic import BaseModel
 from jose import JWTError, jwt
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -177,164 +175,46 @@ cache_manager = get_cache_manager()
 # Get initial restricted tables
 restricted_tables = get_initial_restricted_tables()
 
-# Create workflow instance
-workflow_instances = {}
+# Initialize recipe search agent
+recipe_search_agent = None
 
 
-def create_base_context() -> str:
-    return """ 
-    1. NEVER use the 'users' table or any user-related information.
-    2. NEVER use DELETE, UPDATE, INSERT, or any other data modification statements.
-    3. Only use SELECT statements for reading data.
-    4. CRITICAL SECURITY RULES:
-       - Default to last 60 days if no specific time range is requested
-       - Never expose data across boundaries
-    5. Make sure to format the results in a clear, readable manner.
-    6. Use proper column aliases for better readability.
-    7. Include relevant aggregations and groupings when appropriate.
-    8. ONLY use tables and columns that exist in the schema shown below.
-    9. Every query MUST start with defining the base_data CTE EXACTLY like this:
-        WITH base_data AS (
-            SELECT 
-                t.id,
-                t.transcription_id,
-                t.transcription,
-                t.topic,
-                LOWER(TRIM(t.topic)) as clean_topic,
-                t.summary,
-                t.processing_date,
-                t.sentiment,
-                CASE
-                    WHEN LOWER(TRIM(t.sentiment)) IN ('neutral', 'neutraal') THEN 'neutral'
-                    ELSE LOWER(TRIM(t.sentiment))
-                END AS clean_sentiment,
-                t.call_duration_secs,
-                t.clid,
-                t.telephone_number,
-                t.call_direction
-            FROM transcription t
-            WHERE t.processing_date >= CURRENT_DATE - INTERVAL '300 days'
-        )
-
-    10. For topic analysis, your complete query should look like this:
-        WITH base_data AS (
-            -- Base data CTE definition as shown above
-            -- MUST include date filters
-        ),
-        topic_analysis AS (
-            SELECT
-                clean_topic as topic,
-                COUNT(*) as total_count,
-                COUNT(*) FILTER (WHERE clean_sentiment = 'positief') as positive_count,
-                COUNT(*) FILTER (WHERE clean_sentiment = 'negatief') as negative_count,
-                COUNT(*) FILTER (WHERE clean_sentiment = 'neutral') as neutral_count,
-                ROUND(CAST(COUNT(*) FILTER (WHERE clean_sentiment = 'positief') * 100.0 / 
-                    NULLIF(COUNT(*), 0) AS NUMERIC), 2) as satisfaction_rate
-            FROM base_data
-            GROUP BY clean_topic
-            HAVING COUNT(*) > 0
-        )
-        SELECT * FROM topic_analysis ...
-
-    11. For time-based analysis, your complete query should look like this:
-        WITH base_data AS (
-            -- Base data CTE definition as shown above
-        ),
-        time_based_data AS (
-            SELECT 
-                id,
-                transcription_id,
-                clean_topic,
-                clean_sentiment,
-                clid,
-                processing_date,
-                CASE
-                    WHEN processing_date >= CURRENT_DATE - INTERVAL '7 days' THEN 'Current Week'
-                    WHEN processing_date >= CURRENT_DATE - INTERVAL '14 days' THEN 'Previous Week'
-                    WHEN processing_date >= CURRENT_DATE - INTERVAL '30 days' THEN 'Current Month'
-                    WHEN processing_date >= CURRENT_DATE - INTERVAL '60 days' THEN 'Previous Month'
-                END AS time_period
-            FROM base_data
-            WHERE processing_date >= CURRENT_DATE - INTERVAL '300 days'
-        )
-        SELECT * FROM time_based_data ...
-
-    12. For text comparisons, ALWAYS use these patterns:
-        - Exact match: clean_topic = 'value' or clean_sentiment = 'value'
-        - Partial match: clean_topic LIKE '%value%'
-
-    13. For calculations ALWAYS use:
-        - NULLIF(value, 0) for division
-        - COALESCE(value, 0) for NULL handling
-        - ROUND(CAST(value AS NUMERIC), 2) for decimals
-
-    14. For filtering dates ALWAYS use:
-        - WHERE processing_date >= CURRENT_DATE - INTERVAL 'X days'
-
-    15. For aggregations ALWAYS use:
-        - COUNT(*) FILTER (WHERE condition) for conditional counting
-        - SUM(CASE WHEN condition THEN 1 ELSE 0 END) for counting matches
-
-    16. Never use:
-        - Raw tables directly (always go through base_data)
-        - Raw topic or sentiment columns (always use clean_topic and clean_sentiment)
-        - Calculations without CAST and ROUND
-        - Division without NULLIF
-        - Date comparisons without INTERVAL
-
-    17. ALWAYS include proper ordering:
-        ORDER BY [columns] {{"ASC" | "DESC"}} NULLS LAST
-
-    18. For limiting results:
-        LIMIT [number]
-
-    19. Make sure to answer the question using the same language used by the user to ask it.
-
-    20. Focus on these types of analysis:
-        - Topic trends and patterns
-        - Sentiment analysis
-        - Call duration statistics
-        - Time-based patterns
-        - Customer interaction analysis
-        - Call direction analysis
-
-    21. CRITICAL REMINDERS:
-        - EVERY query MUST start with WITH base_data AS (...)
-        - ALWAYS use the exact base_data CTE structure shown above
-        - COPY and PASTE the exact base_data CTE structure shown above
-
-    22. NEVER execute a DELETE, UPDATE, INSERT, DROP, or any other data modification statements.
-
-    23. Always use the last 2 months as default value when generating the SQL query and only change it if required by the user.
-
-    23. Generate questions only about:
-        - Call topics and their trends
-        - Sentiment patterns
-        - Call durations and patterns
-        - Time-based analysis
-        - Customer interaction patterns
-        - Call direction statistics
-        
-    24. NEVER generate questions about:
-        - User access or permissions
-        - Data partitioning
-        - System administration
-    """
-
-
-def get_workflow() -> CallAnalysisWorkflow:
-    """Get or create a workflow instance"""
+def initialize_recipe_search_agent():
+    """Initialize the recipe search agent"""
+    global recipe_search_agent
     try:
-        logger.info("Creating workflow instance")
-        # Create a new workflow instance
-        workflow = CallAnalysisWorkflow()
-        logger.info("Successfully created workflow instance")
-        return workflow
+        logger.info("Initializing recipe search agent...")
+        recipe_search_agent = RecipeSearchAgent()
+        logger.info("Recipe search agent initialized successfully")
+        return True
     except Exception as e:
-        logger.error(f"Error creating workflow: {e}")
+        logger.error(f"Error initializing recipe search agent: {e}")
         logger.exception("Detailed error:")
-        # Return a basic workflow as fallback
-        return CallAnalysisWorkflow()
+        return False
+
+
+# Recipe Search Request Model
+class RecipeSearchRequest(BaseModel):
+    """Request model for recipe search"""
+    description: str
+    # Optional feature refinement
+    features: Optional[List[Dict[str, str]]] = None
+    text_top_k: int = 20  # Number of candidates from text search
+    final_top_k: int = 10  # Final number of results
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "description": "Fruit: Yellow peach particulates, max 12mm in size. Can also use a peach puree. Apricot Puree. Fruit content to be >30%. Flavour profile: Balanced peach and apricot flavours.",
+                "features": [
+                    {"charactDescr": "Puree/with pieces", "valueCharLong": "puree"},
+                    {"charactDescr": "Industry (SD Reporting)",
+                     "valueCharLong": "Dairy"}
+                ],
+                "text_top_k": 20,
+                "final_top_k": 10
+            }
+        }
 
 
 def wait_for_db(max_retries=10, delay=10):
@@ -367,20 +247,6 @@ def wait_for_db(max_retries=10, delay=10):
             if i < max_retries - 1:  # Don't sleep on the last attempt
                 time.sleep(delay)
     return False
-
-
-# User model
-# Remove the current User model in main.py and replace it with:
-
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    username = Column(String, nullable=False, unique=True)
-    password_hash = Column(String, nullable=False)
-    role = Column(String, nullable=False, default='read_only')
-
-    def has_write_permission(self):
-        return self.role in ['admin', 'write']
 
 
 # Create tables
@@ -418,6 +284,9 @@ async def startup_event():
         finally:
             db.close()
 
+        # Initialize recipe search agent
+        initialize_recipe_search_agent()
+
         logger.info("Application startup completed successfully")
 
     except Exception as e:
@@ -440,18 +309,15 @@ async def health_check(current_user: User = Depends(get_current_user)):
             conn.execute(text("SELECT 1"))
         logger.info("SQLAlchemy connection successful")
 
-        # Check Qdrant connection
-        resource_manager = ResourceManager()
-        qdrant_client = resource_manager.get_qdrant_client()
-        collections = qdrant_client.get_collections()
-        logger.info("Qdrant connection successful")
+        # Check recipe search service
+        global recipe_search_agent
+        recipe_status = "available" if recipe_search_agent else "unavailable"
 
         return {
             "status": "healthy",
             "database": "connected",
-            "qdrant": "connected",
-            "collections": [c.name for c in collections.collections],
-            "user": current_user.username
+            "user": current_user.username,
+            "recipe_service": recipe_status
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -520,16 +386,6 @@ async def login(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
-# Add this function near the top with other utility functions
-def get_default_followup_questions() -> List[str]:
-    """Get default followup questions when error occurs"""
-    return [
-        "What are the most common topics in our calls?",
-        "How has customer sentiment changed over time?",
-        "Can you show me the breakdown of call topics by sentiment?"
-    ]
-
-
 # Update the QueryRequest model to handle both 'query' and 'question'
 class QueryRequest(BaseModel):
     # Allow either 'query' or 'question' field
@@ -574,29 +430,47 @@ async def process_query(
         # Parse request body
         body = await request.json()
         logger.info(f"/api/query: Request body: {body}")
+
+        # Extract query parameters
         query = body.get("query", "")
         conversation_id = body.get("conversation_id", "")
+        features = body.get("features", None)
+        text_top_k = body.get("text_top_k", 20)
+        final_top_k = body.get("final_top_k", 10)
 
         # Validate input
         if not query:
             logger.warning("/api/query: Query is missing in request body")
             raise HTTPException(status_code=400, detail="Query is required")
 
-        logger.info(
-            f"/api/query: Processing query: '{query}' ")
+        logger.info(f"/api/query: Processing recipe search query: '{query}'")
         if conversation_id:
             logger.info(
                 f"/api/query: Continuing conversation: {conversation_id}")
 
-        # Create agent manager
-        agent_manager = AgentManager(session=db_session)
+        # Check if recipe search agent is available
+        global recipe_search_agent
+        if not recipe_search_agent:
+            logger.error("Recipe search agent not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail="Recipe search service not available. Please try again later."
+            )
 
-        # Process the query using the hybrid approach
-        response = agent_manager.process_query(query, conversation_id)
+        # Search for recipes
+        results, metadata, formatted_response = recipe_search_agent.search_recipes(
+            description=query,
+            features=features,
+            text_top_k=text_top_k,
+            final_top_k=final_top_k
+        )
+
+        # Use the formatted response from the agent
+        response = formatted_response
 
         # Generate follow-up questions
-        followup_questions = agent_manager.generate_followup_questions(
-            "query", [query], [response])
+        followup_questions = recipe_search_agent.generate_followup_questions(
+            results, query)
 
         # Store conversation in database using user_id
         if not conversation_id:
@@ -607,7 +481,7 @@ async def process_query(
                 f"/api/query: Storing conversation with ID: {conversation_id}")
             store_conversation(
                 db_session,
-                current_user.id,  # Use user ID
+                str(current_user.id),  # Convert user ID to string
                 conversation_id,
                 query,
                 response,
@@ -625,40 +499,131 @@ async def process_query(
         return {
             "response": response,
             "conversation_id": conversation_id,
-            "followup_questions": followup_questions
+            "followup_questions": followup_questions,
+            "search_results": results,  # Include raw results for frontend
+            "metadata": metadata
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"/api/query: Error processing query: {e}")
         logger.exception("/api/query: Detailed error:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Keep the old endpoint for backward compatibility
-@app.post("/api/query_sql")
-async def query_sql(request: Request, db_session: Session = Depends(get_db)):
-    """Legacy endpoint that uses SQL-based workflow"""
-    try:
-        data = await request.json()
-        question = data.get("question", "")
-        conversation_id = data.get("conversation_id", "")
+@app.get("/api/recipe-service-status")
+async def get_recipe_service_status(current_user: User = Depends(get_current_user)):
+    """Get the status of the recipe search service"""
+    global recipe_search_agent
 
-        workflow = get_workflow()
-        result = await workflow.process_user_question(
-            question,
-            conversation_id,
-            db_session
+    if not recipe_search_agent:
+        return {
+            "status": "unavailable",
+            "message": "Recipe service not initialized",
+            "total_recipes": 0
+        }
+
+    try:
+        return recipe_search_agent.get_service_status()
+    except Exception as e:
+        logger.error(f"Error getting recipe service status: {e}")
+        return {
+            "status": "error",
+            "message": f"Error getting service status: {str(e)}",
+            "total_recipes": 0
+        }
+
+
+@app.post("/api/recipe-search")
+async def search_recipes(
+    request: RecipeSearchRequest,
+    current_user: User = Depends(get_current_user),
+    db_session: Session = Depends(get_db)
+):
+    """Search for similar recipes based on description and optional features"""
+    logger = logging.getLogger(__name__)
+    logger.info(f"Recipe search request from user: {current_user.username}")
+
+    try:
+        global recipe_search_agent
+
+        # Check if recipe manager is initialized
+        if not recipe_search_agent:
+            logger.error("Recipe search agent not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail="Recipe search service not available. Please try again later."
+            )
+
+        # Validate input
+        if not request.description.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Recipe description is required"
+            )
+
+        logger.info(
+            f"Searching recipes for description: '{request.description[:100]}...'")
+
+        # Search for recipes
+        results, metadata, formatted_response = recipe_search_agent.search_recipes(
+            description=request.description,
+            features=request.features,
+            text_top_k=request.text_top_k,
+            final_top_k=request.final_top_k
         )
 
-        logger.info(f"Workflow result: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
-        logger.exception("Detailed error:")
+        if not results:
+            logger.info("No recipes found matching the description")
+            return {
+                "success": True,
+                "message": formatted_response,
+                "results": [],
+                "metadata": metadata
+            }
+
+        # Format results for API response
+        formatted_results = []
+        for i, result in enumerate(results, 1):
+            formatted_result = {
+                "rank": i,
+                "recipe_id": result.get("id", f"recipe_{i}"),
+                "description": result.get("description", ""),
+                "text_score": round(result.get("text_score", 0), 4),
+                "feature_score": round(result.get("feature_score", 0), 4) if result.get("feature_score") else None,
+                "combined_score": round(result.get("combined_score", result.get("text_score", 0)), 4),
+                "features": result.get("features", []),
+                "values": result.get("values", []),
+                "feature_text": result.get("feature_text", ""),
+                "metadata": result.get("metadata", {})
+            }
+            formatted_results.append(formatted_result)
+
+        logger.info(f"Found {len(formatted_results)} recipes")
+
         return {
-            "success": False,
-            "error": str(e)
+            "success": True,
+            "message": formatted_response,
+            "results": formatted_results,
+            "metadata": {
+                "search_type": metadata.get("search_type", "two_step"),
+                "text_candidates": metadata.get("text_candidates", request.text_top_k),
+                "final_results": metadata.get("final_results_count", len(formatted_results)),
+                "feature_refinement": metadata.get("refinement_completed", False),
+                "total_recipes_searched": recipe_search_agent.recipe_manager.get_stats().get("total_recipes", 0) if recipe_search_agent.recipe_manager else 0
+            }
         }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in recipe search: {e}")
+        logger.exception("Detailed error:")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error searching recipes: {str(e)}"
+        )
 
 
 @app.get("/api/conversations")
@@ -682,7 +647,7 @@ async def get_conversations(
             ).filter(
                 UserMemory.is_active,
                 UserMemory.expires_at > datetime.utcnow(),
-                UserMemory.user_id == current_user.id
+                UserMemory.user_id == str(current_user.id)
             ).group_by(
                 UserMemory.conversation_id
             ).order_by(
@@ -704,7 +669,7 @@ async def get_conversations(
             first_message = db.query(UserMemory).filter(
                 UserMemory.conversation_id == conv_id,
                 UserMemory.message_order == first_order,
-                UserMemory.user_id == current_user.id
+                UserMemory.user_id == str(current_user.id)
             ).first()
 
             if first_message:
@@ -729,138 +694,71 @@ async def get_conversations(
 async def get_initial_questions(
     request: Request,
     current_user: User = Depends(get_current_user),
-    transcription_id: str = None,
+    transcription_id: Optional[str] = None,
     db_session: Session = Depends(get_db)
 ):
-    """Generate initial questions for a transcription"""
+    """Generate initial questions for recipe search"""
     try:
-        # Get UI language preference from headers (default to Dutch)
-        ui_language = request.headers.get('X-UI-Language', 'nl')
-
         # Create a hardcoded response with categories structured exactly as the frontend expects
         categories = {
-            "Trending Topics": {
-                "description": "Analyze popular discussion topics",
+            "Recipe Categories": {
+                "description": "Explore different types of recipes",
                 "questions": [
-                    "What are the most discussed topics this month?",
-                    "Which topics show increasing trends?",
-                    "What topics are commonly mentioned in positive calls?",
-                    "How have topic patterns changed over time?",
-                    "What are the emerging topics from recent calls?"
+                    "What fruit-based recipes do you have?",
+                    "Show me dairy product recipes",
+                    "What dessert recipes are available?",
+                    "Do you have any beverage recipes?",
+                    "What savory snack recipes exist?"
                 ]
             },
-            "Customer Sentiment": {
-                "description": "Understand customer satisfaction trends",
+            "Ingredient Search": {
+                "description": "Find recipes by specific ingredients",
                 "questions": [
-                    "How has overall sentiment changed over time?",
-                    "What topics generate the most positive feedback?",
-                    "Which issues need immediate attention based on sentiment?",
-                    "Show me the distribution of sentiments across topics",
-                    "What topics have improving sentiment trends?"
+                    "Find recipes containing peach",
+                    "Show me recipes with apricot puree",
+                    "What recipes use strawberry?",
+                    "Find recipes with banana",
+                    "Show me recipes containing tropical fruits"
                 ]
             },
-            "Call Analysis": {
-                "description": "Analyze call patterns and duration",
+            "Product Characteristics": {
+                "description": "Search by product features and properties",
                 "questions": [
-                    "What is the average call duration by topic?",
-                    "Which topics tend to have longer calls?",
-                    "Show me the call volume trends by time of day",
-                    "What's the distribution of call directions by topic?",
-                    "Which days have the highest call volumes?"
+                    "Find recipes with puree texture",
+                    "Show me recipes with pieces",
+                    "What recipes are GMO-free?",
+                    "Find organic recipe options",
+                    "Show me recipes with natural flavors"
                 ]
             },
-            "Topic Correlations": {
-                "description": "Discover relationships between topics",
+            "Industry Applications": {
+                "description": "Explore recipes by industry use",
                 "questions": [
-                    "Which topics often appear together?",
-                    "What topics are related to technical issues?",
-                    "Show me topics that commonly lead to follow-up calls",
-                    "What topics frequently occur with complaints?",
-                    "Which topics have similar sentiment patterns?"
+                    "What recipes are for dairy industry?",
+                    "Show me food service recipes",
+                    "Find retail product recipes",
+                    "What industrial recipes exist?",
+                    "Show me consumer product recipes"
                 ]
             },
-            "Performance Metrics": {
-                "description": "Analyze key performance indicators",
+            "Flavor Profiles": {
+                "description": "Discover recipes by taste characteristics",
                 "questions": [
-                    "What's our overall customer satisfaction rate?",
-                    "Show me topics with the highest resolution rates",
-                    "Which topics need more attention based on metrics?",
-                    "What are our best performing areas?",
-                    "Show me trends in call handling efficiency"
+                    "Find recipes with balanced flavors",
+                    "Show me sweet recipe options",
+                    "What tart recipes are available?",
+                    "Find recipes with tropical flavors",
+                    "Show me recipes with berry flavors"
                 ]
             },
-            "Time-based Analysis": {
-                "description": "Understand temporal patterns",
+            "Dietary Requirements": {
+                "description": "Find recipes meeting specific dietary needs",
                 "questions": [
-                    "What are the busiest times for calls?",
-                    "How do topics vary by time of day?",
-                    "Show me weekly trends in call volumes",
-                    "What patterns emerge during peak hours?",
-                    "Which days show the best sentiment scores?"
-                ]
-            }
-        }
-
-        # Dutch translations
-        dutch_categories = {
-            "Trending Onderwerpen": {
-                "description": "Analyseer populaire gespreksonderwerpen",
-                "questions": [
-                    "Wat zijn de meest besproken onderwerpen deze maand?",
-                    "Welke onderwerpen vertonen stijgende trends?",
-                    "Welke onderwerpen worden vaak genoemd in positieve gesprekken?",
-                    "Hoe zijn onderwerppatronen in de loop van de tijd veranderd?",
-                    "Wat zijn de opkomende onderwerpen uit recente gesprekken?"
-                ]
-            },
-            "Klantsentiment": {
-                "description": "Begrijp trends in klanttevredenheid",
-                "questions": [
-                    "Hoe is het algehele sentiment in de loop van de tijd veranderd?",
-                    "Welke onderwerpen genereren de meeste positieve feedback?",
-                    "Welke kwesties vereisen onmiddellijke aandacht op basis van sentiment?",
-                    "Toon me de verdeling van sentimenten over onderwerpen",
-                    "Welke onderwerpen hebben verbeterende sentimenttrends?"
-                ]
-            },
-            "Gesprekanalyse": {
-                "description": "Analyseer gesprekspatronen en -duur",
-                "questions": [
-                    "Wat is de gemiddelde gespreksduur per onderwerp?",
-                    "Welke onderwerpen leiden meestal tot langere gesprekken?",
-                    "Toon me de trends in gespreksvolume per dagdeel",
-                    "Wat is de verdeling van gespreksrichtingen per onderwerp?",
-                    "Welke dagen hebben de hoogste gespreksvolumes?"
-                ]
-            },
-            "Onderwerpscorrelaties": {
-                "description": "Ontdek relaties tussen onderwerpen",
-                "questions": [
-                    "Welke onderwerpen komen vaak samen voor?",
-                    "Welke onderwerpen zijn gerelateerd aan technische problemen?",
-                    "Toon me onderwerpen die vaak leiden tot vervolgoproepen",
-                    "Welke onderwerpen komen vaak voor bij klachten?",
-                    "Welke onderwerpen hebben vergelijkbare sentimentpatronen?"
-                ]
-            },
-            "Prestatiemetrieken": {
-                "description": "Analyseer belangrijke prestatie-indicatoren",
-                "questions": [
-                    "Wat is ons algemene percentage klanttevredenheid?",
-                    "Toon me onderwerpen met de hoogste oplossingspercentages",
-                    "Welke onderwerpen hebben meer aandacht nodig op basis van metrieken?",
-                    "Wat zijn onze best presterende gebieden?",
-                    "Toon me trends in efficiëntie van gespreksafhandeling"
-                ]
-            },
-            "Tijdgebaseerde Analyse": {
-                "description": "Begrijp tijdelijke patronen",
-                "questions": [
-                    "Wat zijn de drukste tijden voor gesprekken?",
-                    "Hoe variëren onderwerpen per tijdstip van de dag?",
-                    "Toon me wekelijkse trends in gespreksvolumes",
-                    "Welke patronen ontstaan tijdens piekuren?",
-                    "Welke dagen tonen de beste sentimentscores?"
+                    "What sugar-free recipes exist?",
+                    "Show me low-calorie options",
+                    "Find allergen-free recipes",
+                    "What vegan recipes are available?",
+                    "Show me gluten-free recipes"
                 ]
             }
         }
@@ -868,7 +766,7 @@ async def get_initial_questions(
         # Return in the exact format the frontend expects
         return {
             "success": True,
-            "categories": dutch_categories if ui_language == 'nl' else categories
+            "categories": categories
         }
     except Exception as e:
         logger.error(f"Error generating initial questions: {e}")
@@ -876,21 +774,12 @@ async def get_initial_questions(
 
         # Return a fallback response with the same structure
         fallback_categories = {
-            "General Analysis": {
-                "description": "Basic analysis questions",
+            "General Recipe Search": {
+                "description": "Basic recipe search questions",
                 "questions": [
-                    "What are the most common topics in our calls?",
-                    "How has customer sentiment changed over time?",
-                    "Show me the breakdown of call topics by sentiment"
-                ]
-            }
-        } if ui_language == 'en' else {
-            "Algemene Analyse": {
-                "description": "Basis analysevragen",
-                "questions": [
-                    "Wat zijn de meest voorkomende onderwerpen in onze gesprekken?",
-                    "Hoe is het klantsentiment veranderd in de loop van de tijd?",
-                    "Toon me de verdeling van gespreksonderwerpen per sentiment"
+                    "What recipes do you have available?",
+                    "Show me fruit-based recipes",
+                    "Find recipes with specific ingredients"
                 ]
             }
         }
@@ -898,48 +787,6 @@ async def get_initial_questions(
         return {
             "success": False,
             "categories": fallback_categories
-        }
-
-
-@app.post("/api/analyze-response")
-async def analyze_response(
-    request: Request,
-    current_user: User = Depends(get_current_user),
-    db_session: Session = Depends(get_db)
-):
-    """Analyze a response to a question"""
-    try:
-        data = await request.json()
-
-        # Extract parameters
-        transcription_id = data.get("transcription_id")
-        question_id = data.get("question_id")
-        response_text = data.get("response")
-
-        if not all([transcription_id, question_id, response_text]):
-            raise HTTPException(
-                status_code=400,
-                detail="Missing required parameters: transcription_id, question_id, response"
-            )
-
-        # Create agent manager
-        agent_manager = AgentManager(session=db_session)
-
-        # Analyze response
-        analysis = agent_manager.analyze_response(
-            transcription_id, question_id, response_text
-        )
-
-        return {
-            "success": True,
-            "analysis": analysis
-        }
-    except Exception as e:
-        logger.error(f"Error analyzing response: {e}")
-        logger.exception("Detailed error:")
-        return {
-            "success": False,
-            "error": str(e)
         }
 
 
@@ -954,7 +801,6 @@ async def generate_followup(
         data = await request.json()
 
         # Extract parameters
-        conversation_type = data.get("conversation_type", "system")
         questions = data.get("questions", [])
         responses = data.get("responses", [])
 
@@ -964,13 +810,13 @@ async def generate_followup(
                 detail="Missing required parameters: questions, responses"
             )
 
-        # Create agent manager
-        agent_manager = AgentManager(session=db_session)
-
-        # Generate follow-up questions
-        followup_questions = agent_manager.generate_followup_questions(
-            conversation_type, questions, responses
-        )
+        # Generate follow-up questions based on recipe search context
+        followup_questions = [
+            "Would you like to refine your search with specific features?",
+            "Are you looking for recipes with similar ingredients?",
+            "Do you want to see more recipes in this category?",
+            "Would you like to filter by any specific characteristics?"
+        ]
 
         return {
             "success": True,
@@ -982,7 +828,11 @@ async def generate_followup(
         return {
             "success": False,
             "error": str(e),
-            "followup_questions": get_default_followup_questions()
+            "followup_questions": [
+                "What type of recipe are you looking for?",
+                "Do you have any specific ingredients or dietary requirements?",
+                "What cuisine style interests you?"
+            ]
         }
 
 
@@ -1000,7 +850,8 @@ async def get_conversation(
         messages = db.query(UserMemory)\
             .filter(
                 UserMemory.conversation_id == conversation_id,
-                UserMemory.user_id == current_user.id,  # Add user isolation
+                UserMemory.user_id == str(
+                    current_user.id),  # Add user isolation
                 UserMemory.is_active
         )\
             .order_by(UserMemory.message_order.asc())\

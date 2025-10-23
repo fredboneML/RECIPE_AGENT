@@ -199,7 +199,6 @@ class User(Base):
     username = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default='read_only')
-    tenant_code = Column(String, nullable=False)
 
     def has_write_permission(self):
         return self.role in ['admin', 'write']

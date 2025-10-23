@@ -51,7 +51,7 @@ def get_embedding_model() -> TextEmbedding:
                 logger.info("Initializing embedding model")
                 _embedding_model = TextEmbedding(
                     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-                    cache_dir="/app/embedding_model"  # Use a persistent cache directory
+                    cache_dir="/tmp/embedding_model"  # Use a writable cache directory
                 )
                 logger.info("Embedding model initialized successfully")
             return _embedding_model

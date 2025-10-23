@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import Dict, Any, Optional
+from openai import OpenAI
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,3 +54,53 @@ def get_model_config_from_env() -> Dict[str, Any]:
             logger.info(f"Using Groq base_url: {config['base_url']}")
 
     return config
+
+
+def query_llm(prompt: str, provider: str = "openai", model: str = "gpt-3.5-turbo") -> Optional[str]:
+    """
+    Simple LLM query function using OpenAI client
+
+    Args:
+        prompt: The text prompt to send
+        provider: The API provider (currently only supports "openai")
+        model: The model to use
+
+    Returns:
+        The LLM's response or None if there was an error
+    """
+    try:
+        if provider != "openai":
+            logger.warning(
+                f"Provider {provider} not supported, falling back to OpenAI")
+            provider = "openai"
+
+        # Get API key from environment
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            logger.error("OPENAI_API_KEY not found in environment variables")
+            return None
+
+        # Create OpenAI client
+        client = OpenAI(api_key=api_key)
+
+        # Log model usage
+        ModelLogger.log_model_usage(
+            agent_name="recipe_search_agent",
+            model_provider=provider,
+            model_name=model,
+            params={"temperature": 0.7}
+        )
+
+        # Make the API call
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=1000
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        logger.error(f"Error querying LLM: {e}")
+        return None
