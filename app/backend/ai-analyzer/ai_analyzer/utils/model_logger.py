@@ -56,14 +56,15 @@ def get_model_config_from_env() -> Dict[str, Any]:
     return config
 
 
-def query_llm(prompt: str, provider: str = "openai", model: str = "gpt-3.5-turbo") -> Optional[str]:
+def query_llm(prompt: str, provider: str = "openai", model: str = "gpt-4o-mini", use_azure: bool = False) -> Optional[str]:
     """
-    Simple LLM query function using OpenAI client
+    Simple LLM query function using OpenAI or Azure OpenAI client
 
     Args:
         prompt: The text prompt to send
         provider: The API provider (currently only supports "openai")
-        model: The model to use
+        model: The model to use (default: gpt-4o-mini - cheapest OpenAI model)
+        use_azure: Whether to use Azure OpenAI instead of OpenAI (default: False)
 
     Returns:
         The LLM's response or None if there was an error
@@ -74,21 +75,45 @@ def query_llm(prompt: str, provider: str = "openai", model: str = "gpt-3.5-turbo
                 f"Provider {provider} not supported, falling back to OpenAI")
             provider = "openai"
 
-        # Get API key from environment
-        api_key = os.getenv('OPENAI_API_KEY')
-        if not api_key:
-            logger.error("OPENAI_API_KEY not found in environment variables")
-            return None
+        # Create OpenAI or Azure OpenAI client
+        if use_azure:
+            # Get Azure OpenAI credentials from environment
+            api_key = os.getenv('AZURE_OPENAI_API_KEY')
+            azure_endpoint = os.getenv(
+                'AZURE_OPENAI_ENDPOINT', 'https://msopenai.openai.azure.com')
 
-        # Create OpenAI client
-        client = OpenAI(api_key=api_key)
+            if not api_key:
+                logger.error(
+                    "AZURE_OPENAI_API_KEY not found in environment variables")
+                return None
+
+            from openai import AzureOpenAI
+            client = AzureOpenAI(
+                api_key=api_key,
+                api_version="2024-08-01-preview",
+                azure_endpoint=azure_endpoint
+            )
+
+            # Use Azure deployment name if model is default
+            if model == "gpt-4o-mini":
+                model = os.getenv(
+                    'AZURE_OPENAI_MODEL_DEPLOYMENT', 'gpt-4o-mini')
+        else:
+            # Get OpenAI API key from environment
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                logger.error(
+                    "OPENAI_API_KEY not found in environment variables")
+                return None
+
+            client = OpenAI(api_key=api_key)
 
         # Log model usage
         ModelLogger.log_model_usage(
             agent_name="recipe_search_agent",
-            model_provider=provider,
+            model_provider="azure_openai" if use_azure else provider,
             model_name=model,
-            params={"temperature": 0.7}
+            params={"temperature": 0.7, "use_azure": use_azure}
         )
 
         # Make the API call

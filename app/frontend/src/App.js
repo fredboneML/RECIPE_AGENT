@@ -257,7 +257,7 @@ function App() {
       <div className="sidebar">
         <img src="/logo.png" alt="Company Logo" className="small-logo" />
         <div className="new-conversation">
-          <button onClick={handleNewConversation}>{t('newConversation')}</button>
+          <button onClick={handleNewConversation}>New Conversation</button>
         </div>
         <div className="conversations">
           {conversations.map((conv) => (
@@ -285,7 +285,7 @@ function App() {
           </div>
           {showPopup && (
             <div className="popup">
-              <button onClick={handleSignOff}>{t('signOff')}</button>
+              <button onClick={handleSignOff}>Sign Off</button>
             </div>
           )}
         </div>
@@ -314,12 +314,14 @@ function App() {
                 {/* Assistant response */}
                 {message.response && (
                   <div className="message assistant">
-                    <div className="message-content assistant-message">
-                      {message.response}
-                    </div>
+                    <div className="message-content assistant-message" dangerouslySetInnerHTML={{
+                      __html: message.response
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\n/g, '<br/>')
+                    }} />
                     {message.followup_questions && message.followup_questions.length > 0 && (
                       <div className="followup-suggestions">
-                        <h4>{t('followupQuestions')}</h4>
+                        <h4>Follow-up Questions:</h4>
                         <div className="common-questions">
                           {message.followup_questions.map((question, idx) => (
                             <div
@@ -339,7 +341,7 @@ function App() {
                 {/* Error message with reformulated question */}
                 {message.error && (
                   <div className="error-suggestion">
-                    <h4>{t('querySuggestion')}</h4>
+                    <h4>Query Suggestion:</h4>
                     {message.reformulated_question && (
                       <div
                         className="question-box"
@@ -350,7 +352,7 @@ function App() {
                     )}
                     {message.followup_questions && message.followup_questions.length > 0 && (
                       <div className="followup-suggestions">
-                        <h4>{t('tryTheseInstead')}</h4>
+                        <h4>Try these instead:</h4>
                         <div className="common-questions">
                           {message.followup_questions.map((question, idx) => (
                             <div
@@ -373,7 +375,7 @@ function App() {
 
           {isProcessing && (
             <div className="processing-message">
-              {t('processingRequest')}
+              Processing your request...
             </div>
           )}
 
@@ -384,13 +386,13 @@ function App() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={t('askQuestion')}
+                placeholder="Ask a question... (Shift+Enter to continue, Ctrl+V to paste)"
               />
               <button 
                 onClick={isProcessing ? handleStopRequest : handleSubmit}
                 className={isProcessing ? 'stop-button' : ''}
               >
-                {isProcessing ? t('stop') : t('send')}
+                {isProcessing ? 'Stop' : 'Send'}
               </button>
             </div>
           </div>

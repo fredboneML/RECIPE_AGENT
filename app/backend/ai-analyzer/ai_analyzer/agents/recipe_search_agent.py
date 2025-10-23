@@ -51,7 +51,7 @@ If the text contains multiple languages or is unclear, default to "en" (English)
 Respond with only the language code, nothing else."""
 
         # Make AI call for language detection
-        response = query_llm(prompt, provider="openai", model="gpt-3.5-turbo")
+        response = query_llm(prompt, provider="openai")
 
         if response:
             # Clean the response and extract language code
@@ -182,7 +182,7 @@ Please format this as a natural, helpful response that:
 Format the response in a clear, readable way with proper numbering and structure. Emphasize that these are similar recipes found in the database."""
 
         # Make AI call for response formatting
-        response = query_llm(prompt, provider="openai", model="gpt-3.5-turbo")
+        response = query_llm(prompt, provider="openai")
 
         if response:
             logger.info(
@@ -370,7 +370,7 @@ IMPORTANT: Generate the questions {lang_instruction}. Use natural, conversationa
 Generate 3-5 specific, actionable questions that would help find more similar recipes."""
 
                     ai_response = query_llm(
-                        ai_prompt, provider="openai", model="gpt-3.5-turbo")
+                        ai_prompt, provider="openai")
 
                     if ai_response:
                         # Parse AI response into individual questions
