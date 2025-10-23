@@ -458,7 +458,7 @@ async def process_query(
             )
 
         # Search for recipes
-        results, metadata, formatted_response = recipe_search_agent.search_recipes(
+        results, metadata, formatted_response, detected_language = recipe_search_agent.search_recipes(
             description=query,
             features=features,
             text_top_k=text_top_k,
@@ -468,9 +468,9 @@ async def process_query(
         # Use the formatted response from the agent
         response = formatted_response
 
-        # Generate follow-up questions
+        # Generate follow-up questions in the detected language
         followup_questions = recipe_search_agent.generate_followup_questions(
-            results, query)
+            results, query, detected_language)
 
         # Store conversation in database using user_id
         if not conversation_id:
@@ -567,7 +567,7 @@ async def search_recipes(
             f"Searching recipes for description: '{request.description[:100]}...'")
 
         # Search for recipes
-        results, metadata, formatted_response = recipe_search_agent.search_recipes(
+        results, metadata, formatted_response, detected_language = recipe_search_agent.search_recipes(
             description=request.description,
             features=request.features,
             text_top_k=request.text_top_k,

@@ -227,7 +227,7 @@ class RecipeSearchAgent:
                        description: str,
                        features: Optional[List[Dict[str, str]]] = None,
                        text_top_k: int = 20,
-                       final_top_k: int = 10) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str]:
+                       final_top_k: int = 10) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str]:
         """
         Search for similar recipes based on description and optional features
 
@@ -238,7 +238,7 @@ class RecipeSearchAgent:
             final_top_k: Final number of results to return
 
         Returns:
-            Tuple of (results, metadata, formatted_response)
+            Tuple of (results, metadata, formatted_response, detected_language)
         """
         try:
             if not self.recipe_manager:
@@ -292,12 +292,12 @@ class RecipeSearchAgent:
                 results, detected_language, description)
 
             logger.info(f"Found {len(results)} recipes")
-            return results, metadata, formatted_response
+            return results, metadata, formatted_response, detected_language
 
         except Exception as e:
             logger.error(f"Error in recipe search: {e}")
             logger.exception("Detailed error:")
-            return [], {"error": f"Error searching recipes: {str(e)}"}, f"Error searching recipes: {str(e)}"
+            return [], {"error": f"Error searching recipes: {str(e)}"}, f"Error searching recipes: {str(e)}", "en"
 
     def get_service_status(self) -> Dict[str, Any]:
         """Get the status of the recipe search service"""
@@ -330,42 +330,34 @@ class RecipeSearchAgent:
                 "total_recipes": 0
             }
 
-    def generate_followup_questions(self, search_results: List[Dict[str, Any]], original_query: str = "") -> List[str]:
-        """Generate recipe-specific follow-up questions to help users find more similar recipes"""
+    def generate_followup_questions(self, search_results: List[Dict[str, Any]], original_query: str = "", language: str = "en") -> List[str]:
+        """Generate recipe-specific follow-up questions to help users find more similar recipes in the detected language"""
         try:
-            if not search_results:
-                # No results - suggest broadening the search
-                return [
-                    "Would you like to try a broader search with fewer specific requirements?",
-                    "Would you like to search by main ingredient instead?",
-                    "Would you like to specify a different product category (Dairy, Beverages, etc.)?",
-                    "Would you like to search by flavor profile (Sweet, Tart, etc.)?",
-                    "Would you like to specify dietary requirements (Halal, Kosher, etc.)?"
-                ]
+            # Language-specific instructions for AI
+            language_instructions = {
+                "en": "in English",
+                "nl": "in Dutch (Nederlands)",
+                "fr": "in French (Français)",
+                "de": "in German (Deutsch)",
+                "it": "in Italian (Italiano)",
+                "es": "in Spanish (Español)",
+                "pt": "in Portuguese (Português)",
+                "da": "in Danish (Dansk)"
+            }
 
-            # Extract common themes from results
-            features = []
-            for result in search_results[:5]:
-                features.extend(result.get('features', []))
-
-            # Generate contextual follow-up questions focused on recipe similarity
-            followup_questions = [
-                "Would you like to refine your search with specific features (Color, Flavour, Stabilizer)?",
-                "Are you looking for recipes with similar ingredients or processing methods?",
-                "Would you like to specify dietary requirements (Halal, Kosher, Plant-based)?",
-                "Do you want to see recipes from the same industry segment (Dairy, Beverages, etc.)?",
-                "Would you like to search by product characteristics (Puree/with pieces, Natural flavor, etc.)?"
-            ]
+            lang_instruction = language_instructions.get(
+                language, "in English")
 
             # Add AI-generated contextual questions based on the original query
             if original_query:
                 try:
-                    ai_prompt = f"""Based on this recipe search query and the results found, generate 2-3 helpful follow-up questions that would help the user find more similar recipes.
+                    ai_prompt = f"""Based on this recipe search query and the results found, generate 3-5 helpful follow-up questions {lang_instruction} that would help the user find more similar recipes.
 
 Original Query: "{original_query}"
 Number of Results Found: {len(search_results)}
+Has Results: {"Yes" if search_results else "No"}
 
-The user is looking for similar recipes in a food product database. Generate questions that help them:
+The user is looking for similar recipes in a food product database. Generate questions {lang_instruction} that help them:
 1. Refine their search with specific features
 2. Explore related product categories
 3. Specify technical requirements
@@ -373,7 +365,9 @@ The user is looking for similar recipes in a food product database. Generate que
 
 Focus on food industry terms like: Color, Flavour, Stabilizer, Industry, Product Line, Dietary requirements, Processing methods, etc.
 
-Generate 2-3 specific, actionable questions that would help find more similar recipes."""
+IMPORTANT: Generate the questions {lang_instruction}. Use natural, conversational language appropriate for {lang_instruction}.
+
+Generate 3-5 specific, actionable questions that would help find more similar recipes."""
 
                     ai_response = query_llm(
                         ai_prompt, provider="openai", model="gpt-3.5-turbo")
@@ -382,14 +376,21 @@ Generate 2-3 specific, actionable questions that would help find more similar re
                         # Parse AI response into individual questions
                         ai_questions = [q.strip() for q in ai_response.split(
                             '\n') if q.strip() and '?' in q]
-                        # Add up to 2 AI-generated questions
-                        followup_questions.extend(ai_questions[:2])
+                        # Return AI-generated questions
+                        return ai_questions[:5]
 
                 except Exception as e:
                     logger.warning(
                         f"Error generating AI follow-up questions: {e}")
 
-            return followup_questions[:5]  # Limit to 5 questions
+            # Fallback questions in English if no query provided
+            return [
+                "Would you like to refine your search with specific features?",
+                "Are you looking for recipes with similar characteristics?",
+                "Would you like to specify dietary requirements?",
+                "Do you want to explore different product categories?",
+                "Would you like to search by flavor profile?"
+            ]
 
         except Exception as e:
             logger.error(f"Error generating follow-up questions: {e}")
