@@ -1,6 +1,5 @@
 import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect, useRef } from 'react';
-import { useLanguage } from './LanguageContext';
 import './App.css';
 import tokenManager from './tokenManager';
 
@@ -20,7 +19,6 @@ function App() {
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const { t, language, setLanguage } = useLanguage();
   
   const backendUrl = window.location.hostname === 'localhost' 
     ? 'http://localhost:8000'
@@ -106,7 +104,6 @@ function App() {
     'Content-Type': 'application/json',
     'X-Tenant-Code': localStorage.getItem('tenantCode'),
     'Accept': 'application/json',
-    'X-UI-Language': language,
     'Authorization': `Bearer ${localStorage.getItem('token')}`,
   });
 
@@ -180,6 +177,7 @@ function App() {
             query,
             response: responseText,
             followup_questions: data.followup_questions || [],
+            comparison_table: data.comparison_table || null,
             timestamp: new Date()
           };
           
@@ -319,6 +317,51 @@ function App() {
                         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                         .replace(/\n/g, '<br/>')
                     }} />
+                    
+                    {/* Comparison Table */}
+                    {message.comparison_table && message.comparison_table.has_data && (
+                      <div className="comparison-table-container">
+                        <h4>Recipe Comparison</h4>
+                        <div className="table-wrapper">
+                          <table className="comparison-table">
+                            <thead>
+                              <tr className="recipe-names">
+                                {message.comparison_table.recipes.map((recipe, idx) => (
+                                  <th key={idx} colSpan="2" className="recipe-header">
+                                    {recipe.recipe_name || recipe.recipe_id}
+                                  </th>
+                                ))}
+                              </tr>
+                              <tr className="column-headers">
+                                {message.comparison_table.recipes.map((recipe, idx) => (
+                                  <React.Fragment key={idx}>
+                                    <th className="characteristic-header">Characteristic</th>
+                                    <th className="value-header">Value</th>
+                                  </React.Fragment>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {message.comparison_table.recipes[0]?.characteristics.map((_, charIndex) => (
+                                <tr key={charIndex}>
+                                  {message.comparison_table.recipes.map((recipe, recipeIndex) => (
+                                    <React.Fragment key={recipeIndex}>
+                                      <td className="characteristic-cell">
+                                        {recipe.characteristics[charIndex]?.charactDescr || ''}
+                                      </td>
+                                      <td className="value-cell">
+                                        {recipe.characteristics[charIndex]?.valueCharLong || ''}
+                                      </td>
+                                    </React.Fragment>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    
                     {message.followup_questions && message.followup_questions.length > 0 && (
                       <div className="followup-suggestions">
                         <h4>Follow-up Questions:</h4>

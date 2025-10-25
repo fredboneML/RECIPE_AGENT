@@ -421,3 +421,139 @@
     font-size: 0.9rem;
   }
 }
+
+/* Comparison Table Styles */
+.comparison-table-container {
+    margin: 20px 0;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.comparison-table-container h4 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #333;
+    font-size: 1.2em;
+    font-weight: 600;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+    border-radius: 6px;
+    background-color: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+    min-width: 600px;
+}
+
+.comparison-table thead {
+    background-color: #2c3e50;
+    color: white;
+}
+
+.comparison-table thead tr.recipe-names th {
+    padding: 15px 10px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 1.05em;
+    border-right: 2px solid #34495e;
+    border-bottom: 1px solid #34495e;
+}
+
+.comparison-table thead tr.recipe-names th:last-child {
+    border-right: none;
+}
+
+.comparison-table thead tr.column-headers th {
+    padding: 10px 8px;
+    text-align: center;
+    font-weight: 500;
+    font-size: 0.9em;
+    background-color: #34495e;
+    border-right: 1px solid #4a5f7f;
+}
+
+.comparison-table thead tr.column-headers th:nth-child(odd) {
+    border-left: 2px solid #2c3e50;
+}
+
+.comparison-table tbody tr {
+    border-bottom: 1px solid #dee2e6;
+}
+
+.comparison-table tbody tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+
+.comparison-table tbody tr:hover {
+    background-color: #e9ecef;
+}
+
+.comparison-table td {
+    padding: 12px 10px;
+    border-right: 1px solid #dee2e6;
+}
+
+.comparison-table td.characteristic-cell {
+    font-weight: 500;
+    color: #495057;
+    background-color: rgba(52, 73, 94, 0.05);
+    border-left: 2px solid #dee2e6;
+    max-width: 200px;
+    word-wrap: break-word;
+}
+
+.comparison-table td.value-cell {
+    color: #212529;
+    max-width: 200px;
+    word-wrap: break-word;
+}
+
+.comparison-table tbody tr:nth-child(odd) td.characteristic-cell {
+    background-color: rgba(52, 73, 94, 0.08);
+}
+
+/* Responsive adjustments for comparison table */
+@media (max-width: 768px) {
+    .comparison-table-container {
+        padding: 15px;
+        margin: 15px 0;
+    }
+    
+    .comparison-table {
+        font-size: 0.85em;
+        min-width: 500px;
+    }
+    
+    .comparison-table thead tr.recipe-names th {
+        padding: 12px 8px;
+        font-size: 1em;
+    }
+    
+    .comparison-table td {
+        padding: 10px 8px;
+    }
+}
+
+@media (max-width: 480px) {
+    .comparison-table {
+        font-size: 0.8em;
+        min-width: 450px;
+    }
+    
+    .comparison-table thead tr.recipe-names th {
+        padding: 10px 6px;
+        font-size: 0.95em;
+    }
+    
+    .comparison-table td {
+        padding: 8px 6px;
+    }
+}

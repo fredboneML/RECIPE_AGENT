@@ -10,7 +10,7 @@ function ChatInterface() {
     const [conversationId, setConversationId] = useState(null);
     const [followupQuestions, setFollowupQuestions] = useState([]);
     const [contextExceeded, setContextExceeded] = useState(false);
-    const isDutch = localStorage.getItem('language') === 'nl';
+    const [comparisonTable, setComparisonTable] = useState(null);
 
     const handleSendMessage = async (message) => {
         if (!message.trim()) return;
@@ -34,6 +34,13 @@ function ChatInterface() {
                 setFollowupQuestions(response.followup_questions);
             }
 
+            if (response.comparison_table) {
+                console.log('Comparison table received:', response.comparison_table);
+                setComparisonTable(response.comparison_table);
+            } else {
+                console.log('No comparison table in response');
+            }
+
             setUserInput('');
         } catch (err) {
             console.error('Error sending message:', err);
@@ -48,12 +55,11 @@ function ChatInterface() {
         setConversationId(null);
         setFollowupQuestions([]);
         setContextExceeded(false);
+        setComparisonTable(null);
     };
 
     const handleFollowupClick = (question) => {
-        if (contextExceeded && 
-            (question.toLowerCase().includes("start a new conversation") || 
-             question.toLowerCase().includes("start een nieuw gesprek"))) {
+        if (contextExceeded && question.toLowerCase().includes("start a new conversation")) {
             handleNewConversation();
             return;
         }
@@ -74,21 +80,58 @@ function ChatInterface() {
                 {error && <div className="error">{error}</div>}
             </div>
 
+            {comparisonTable && comparisonTable.has_data && (
+                <div className="comparison-table-container">
+                    <h4>Recipe Comparison</h4>
+                    <div className="table-wrapper">
+                        <table className="comparison-table">
+                            <thead>
+                                <tr className="recipe-names">
+                                    {comparisonTable.recipes.map((recipe, index) => (
+                                        <th key={index} colSpan="2" className="recipe-header">
+                                            {recipe.recipe_name || recipe.recipe_id}
+                                        </th>
+                                    ))}
+                                </tr>
+                                <tr className="column-headers">
+                                    {comparisonTable.recipes.map((recipe, index) => (
+                                        <React.Fragment key={index}>
+                                            <th className="characteristic-header">Characteristic</th>
+                                            <th className="value-header">Value</th>
+                                        </React.Fragment>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {comparisonTable.recipes[0]?.characteristics.map((_, charIndex) => (
+                                    <tr key={charIndex}>
+                                        {comparisonTable.recipes.map((recipe, recipeIndex) => (
+                                            <React.Fragment key={recipeIndex}>
+                                                <td className="characteristic-cell">
+                                                    {recipe.characteristics[charIndex]?.charactDescr || ''}
+                                                </td>
+                                                <td className="value-cell">
+                                                    {recipe.characteristics[charIndex]?.valueCharLong || ''}
+                                                </td>
+                                            </React.Fragment>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
             {followupQuestions && followupQuestions.length > 0 && (
                 <div className="followup-questions">
-                    <h4>{contextExceeded ? 
-                        (isDutch ? "Aanbevolen acties:" : "Recommended actions:") : 
-                        (isDutch ? "Suggesties voor vervolgvragen:" : "Suggested follow-up questions:")}
-                    </h4>
+                    <h4>{contextExceeded ? "Recommended actions:" : "Suggested follow-up questions:"}</h4>
                     <ul>
                         {followupQuestions.map((question, index) => (
                             <li 
                                 key={index} 
                                 onClick={() => handleFollowupClick(question)}
-                                className={contextExceeded && 
-                                    (question.toLowerCase().includes("start a new conversation") || 
-                                     question.toLowerCase().includes("start een nieuw gesprek")) 
-                                    ? "new-conversation-action" : ""}
+                                className={contextExceeded && question.toLowerCase().includes("start a new conversation") ? "new-conversation-action" : ""}
                             >
                                 {question}
                             </li>
@@ -103,7 +146,7 @@ function ChatInterface() {
                     value={userInput}
                     onChange={(e) => setUserInput(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage(userInput)}
-                    placeholder={isDutch ? "Stel een vraag..." : "Ask a question..."}
+                    placeholder="Ask a question..."
                     disabled={isLoading}
                 />
                 <button 
@@ -116,7 +159,7 @@ function ChatInterface() {
                     onClick={handleNewConversation}
                     className="new-conversation"
                 >
-                    {isDutch ? "Nieuw gesprek" : "New Conversation"}
+                    New Conversation
                 </button>
             </div>
         </div>

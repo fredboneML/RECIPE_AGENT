@@ -78,6 +78,73 @@ Respond with only the language code, nothing else."""
         return "en"
 
 
+def create_comparison_table(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Create a comparison table structure for the top 3 recipes
+
+    Args:
+        results: List of recipe search results
+
+    Returns:
+        Dictionary with table structure containing recipe names and their characteristics
+    """
+    try:
+        # Take only top 3 recipes
+        top_recipes = results[:3]
+
+        if not top_recipes:
+            return None
+
+        # Initialize table structure
+        table_data = {
+            "recipes": [],
+            "has_data": len(top_recipes) > 0
+        }
+
+        # Collect all unique characteristics from all recipes
+        all_characteristics = set()
+
+        for recipe in top_recipes:
+            features = recipe.get("features", [])
+            all_characteristics.update(features)
+
+        # Sort characteristics for consistent display
+        sorted_characteristics = sorted(list(all_characteristics))
+
+        # Build table data for each recipe
+        for recipe in top_recipes:
+            features = recipe.get("features", [])
+            values = recipe.get("values", [])
+
+            # Create feature-value mapping
+            feature_map = {}
+            for i, feature in enumerate(features):
+                if i < len(values):
+                    feature_map[feature] = values[i]
+
+            recipe_table_data = {
+                "recipe_name": recipe.get("recipe_name", recipe.get("id", "Unknown")),
+                "recipe_id": recipe.get("id", ""),
+                "characteristics": []
+            }
+
+            # Add all characteristics (with empty values if not present in this recipe)
+            for char in sorted_characteristics:
+                recipe_table_data["characteristics"].append({
+                    "charactDescr": char,
+                    "valueCharLong": feature_map.get(char, "")
+                })
+
+            table_data["recipes"].append(recipe_table_data)
+
+        return table_data
+
+    except Exception as e:
+        logger.error(f"Error creating comparison table: {e}")
+        logger.exception("Detailed error:")
+        return None
+
+
 def format_response_in_language(results: List[Dict[str, Any]], language: str) -> str:
     """Format the response in the specified language"""
     if not results:
@@ -227,7 +294,7 @@ class RecipeSearchAgent:
                        description: str,
                        features: Optional[List[Dict[str, str]]] = None,
                        text_top_k: int = 20,
-                       final_top_k: int = 3) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str]:
+                       final_top_k: int = 3) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
         Search for similar recipes based on description and optional features
 
@@ -238,17 +305,17 @@ class RecipeSearchAgent:
             final_top_k: Final number of results to return
 
         Returns:
-            Tuple of (results, metadata, formatted_response, detected_language)
+            Tuple of (results, metadata, formatted_response, detected_language, comparison_table)
         """
         try:
             if not self.recipe_manager:
                 logger.error("Recipe manager not initialized")
-                return [], {"error": "Recipe service not available"}, "Recipe service not available"
+                return [], {"error": "Recipe service not available"}, "Recipe service not available", "en", None
 
             # Validate input
             if not description.strip():
                 logger.warning("Empty description provided")
-                return [], {"error": "Recipe description is required"}, "Recipe description is required"
+                return [], {"error": "Recipe description is required"}, "Recipe description is required", "en", None
 
             # Detect language of the user's query using AI
             detected_language = detect_language_with_ai(description)
@@ -291,13 +358,16 @@ class RecipeSearchAgent:
             formatted_response = format_response_in_language_with_ai(
                 results, detected_language, description)
 
+            # Create comparison table for top 3 recipes
+            comparison_table = create_comparison_table(results)
+
             logger.info(f"Found {len(results)} recipes")
-            return results, metadata, formatted_response, detected_language
+            return results, metadata, formatted_response, detected_language, comparison_table
 
         except Exception as e:
             logger.error(f"Error in recipe search: {e}")
             logger.exception("Detailed error:")
-            return [], {"error": f"Error searching recipes: {str(e)}"}, f"Error searching recipes: {str(e)}", "en"
+            return [], {"error": f"Error searching recipes: {str(e)}"}, f"Error searching recipes: {str(e)}", "en", None
 
     def get_service_status(self) -> Dict[str, Any]:
         """Get the status of the recipe search service"""

@@ -458,7 +458,7 @@ async def process_query(
             )
 
         # Search for recipes
-        results, metadata, formatted_response, detected_language = recipe_search_agent.search_recipes(
+        results, metadata, formatted_response, detected_language, comparison_table = recipe_search_agent.search_recipes(
             description=query,
             features=features,
             text_top_k=text_top_k,
@@ -501,7 +501,8 @@ async def process_query(
             "conversation_id": conversation_id,
             "followup_questions": followup_questions,
             "search_results": results,  # Include raw results for frontend
-            "metadata": metadata
+            "metadata": metadata,
+            "comparison_table": comparison_table  # Include comparison table
         }
 
     except HTTPException:
