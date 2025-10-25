@@ -200,7 +200,7 @@ class RecipeSearchRequest(BaseModel):
     # Optional feature refinement
     features: Optional[List[Dict[str, str]]] = None
     text_top_k: int = 20  # Number of candidates from text search
-    final_top_k: int = 10  # Final number of results
+    final_top_k: int = 3  # Final number of results
 
     class Config:
         json_schema_extra = {
@@ -212,7 +212,7 @@ class RecipeSearchRequest(BaseModel):
                      "valueCharLong": "Dairy"}
                 ],
                 "text_top_k": 20,
-                "final_top_k": 10
+                "final_top_k": 3
             }
         }
 
@@ -436,7 +436,7 @@ async def process_query(
         conversation_id = body.get("conversation_id", "")
         features = body.get("features", None)
         text_top_k = body.get("text_top_k", 20)
-        final_top_k = body.get("final_top_k", 10)
+        final_top_k = body.get("final_top_k", 3)
 
         # Validate input
         if not query:

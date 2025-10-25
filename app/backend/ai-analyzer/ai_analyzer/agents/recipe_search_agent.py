@@ -227,7 +227,7 @@ class RecipeSearchAgent:
                        description: str,
                        features: Optional[List[Dict[str, str]]] = None,
                        text_top_k: int = 20,
-                       final_top_k: int = 10) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str]:
+                       final_top_k: int = 3) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str]:
         """
         Search for similar recipes based on description and optional features
 
