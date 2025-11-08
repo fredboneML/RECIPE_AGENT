@@ -299,9 +299,12 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
                         # Create embedding from description
                         embedding = model.encode(description)
 
-                        # Create point for Qdrant
+                        # Create point for Qdrant with deterministic UUID
+                        # Use UUID5 to generate deterministic UUID from recipe filename
+                        point_id = str(uuid.uuid5(
+                            uuid.NAMESPACE_DNS, recipe_filename))
                         point = PointStruct(
-                            id=str(uuid.uuid4()),
+                            id=point_id,  # Deterministic UUID to avoid duplicates
                             vector=embedding.tolist(),
                             payload={
                                 "recipe_name": recipe_filename,
