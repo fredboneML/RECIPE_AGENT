@@ -520,7 +520,7 @@ function App() {
                 className="upload-button"
                 onClick={handleUploadClick}
                 disabled={isUploading || isProcessing}
-                title="Upload document"
+                title="Document uploaded"
               >
                 <img 
                   src="/upload.png" 
