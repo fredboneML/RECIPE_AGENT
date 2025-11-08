@@ -84,12 +84,13 @@ class DataExtractorRouterAgent:
         logger.info(
             f"Initialized DataExtractorRouterAgent with model {self.model_name}")
 
-    def extract_and_route(self, supplier_brief: str) -> Dict[str, Any]:
+    def extract_and_route(self, supplier_brief: str, document_text: Optional[str] = None) -> Dict[str, Any]:
         """
         Extract information from supplier brief and determine search strategy
 
         Args:
-            supplier_brief: The supplier project brief text
+            supplier_brief: The supplier project brief text (user input)
+            document_text: Optional extracted text from uploaded document
 
         Returns:
             Dictionary containing:
@@ -99,12 +100,26 @@ class DataExtractorRouterAgent:
             - reasoning: Explanation of routing decision
         """
         try:
+            # Combine user input with document text if available
+            if document_text:
+                logger.info("Processing supplier brief with uploaded document")
+                combined_brief = f"""
+USER DESCRIPTION:
+{supplier_brief}
+
+EXTRACTED DOCUMENT CONTENT:
+{document_text}
+"""
+            else:
+                logger.info("Processing supplier brief from text input only")
+                combined_brief = supplier_brief
+
             # Prepare the prompt
             prompt = f"""
 Analyze the following supplier project brief and extract relevant recipe information:
 
 SUPPLIER BRIEF:
-{supplier_brief}
+{combined_brief}
 
 Extract the key information and decide on the appropriate search strategy.
 Provide your response as a JSON object following the specified format.
@@ -142,7 +157,7 @@ Provide your response as a JSON object following the specified format.
             # Fallback to text-only search
             return {
                 'search_type': 'text_only',
-                'text_description': supplier_brief,
+                'text_description': document_text if document_text else supplier_brief,
                 'features_df': None,
                 'reasoning': f'Error in extraction: {str(e)}. Falling back to text-only search.'
             }

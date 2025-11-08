@@ -2,6 +2,8 @@ FROM python:3.12-slim
 # FROM --platform=linux/arm64 python:3.12-slim
 
 # Add curl for health checks and system dependencies
+# Install libmagic1 and tesseract-ocr for document processing and OCR
+# Install OpenGL and OpenCV dependencies for unstructured library
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     curl \
@@ -9,6 +11,15 @@ RUN apt-get update && \
     gcc \
     libpq-dev \
     python3-dev \
+    libmagic1 \
+    tesseract-ocr \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    libgthread-2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app

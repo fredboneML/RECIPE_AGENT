@@ -14,11 +14,14 @@ function App() {
   const [showPopup, setShowPopup] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRequestCanceled, setIsRequestCanceled] = useState(false);
+  const [uploadedDocument, setUploadedDocument] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
   
   const navigate = useNavigate();
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
   
   const backendUrl = window.location.hostname === 'localhost' 
     ? 'http://localhost:8000'
@@ -146,8 +149,14 @@ function App() {
     abortControllerRef.current = new AbortController();
     
     try {
+      // Combine query with uploaded document text if available
+      let finalQuery = query;
+      if (uploadedDocument && uploadedDocument.extractedText) {
+        finalQuery = `${query}\n\n[Extracted from document: ${uploadedDocument.filename}]\n${uploadedDocument.extractedText}`;
+      }
+      
       const response = await tokenManager.post('/api/query', {
-        query,
+        query: finalQuery,
         conversation_id: currentConversation?.id
       }, {
         signal: abortControllerRef.current.signal
@@ -210,6 +219,7 @@ function App() {
       }
       setIsRequestCanceled(false);
       setQuery('');
+      setUploadedDocument(null); // Clear uploaded document after submission
     }
   };
 
@@ -245,9 +255,72 @@ function App() {
     setMessages([]);
     setQuery('');
     setResult('');
+    setUploadedDocument(null);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // Don't set Content-Type header - let the browser set it automatically with boundary
+      const response = await tokenManager.post('/api/upload-document', formData);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to upload document';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
+        } catch (e) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setUploadedDocument({
+          filename: data.filename,
+          extractedText: data.extracted_text
+        });
+        
+        // Optionally, pre-fill the query with a message about the uploaded document
+        setQuery(`[Document uploaded: ${data.filename}]\n\n`);
+        
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+        }
+      }
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      alert(`Error uploading document: ${error.message}`);
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleUploadClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleRemoveDocument = () => {
+    setUploadedDocument(null);
+    setQuery('');
   };
 
   return (
@@ -423,19 +496,52 @@ function App() {
           )}
 
           <div className="input-container">
+            {uploadedDocument && (
+              <div className="uploaded-document-indicator">
+                <span className="document-name">📎 {uploadedDocument.filename}</span>
+                <button 
+                  className="remove-document-btn"
+                  onClick={handleRemoveDocument}
+                  title="Remove document"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             <div className="query-input">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.webp,.svg,.html,.htm,.txt,.rtf,.odt"
+                style={{ display: 'none' }}
+              />
+              <button 
+                className="upload-button"
+                onClick={handleUploadClick}
+                disabled={isUploading || isProcessing}
+                title="Upload document"
+              >
+                <img 
+                  src="/upload.png" 
+                  alt="Upload" 
+                  className="upload-icon"
+                />
+              </button>
               <textarea
                 ref={textareaRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Ask a question... (Shift+Enter to continue, Ctrl+V to paste)"
+                disabled={isUploading}
               />
               <button 
                 onClick={isProcessing ? handleStopRequest : handleSubmit}
                 className={isProcessing ? 'stop-button' : ''}
+                disabled={isUploading}
               >
-                {isProcessing ? 'Stop' : 'Send'}
+                {isProcessing ? 'Stop' : isUploading ? 'Uploading...' : 'Send'}
               </button>
             </div>
           </div>

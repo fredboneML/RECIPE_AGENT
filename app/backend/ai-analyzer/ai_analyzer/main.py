@@ -7,7 +7,7 @@ from ai_analyzer.data_import_postgresql import (
     store_conversation
 )
 from ai_analyzer.config import config, DATABASE_URL, JWT_SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text, func
 from sqlalchemy.ext.declarative import declarative_base
@@ -16,12 +16,15 @@ import hashlib
 import time
 import logging
 import uuid
+import os
+import tempfile
 from datetime import datetime, timedelta
 from psycopg2 import connect
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 from jose import JWTError, jwt
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from unstructured.partition.auto import partition
 
 
 # JWT Configuration
@@ -415,6 +418,75 @@ class QueryRequest(BaseModel):
                 "conversation_id": "optional-uuid-here"
             }
         }
+
+
+@app.post("/api/upload-document")
+async def upload_document(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload and extract text from a document (PDF, Word, PowerPoint, Images, etc.)
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Document upload from user: {current_user.username}")
+
+    try:
+        # Validate file type
+        allowed_extensions = {
+            '.pdf', '.doc', '.docx', '.ppt', '.pptx',
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.svg',
+            '.html', '.htm', '.txt', '.rtf', '.odt'
+        }
+
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type. Allowed types: {', '.join(allowed_extensions)}"
+            )
+
+        # Create a temporary file to store the upload
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
+            # Read and write file content
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        try:
+            logger.info(f"Processing document: {file.filename}")
+
+            # Use unstructured to extract text
+            elements = partition(filename=temp_file_path)
+            extracted_text = "\n\n".join(
+                [str(element) for element in elements])
+
+            logger.info(
+                f"Successfully extracted {len(extracted_text)} characters from {file.filename}")
+
+            return {
+                "success": True,
+                "filename": file.filename,
+                "extracted_text": extracted_text,
+                "text_length": len(extracted_text)
+            }
+
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(temp_file_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete temporary file: {e}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing document upload: {e}")
+        logger.exception("Detailed error:")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing document: {str(e)}"
+        )
 
 
 @app.post("/api/query")

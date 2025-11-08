@@ -175,13 +175,18 @@ class TokenManager {
     const fullUrl = url.startsWith('http') ? url : `${this.getBackendUrl()}${url}`;
 
     // Prepare headers - CRITICAL: Only Authorization header, NO X-Tenant-Code!
+    // Don't set Content-Type if body is FormData (browser will set it with boundary)
     const headers = {
       'Accept': 'application/json',
-      'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
       // REMOVED: X-Tenant-Code header - backend gets tenant from JWT token now!
       ...options.headers, // Allow overriding default headers
     };
+
+    // Only add Content-Type if body is not FormData
+    if (!(options.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     const requestOptions = {
       ...options,
@@ -250,7 +255,8 @@ class TokenManager {
     const requestOptions = {
       ...options,
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined
+      // If data is FormData, don't stringify it
+      body: data instanceof FormData ? data : (data ? JSON.stringify(data) : undefined)
     };
 
     return this.fetchWithAuth(url, requestOptions);

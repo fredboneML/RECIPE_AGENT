@@ -9,3 +9,4 @@ app/database/data/base
 venv
 app/backend/ai-analyzer/data
 app/brief.txt
+app/database
