@@ -92,7 +92,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_BACKEND_URL=http://37.97.226.251:8000
+      - REACT_APP_BACKEND_URL=http://108.143.207.17:8000
     restart: unless-stopped
     networks:
       - app-network

@@ -54,7 +54,7 @@ services:
       - JWT_ALGORITHM=${JWT_ALGORITHM}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
       # Add CORS allowed origins
-      - ALLOWED_ORIGINS=http://localhost:3000,http://37.97.226.251:3000,http://127.0.0.1:3000
+      - ALLOWED_ORIGINS=http://localhost:3000,http://http://108.143.207.17:3000,http://127.0.0.1:3000
       # Add host environment variable
       - HOST=${HOST:-localhost}
     volumes:
