@@ -56,7 +56,7 @@ def get_model_config_from_env() -> Dict[str, Any]:
     return config
 
 
-def query_llm(prompt: str, provider: str = "openai", model: str = "gpt-4o-mini", use_azure: bool = False) -> Optional[str]:
+def query_llm(prompt: str, provider: str = "openai", model: str = "gpt-4o-mini", use_azure: Optional[bool] = None) -> Optional[str]:
     """
     Simple LLM query function using OpenAI or Azure OpenAI client
 
@@ -64,12 +64,15 @@ def query_llm(prompt: str, provider: str = "openai", model: str = "gpt-4o-mini",
         prompt: The text prompt to send
         provider: The API provider (currently only supports "openai")
         model: The model to use (default: gpt-4o-mini - cheapest OpenAI model)
-        use_azure: Whether to use Azure OpenAI instead of OpenAI (default: False)
+        use_azure: Whether to use Azure OpenAI instead of OpenAI (default: loaded from USE_AZURE env var, or False)
 
     Returns:
         The LLM's response or None if there was an error
     """
     try:
+        # Load use_azure from environment variable if not explicitly provided
+        if use_azure is None:
+            use_azure = os.getenv('USE_AZURE', 'false').lower() == 'true'
         if provider != "openai":
             logger.warning(
                 f"Provider {provider} not supported, falling back to OpenAI")

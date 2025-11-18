@@ -5,11 +5,7 @@ import os
 import time
 import logging
 import hashlib
-import pandas as pd
-from datetime import datetime
 from ai_analyzer.config import config, DATA_DIR
-from ai_analyzer.make_openai_call_df import make_openai_call_df
-import uuid
 
 # Configure logging
 logging.basicConfig(
