@@ -56,19 +56,9 @@ function Login() {
                     permissions: data.permissions
                 }));
                 
-                // Verify token is working by making an authenticated request
-                try {
-                    const healthCheck = await tokenManager.get('/health');
-                    if (!healthCheck.ok) {
-                        throw new Error('Health check failed');
-                    }
-                    console.log('Authentication verified, navigating to dashboard');
-                    navigate('/');
-                } catch (healthError) {
-                    console.error('Authentication verification failed:', healthError);
-                    setError('Authentication failed. Please try again.');
-                    tokenManager.clearToken();
-                }
+                // Token stored successfully, navigate to dashboard
+                console.log('Authentication successful, navigating to dashboard');
+                navigate('/');
             } else {
                 console.error('Login failed:', data);
                 setError(data.detail || 'Invalid credentials');
