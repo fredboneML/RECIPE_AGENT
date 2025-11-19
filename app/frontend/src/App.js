@@ -57,7 +57,7 @@ function App() {
         setUserInitial(userName.charAt(0).toUpperCase());
         
         console.log('App.js - Fetching conversations...');
-        const conversationsResponse = await tokenManager.get('/api/conversations');
+        const conversationsResponse = await tokenManager.get('/conversations');
   
         if (!conversationsResponse.ok) {
           throw new Error('Auth verification failed');
@@ -101,7 +101,7 @@ function App() {
 
   const fetchConversations = async () => {
     try {
-      const response = await tokenManager.get('/api/conversations');
+      const response = await tokenManager.get('/conversations');
       if (response.ok) {
         const data = await response.json();
         setConversations(data);
@@ -118,7 +118,7 @@ function App() {
 
   const fetchConversationMessages = async (conversationId) => {
     try {
-      const response = await tokenManager.get(`/api/conversations/${conversationId}`);
+      const response = await tokenManager.get(`/conversations/${conversationId}`);
       if (response.ok) {
         const data = await response.json();
         setMessages(data);
@@ -144,7 +144,7 @@ function App() {
         finalQuery = `${query}\n\n[Extracted from document: ${uploadedDocument.filename}]\n${uploadedDocument.extractedText}`;
       }
       
-      const response = await tokenManager.post('/api/query', {
+      const response = await tokenManager.post('/query', {
         query: finalQuery,
         conversation_id: currentConversation?.id
       }, {
@@ -261,7 +261,7 @@ function App() {
       formData.append('file', file);
 
       // Don't set Content-Type header - let the browser set it automatically with boundary
-      const response = await tokenManager.post('/api/upload-document', formData);
+      const response = await tokenManager.post('/upload-document', formData);
 
       if (!response.ok) {
         let errorMessage = 'Failed to upload document';
