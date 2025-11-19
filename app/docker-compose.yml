@@ -19,7 +19,8 @@ services:
       - NPM_CONFIG_CACHE=/home/appuser/.npm
       - NPM_CONFIG_PREFIX=/home/appuser/.npm-global
       # Dynamic backend URL based on host
-      - REACT_APP_BACKEND_URL=http://${HOST:-localhost}:8000
+      - REACT_APP_BACKEND_URL=/api
+      - REACT_APP_WS_URL=/ws
       - DANGEROUSLY_DISABLE_HOST_CHECK=true
     volumes:
       - ./frontend:/usr/src/app:cached
