@@ -25,7 +25,7 @@ function Login() {
 
         try {
             // Login endpoint doesn't need authentication, so we use a special method
-            const response = await fetch(`${tokenManager.getBackendUrl()}/api/login`, {
+            const response = await fetch(`${tokenManager.getBackendUrl()}/login`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

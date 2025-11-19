@@ -13,9 +13,7 @@ class TokenManager {
 
   // Get backend URL dynamically
   getBackendUrl() {
-    return window.location.hostname === 'localhost' 
-      ? 'http://localhost:8000'
-      : `http://${window.location.hostname}:8000`;
+    return process.env.REACT_APP_BACKEND_URL || '/api';
   }
 
   getToken() {
@@ -97,7 +95,7 @@ class TokenManager {
       const token = this.getToken();
       if (!token) throw new Error('No token to refresh');
 
-      const response = await fetch(`${this.getBackendUrl()}/api/refresh-token`, {
+      const response = await fetch(`${this.getBackendUrl()}/refresh-token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

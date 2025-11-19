@@ -1,7 +1,5 @@
 // API service for making authenticated requests
-const backendUrl = window.location.hostname === 'localhost' 
-    ? 'http://localhost:8000'
-    : `http://${window.location.hostname}:8000`;
+const backendUrl = process.env.REACT_APP_BACKEND_URL || '/api';
 
 const getHeaders = () => {
     const token = localStorage.getItem('token');
@@ -14,7 +12,7 @@ const getHeaders = () => {
 
 export const api = {
     async query(question, conversationId = null) {
-        const response = await fetch(`${backendUrl}/api/query`, {
+        const response = await fetch(`${backendUrl}/query`, {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({
@@ -37,7 +35,7 @@ export const api = {
     },
 
     async getConversations() {
-        const response = await fetch(`${backendUrl}/api/conversations`, {
+        const response = await fetch(`${backendUrl}/conversations`, {
             headers: getHeaders(),
         });
         
@@ -54,7 +52,7 @@ export const api = {
     },
 
     async getConversation(conversationId) {
-        const response = await fetch(`${backendUrl}/api/conversations/${conversationId}`, {
+        const response = await fetch(`${backendUrl}/conversations/${conversationId}`, {
             headers: getHeaders(),
         });
         
