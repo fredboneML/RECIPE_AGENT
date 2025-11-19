@@ -22,10 +22,6 @@ function App() {
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
-  
-  const backendUrl = window.location.hostname === 'localhost' 
-    ? 'http://localhost:8000'
-    : `http://${window.location.hostname}:8000`;
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -59,13 +55,6 @@ function App() {
         }
   
         setUserInitial(userName.charAt(0).toUpperCase());
-        
-        // First verify health check
-        console.log('App.js - Checking health status...');
-        const healthResponse = await tokenManager.get('/health');
-        if (!healthResponse.ok) {
-          throw new Error('Health check failed');
-        }
         
         console.log('App.js - Fetching conversations...');
         const conversationsResponse = await tokenManager.get('/api/conversations');
