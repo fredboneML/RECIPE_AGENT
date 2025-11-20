@@ -69,14 +69,14 @@ def append_to_processed_list(list_path: Path, filename: str) -> None:
 
 def process_single_zip(zip_path: Path, out_dir: Path, processed_files: set[str],
                        list_path: Path, include_exts: set[str] | None = None,
-                       verbose: bool = False) -> int:
+                       temp_dir: Path | None = None, verbose: bool = False) -> int:
     """
     Process a single ZIP file (recursively extracting nested zips) and copy files to out_dir.
     Returns the number of files successfully copied.
     """
     copied_count = 0
 
-    with tempfile.TemporaryDirectory() as tmpdir_str:
+    with tempfile.TemporaryDirectory(dir=temp_dir) as tmpdir_str:
         tmpdir = Path(tmpdir_str)
         work_stack = []
 
@@ -134,7 +134,8 @@ def process_single_zip(zip_path: Path, out_dir: Path, processed_files: set[str],
 
 
 def flatten_nested_zip(top_zip: Path, out_dir: Path, include_exts: set[str] | None = None,
-                       resume_list: Path | None = None, verbose: bool = False) -> None:
+                       resume_list: Path | None = None, temp_dir: Path | None = None,
+                       verbose: bool = False) -> None:
     """
     Recursively extract all nested ZIPs and collect all non-ZIP files into out_dir.
     Processes zip files in batches to reduce memory usage.
@@ -145,6 +146,7 @@ def flatten_nested_zip(top_zip: Path, out_dir: Path, include_exts: set[str] | No
         out_dir: Directory where all files will be copied
         include_exts: Optional set of file extensions to include
         resume_list: Path to persistent list file (default: .processed_files.txt in out_dir)
+        temp_dir: Directory for temporary extraction (default: system temp dir)
         verbose: Print details about processing
     """
     top_zip = Path(top_zip).resolve()
@@ -163,7 +165,7 @@ def flatten_nested_zip(top_zip: Path, out_dir: Path, include_exts: set[str] | No
         print(
             f"[RESUME] Loaded {len(processed_files)} already processed files")
 
-    with tempfile.TemporaryDirectory() as tmpdir_str:
+    with tempfile.TemporaryDirectory(dir=temp_dir) as tmpdir_str:
         tmpdir = Path(tmpdir_str)
 
         # Extract the top-level ZIP first (fail-fast here if the top zip is bad)
@@ -188,7 +190,7 @@ def flatten_nested_zip(top_zip: Path, out_dir: Path, include_exts: set[str] | No
 
             copied = process_single_zip(
                 zip_file, out_dir, processed_files, list_path,
-                include_exts, verbose
+                include_exts=include_exts, temp_dir=temp_dir, verbose=verbose
             )
             total_copied += copied
 
@@ -252,6 +254,12 @@ def main():
              "Allows resuming after interruptions."
     )
     parser.add_argument(
+        "--temp-dir",
+        default=None,
+        help="Directory for temporary extraction. Use this if your system temp "
+             "directory has insufficient space. If not provided, uses system default."
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Print details about extracted, copied, and skipped files."
@@ -264,12 +272,14 @@ def main():
             ".") else f".{ext}".lower() for ext in (e.lower() for e in args.only)}
 
     resume_list = Path(args.resume_list) if args.resume_list else None
+    temp_dir = Path(args.temp_dir) if args.temp_dir else None
 
     flatten_nested_zip(
         Path(args.zip_path),
         Path(args.output_dir),
         include_exts,
         resume_list=resume_list,
+        temp_dir=temp_dir,
         verbose=args.verbose
     )
     print(f"✅ Done. Files are in: {args.output_dir}")
@@ -289,3 +299,17 @@ if __name__ == "__main__":
 
 # With file extension filtering
 # python flatten_zip.py archive.zip output_folder --only .pdf .csv .json -v
+
+# Specify temp directory (important for large files when system /tmp has limited space)
+# python flatten_zip.py archive.zip output_folder --temp-dir /datadrive/tmp -v
+
+# First, create a temp directory on datadrive (if it doesn't exist)
+# mkdir -p /datadrive/tmp
+
+# Now run the script with the temp directory specified
+# python /datadrive/RECIPE_AGENT/app/backend/ai-analyzer/ai_analyzer/flatten_zip.py \
+#  /home/azureuser/Beispieldaten_SOP_Run4.zip \
+#  /datadrive/RECIPE_AGENT/app/data \
+#  --only .json \
+#  --temp-dir /datadrive/tmp \
+#  -v
