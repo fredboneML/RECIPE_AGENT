@@ -171,6 +171,16 @@ class QdrantRecipeManager:
             return [], search_metadata
 
         search_metadata["text_results_found"] = len(text_candidates)
+        
+        # Log all text search candidates for debugging
+        logger.info(f"Text search found {len(text_candidates)} candidates before refinement:")
+        for i, candidate in enumerate(text_candidates, 1):
+            recipe_name = candidate.get('recipe_name', 'Unknown')
+            text_score = candidate.get('text_score', 0.0)
+            num_features = candidate.get('num_features', 0)
+            description = candidate.get('description', '')
+            description_preview = description[:80] + '...' if len(description) > 80 else description
+            logger.info(f"  {i}. {recipe_name} | Text Score: {text_score:.4f} | Features: {num_features} | Desc: {description_preview}")
 
         # Step 2: Feature refinement (if query_df provided)
         if query_df is not None and not query_df.empty:
@@ -267,6 +277,16 @@ class QdrantRecipeManager:
 
             logger.info(
                 f"Feature refinement completed, returning top {min(top_k, len(refined_results))} results")
+            
+            # Log refined results with all scores for debugging
+            logger.info(f"Refined results (sorted by combined score):")
+            for i, result in enumerate(refined_results[:top_k], 1):
+                recipe_name = result.get('recipe_name', 'Unknown')
+                text_score = result.get('text_score', 0.0)
+                feature_score = result.get('feature_score', 0.0)
+                combined_score = result.get('combined_score', 0.0)
+                logger.info(f"  {i}. {recipe_name} | Combined: {combined_score:.4f} (Text: {text_score:.4f} × 0.3 + Feature: {feature_score:.4f} × 0.7)")
+            
             return refined_results[:top_k]
 
         except Exception as e:
