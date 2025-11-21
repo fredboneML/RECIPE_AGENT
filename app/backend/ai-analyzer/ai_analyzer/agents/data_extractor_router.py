@@ -4,8 +4,8 @@ Data Extractor & Search Router Agent
 
 This agent is responsible for:
 1. Extracting meaningful information from supplier project briefs
-2. Deciding whether to use text-only search or two-step search with feature refinement
-3. Preparing the search query structure
+2. Preparing data for two-step feature-based search
+3. Structuring the search query with features and text description
 """
 import logging
 import re
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class DataExtractorRouterAgent:
-    """Agent for extracting data from supplier briefs and routing search strategy"""
+    """Agent for extracting data from supplier briefs for two-step feature-based search"""
 
     def __init__(self, model_provider: str = "openai", model_name: str = "gpt-4", api_key: Optional[str] = None):
         """Initialize the Data Extractor & Router Agent"""
@@ -32,7 +32,7 @@ class DataExtractorRouterAgent:
         # Create the agent
         self.agent = Agent(
             name="Data Extractor & Search Router",
-            role="Extract recipe information from supplier briefs and determine optimal search strategy",
+            role="Extract recipe information from supplier briefs for feature-based search",
             model=OpenAIChat(
                 api_key=self.api_key
             ),
@@ -40,9 +40,8 @@ class DataExtractorRouterAgent:
                 "You are an expert recipe analyzer who extracts structured information from supplier project briefs.",
                 "Your task is to:",
                 "1. Extract key recipe characteristics (flavors, colors, ingredients, attributes)",
-                "2. Identify whether the brief contains specific feature requirements",
-                "3. Decide if text-only search or two-step feature-based search is appropriate",
-                "4. Structure the extracted information for recipe search",
+                "2. Identify specific feature requirements from the brief",
+                "3. Structure the extracted information for two-step feature-based search",
                 "",
                 "EXTRACTION GUIDELINES:",
                 "- Extract flavor/flavour information (e.g., 'peach', 'apricot', 'banana')",
@@ -53,30 +52,25 @@ class DataExtractorRouterAgent:
                 "- Extract texture/consistency information",
                 "- Extract any specific technical requirements",
                 "",
-                "ROUTING DECISION:",
-                "- Use TEXT-ONLY search when:",
-                "  * The brief contains primarily descriptive text without specific feature requirements",
-                "  * The brief focuses on flavor profiles, sensory descriptions, or general product concepts",
-                "  * No structured attributes (like 'No preservatives', 'Halal', 'Organic') are mentioned",
-                "",
-                "- Use TWO-STEP search when:",
-                "  * The brief contains specific feature requirements (e.g., 'No artificial colors', 'Halal')",
-                "  * Structured attributes are clearly defined (e.g., 'Natural flavour', 'No preservatives')",
-                "  * The brief includes technical specifications or product classifications",
+                "SEARCH STRATEGY:",
+                "- ALL requests will use TWO-STEP feature-based search",
+                "- Extract both descriptive text and structured features from the brief",
+                "- Always identify and extract feature requirements even if not explicitly stated",
+                "- Convert general descriptions into structured features when applicable",
                 "",
                 "OUTPUT FORMAT:",
                 "Your response must be a JSON object with the following structure:",
                 "{",
-                "  'search_type': 'text_only' or 'two_step',",
+                "  'search_type': 'two_step',",
                 "  'text_description': 'extracted descriptive text for search',",
                 "  'features': [",
                 "    {'feature_name': 'Feature name', 'feature_value': 'Feature value'},",
                 "    ...",
                 "  ],",
-                "  'reasoning': 'brief explanation of why this search type was chosen'",
+                "  'reasoning': 'brief explanation of the extracted features'",
                 "}",
                 "",
-                "IMPORTANT: Always provide valid JSON output."
+                "IMPORTANT: Always provide valid JSON output with search_type set to 'two_step'."
             ],
             markdown=False
         )
@@ -86,7 +80,7 @@ class DataExtractorRouterAgent:
 
     def extract_and_route(self, supplier_brief: str, document_text: Optional[str] = None) -> Dict[str, Any]:
         """
-        Extract information from supplier brief and determine search strategy
+        Extract information from supplier brief for two-step feature-based search
 
         Args:
             supplier_brief: The supplier project brief text (user input)
@@ -94,10 +88,10 @@ class DataExtractorRouterAgent:
 
         Returns:
             Dictionary containing:
-            - search_type: 'text_only' or 'two_step'
+            - search_type: 'two_step' (always)
             - text_description: Extracted text for search
-            - features_df: Optional DataFrame with features (for two-step search)
-            - reasoning: Explanation of routing decision
+            - features_df: DataFrame with features for two-step search
+            - reasoning: Explanation of extracted features
         """
         try:
             # Combine user input with document text if available
@@ -154,12 +148,12 @@ Provide your response as a JSON object following the specified format.
 
         except Exception as e:
             logger.error(f"Error in data extraction and routing: {e}")
-            # Fallback to text-only search
+            # Fallback to two-step search with empty features
             return {
-                'search_type': 'text_only',
+                'search_type': 'two_step',
                 'text_description': document_text if document_text else supplier_brief,
                 'features_df': None,
-                'reasoning': f'Error in extraction: {str(e)}. Falling back to text-only search.'
+                'reasoning': f'Error in extraction: {str(e)}. Falling back to two-step search with text only.'
             }
 
     def _parse_agent_response(self, response_text: str) -> Dict[str, Any]:
@@ -185,7 +179,7 @@ Provide your response as a JSON object following the specified format.
 
             # Validate required fields
             if 'search_type' not in result:
-                result['search_type'] = 'text_only'
+                result['search_type'] = 'two_step'
             if 'text_description' not in result:
                 result['text_description'] = response_text
             if 'features' not in result:
@@ -197,12 +191,12 @@ Provide your response as a JSON object following the specified format.
 
         except Exception as e:
             logger.warning(f"Failed to parse JSON response: {e}")
-            # Return text-only fallback
+            # Return two-step fallback
             return {
-                'search_type': 'text_only',
+                'search_type': 'two_step',
                 'text_description': response_text,
                 'features': [],
-                'reasoning': 'Failed to parse structured response. Using text-only search.'
+                'reasoning': 'Failed to parse structured response. Using two-step search with text only.'
             }
 
     def get_stats(self) -> Dict[str, Any]:

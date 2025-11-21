@@ -5,7 +5,7 @@ import os
 import logging
 import json
 import pandas as pd
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 import sys
 
@@ -292,7 +292,7 @@ class RecipeSearchAgent:
 
     def search_recipes(self,
                        description: str,
-                       features: Optional[List[Dict[str, str]]] = None,
+                       features: Optional[Union[pd.DataFrame, List[Dict[str, str]]]] = None,
                        text_top_k: int = 20,
                        final_top_k: int = 3) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
@@ -300,7 +300,7 @@ class RecipeSearchAgent:
 
         Args:
             description: Recipe description (mandatory)
-            features: Optional list of feature dictionaries with 'charactDescr' and 'valueCharLong'
+            features: Optional DataFrame or list of dicts with 'charactDescr' and 'valueCharLong'
             text_top_k: Number of candidates from text search
             final_top_k: Final number of results to return
 
@@ -327,21 +327,27 @@ class RecipeSearchAgent:
 
             # Prepare query DataFrame if features are provided
             query_df = None
-            if features:
+            if features is not None:
                 try:
-                    # Convert features to DataFrame format
-                    features_data = []
-                    for feature in features:
-                        if 'charactDescr' in feature and 'valueCharLong' in feature:
-                            features_data.append({
-                                'charactDescr': feature['charactDescr'],
-                                'valueCharLong': feature['valueCharLong']
-                            })
-
-                    if features_data:
-                        query_df = pd.DataFrame(features_data)
-                        logger.info(
-                            f"Using {len(features_data)} features for refinement")
+                    # Check if features is a DataFrame or list
+                    if isinstance(features, pd.DataFrame):
+                        if not features.empty:
+                            query_df = features
+                            logger.info(
+                                f"Using {len(features)} features for refinement")
+                    elif isinstance(features, list) and len(features) > 0:
+                        # Convert list of dicts to DataFrame
+                        features_data = []
+                        for feature in features:
+                            if 'charactDescr' in feature and 'valueCharLong' in feature:
+                                features_data.append({
+                                    'charactDescr': feature['charactDescr'],
+                                    'valueCharLong': feature['valueCharLong']
+                                })
+                        if features_data:
+                            query_df = pd.DataFrame(features_data)
+                            logger.info(
+                                f"Using {len(features_data)} features for refinement")
                 except Exception as e:
                     logger.warning(f"Error processing features: {e}")
                     query_df = None

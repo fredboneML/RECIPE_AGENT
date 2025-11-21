@@ -1,5 +1,6 @@
 # app/backend/ai-analyzer/ai_analyzer/main.py
 from ai_analyzer.agents.recipe_search_agent import RecipeSearchAgent
+from ai_analyzer.agents.data_extractor_router import DataExtractorRouterAgent
 from ai_analyzer.cache_manager import DatabaseCacheManager
 from ai_analyzer.data_import_postgresql import (
     User,
@@ -180,6 +181,7 @@ restricted_tables = get_initial_restricted_tables()
 
 # Initialize recipe search agent
 recipe_search_agent = None
+data_extractor_router_agent = None
 
 
 def initialize_recipe_search_agent():
@@ -192,6 +194,20 @@ def initialize_recipe_search_agent():
         return True
     except Exception as e:
         logger.error(f"Error initializing recipe search agent: {e}")
+        logger.exception("Detailed error:")
+        return False
+
+
+def initialize_data_extractor_router_agent():
+    """Initialize the data extractor router agent"""
+    global data_extractor_router_agent
+    try:
+        logger.info("Initializing data extractor router agent...")
+        data_extractor_router_agent = DataExtractorRouterAgent()
+        logger.info("Data extractor router agent initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Error initializing data extractor router agent: {e}")
         logger.exception("Detailed error:")
         return False
 
@@ -289,6 +305,9 @@ async def startup_event():
 
         # Initialize recipe search agent
         initialize_recipe_search_agent()
+        
+        # Initialize data extractor router agent
+        initialize_data_extractor_router_agent()
 
         logger.info("Application startup completed successfully")
 
@@ -521,18 +540,48 @@ async def process_query(
                 f"/api/query: Continuing conversation: {conversation_id}")
 
         # Check if recipe search agent is available
-        global recipe_search_agent
+        global recipe_search_agent, data_extractor_router_agent
         if not recipe_search_agent:
             logger.error("Recipe search agent not initialized")
             raise HTTPException(
                 status_code=503,
                 detail="Recipe search service not available. Please try again later."
             )
+        
+        if not data_extractor_router_agent:
+            logger.error("Data extractor router agent not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail="Data extraction service not available. Please try again later."
+            )
 
-        # Search for recipes
+        # Extract features from the query using the data extractor router agent
+        logger.info("/api/query: Extracting features from query...")
+        extraction_result = data_extractor_router_agent.extract_and_route(query)
+        
+        # Use extracted features for the search
+        extracted_features_df = extraction_result.get('features_df')
+        text_description = extraction_result.get('text_description', query)
+        
+        logger.info(f"/api/query: Search type: {extraction_result.get('search_type')}")
+        logger.info(f"/api/query: Reasoning: {extraction_result.get('reasoning')}")
+        
+        # Detailed logging for debugging
+        if extracted_features_df is not None and not extracted_features_df.empty:
+            features_list = []
+            for idx, row in extracted_features_df.iterrows():
+                feature_str = f"{row.get('charactDescr', 'N/A')}: {row.get('valueCharLong', 'N/A')}"
+                features_list.append(feature_str)
+            logger.info(f"/api/query: Extracted {len(extracted_features_df)} features: {', '.join(features_list)}")
+        else:
+            logger.info("/api/query: Extracted 0 features")
+        
+        logger.info(f"/api/query: Extracted description: {text_description}")
+        
+        # Search for recipes with extracted features
         results, metadata, formatted_response, detected_language, comparison_table = recipe_search_agent.search_recipes(
-            description=query,
-            features=features,
+            description=text_description,
+            features=extracted_features_df,
             text_top_k=text_top_k,
             final_top_k=final_top_k
         )
