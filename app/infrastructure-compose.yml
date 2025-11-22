@@ -66,6 +66,7 @@ services:
       - RECIPE_COLLECTION_NAME=food_recipes_two_step
       - EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2
       - RECIPE_DATA_DIR=/usr/src/app/data
+      - FEATURE_MAP_PATH=/usr/src/app/Test_Input/charactDescr_valueCharLong_map.json
       - PYTHONPATH=/usr/src/app
       - PYTHONUNBUFFERED=1
     volumes:
