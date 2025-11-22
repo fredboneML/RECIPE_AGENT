@@ -547,7 +547,7 @@ async def process_query(
                 status_code=503,
                 detail="Recipe search service not available. Please try again later."
             )
-        
+
         if not data_extractor_router_agent:
             logger.error("Data extractor router agent not initialized")
             raise HTTPException(

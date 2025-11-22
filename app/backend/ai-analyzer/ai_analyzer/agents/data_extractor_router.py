@@ -6,9 +6,12 @@ This agent is responsible for:
 1. Extracting meaningful information from supplier project briefs
 2. Preparing data for two-step feature-based search
 3. Structuring the search query with features and text description
+4. Using intelligent feature mappings for multilingual/synonym support
 """
 import logging
 import re
+import json
+import os
 import pandas as pd
 from typing import Dict, Any, Optional, List, Tuple
 from agno.agent import Agent
@@ -28,6 +31,12 @@ class DataExtractorRouterAgent:
         self.model_provider = model_provider
         self.model_name = model_name
         self.api_key = api_key or config.get('AI_ANALYZER_OPENAI_API_KEY')
+        
+        # Load feature mappings for intelligent extraction
+        self.feature_mappings = self._load_feature_mappings()
+        
+        # Generate dynamic instructions with mappings
+        instructions = self._generate_instructions()
 
         # Create the agent
         self.agent = Agent(
@@ -36,7 +45,32 @@ class DataExtractorRouterAgent:
             model=OpenAIChat(
                 api_key=self.api_key
             ),
-            instructions=[
+            instructions=instructions
+        )
+        
+        logger.info(f"DataExtractorRouterAgent initialized with {len(self.feature_mappings.get('feature_name_mappings', {}))} feature name mappings")
+    
+    def _load_feature_mappings(self) -> Dict[str, Any]:
+        """Load feature mappings for intelligent extraction"""
+        mappings_path = '/usr/src/app/data/feature_extraction_mappings.json'
+        
+        try:
+            if os.path.exists(mappings_path):
+                with open(mappings_path, 'r', encoding='utf-8') as f:
+                    mappings = json.load(f)
+                logger.info(f"Loaded feature mappings: {mappings.get('stats', {})}")
+                return mappings
+            else:
+                logger.warning(f"Feature mappings not found at {mappings_path}")
+                logger.warning("Proceeding with default mappings")
+                return {'feature_name_mappings': {}, 'value_mappings': {}}
+        except Exception as e:
+            logger.error(f"Error loading feature mappings: {e}")
+            return {'feature_name_mappings': {}, 'value_mappings': {}}
+    
+    def _generate_instructions(self) -> List[str]:
+        """Generate instructions with feature mappings"""
+        base_instructions = [
                 "You are an expert recipe analyzer who extracts structured information from supplier project briefs.",
                 "Your task is to:",
                 "1. Extract key recipe characteristics and map them to database field names (charactDescr)",
@@ -90,11 +124,28 @@ class DataExtractorRouterAgent:
                 "",
                 "FEATURE EXTRACTION RULES:",
                 "1. Map user terms to exact database field names listed above",
-                "2. For stabilizers: if 'starch' mentioned → use 'Starch' OR 'Stärke'",
-                "3. For certifications: use uppercase versions (HALAL, KOSHER, VEGAN, ORGANIC)",
-                "4. For boolean attributes: use 'yes'/'no' or 'allowed'/'not allowed'",
-                "5. Extract specific values when mentioned (e.g., pH <4.1, Brix 30±5)",
-                "6. Prioritize features that are explicitly stated in the brief",
+                "2. Extract SINGLE, SPECIFIC values that match database format:",
+                "   - For YES/NO features: use 'Yes' or 'No' (e.g., Starch: Yes, Artificial colors: No)",
+                "   - For certifications: use 'Yes' not 'allowed' or 'Preferred' (e.g., HALAL: Yes, KOSHER: Yes)",
+                "   - For pH range: MUST be MIN-MAX format (e.g., '3.0-4.1', '3.2-4.5', '2.8-4.0')",
+                "     * NEVER use '<4.1' or '>3.0' - always convert to range format",
+                "     * If only max given (pH <4.1), use '3.0-4.1' as default range",
+                "     * If only min given (pH >3.0), use '3.0-4.5' as default range",
+                "   - For Brix range: MUST be MIN-MAX format (e.g., '25-35', '30-40', '20-30')",
+                "     * Extract from brief carefully: 'Fruit 30±5' means '25-35', 'Syrup 50±5' means '45-55'",
+                "     * Use the Fruit Brix range, not Syrup",
+                "   - For flavor/color: use PRIMARY flavor only (e.g., Flavour: Peach, Color: Orange)",
+                "     * If 'Peach Apricot', extract 'Peach' as primary",
+                "     * If 'Strawberry Vanilla', extract 'Strawberry' as primary",
+                "   - For application: use general category (e.g., 'Yogurt', 'Ice Cream', 'Bakery')",
+                "3. ONE value per feature - if multiple options, choose the PRIMARY one",
+                "4. Avoid compound values - choose the MAIN one",
+                "5. Format validation checklist:",
+                "   ✓ pH range contains '-' (e.g., '3.0-4.1')",
+                "   ✓ Brix range contains '-' (e.g., '25-35')",
+                "   ✓ Boolean values are exactly 'Yes' or 'No'",
+                "   ✓ Flavour is single word or two words max",
+                "6. Prioritize features explicitly stated in brief",
                 "",
                 "OUTPUT FORMAT:",
                 "Your response must be a JSON object with the following structure:",
@@ -102,23 +153,117 @@ class DataExtractorRouterAgent:
                 "  'search_type': 'two_step',",
                 "  'text_description': 'concise product description with key features',",
                 "  'features': [",
-                "    {'feature_name': 'Exact charactDescr name from database', 'feature_value': 'Specific value'},",
-                "    ...",
+                "    {'feature_name': 'Flavour', 'feature_value': 'Peach'},",
+                "    {'feature_name': 'Color', 'feature_value': 'Orange'},",
+                "    {'feature_name': 'Application (Fruit filling)', 'feature_value': 'Yogurt'},",
+                "    {'feature_name': 'Starch', 'feature_value': 'Yes'},",
+                "    {'feature_name': 'Pectin', 'feature_value': 'Yes'},",
+                "    {'feature_name': 'Xanthan', 'feature_value': 'Yes'},",
+                "    {'feature_name': 'HALAL', 'feature_value': 'Yes'},",
+                "    {'feature_name': 'KOSHER', 'feature_value': 'Yes'},",
+                "    {'feature_name': 'Artificial colors', 'feature_value': 'No'},",
+                "    {'feature_name': 'pH range', 'feature_value': '3.0-4.1'},",
+                "    {'feature_name': 'Brix range', 'feature_value': '25-35'}",
                 "  ],",
                 "  'reasoning': 'brief explanation of mapping choices'",
                 "}",
+                "",
+                "CRITICAL: For pH and Brix range, ALWAYS use MIN-MAX format with dash '-'",
+                "Example: If brief says 'pH <4.1', convert to '3.0-4.1'",
+                "Example: If brief says 'Brix Fruit 30±5', convert to '25-35'",
+                "",
+                "IMPORTANT EXAMPLES:",
+                "Boolean Features:",
+                "- ✅ CORRECT: {'feature_name': 'Starch', 'feature_value': 'Yes'}",
+                "- ❌ WRONG: {'feature_name': 'Starch', 'feature_value': 'allowed'} or 'Modified Starch (1442)'",
+                "",
+                "- ✅ CORRECT: {'feature_name': 'HALAL', 'feature_value': 'Yes'}",
+                "- ❌ WRONG: {'feature_name': 'HALAL', 'feature_value': 'Preferred'} or 'allowed'",
+                "",
+                "- ✅ CORRECT: {'feature_name': 'Artificial colors', 'feature_value': 'No'}",
+                "- ❌ WRONG: {'feature_name': 'Artificial colors', 'feature_value': 'not allowed'}",
+                "",
+                "Numeric Ranges (MUST contain dash '-'):",
+                "- ✅ CORRECT: {'feature_name': 'pH range', 'feature_value': '3.0-4.1'}",
+                "- ❌ WRONG: {'feature_name': 'pH range', 'feature_value': '<4.1'} (missing min)",
+                "- ❌ WRONG: {'feature_name': 'pH range', 'feature_value': '4.1'} (not a range)",
+                "",
+                "- ✅ CORRECT: {'feature_name': 'Brix range', 'feature_value': '25-35'}",
+                "- ❌ WRONG: {'feature_name': 'Brix range', 'feature_value': '30±5'} (convert to 25-35)",
+                "- ❌ WRONG: {'feature_name': 'Brix range', 'feature_value': '30-55'} (too wide, use fruit brix)",
+                "",
+                "Text Values:",
+                "- ✅ CORRECT: {'feature_name': 'Flavour', 'feature_value': 'Peach'}",
+                "- ❌ WRONG: {'feature_name': 'Flavour', 'feature_value': 'Peach Apricot'} (use primary only)",
+                "",
+                "- ✅ CORRECT: {'feature_name': 'Application (Fruit filling)', 'feature_value': 'Yogurt'}",
+                "- ❌ WRONG: {'feature_name': 'Application', 'feature_value': 'Mixed with white mass, On top, At bottom'}",
                 "",
                 "IMPORTANT:",
                 "- Always use EXACT database field names (charactDescr) listed above",
                 "- Keep text_description concise and searchable (focus on product type, flavor, key attributes)",
                 "- Only extract features that are clearly mentioned or strongly implied",
-                "- Always provide valid JSON output with search_type set to 'two_step'"
-            ],
-            markdown=False
-        )
-
-        logger.info(
-            f"Initialized DataExtractorRouterAgent with model {self.model_name}")
+                "- For multi-flavor products (e.g., 'Peach Apricot'), extract PRIMARY flavor only: 'Peach'",
+                "- For pH/Brix ranges, ALWAYS convert to MIN-MAX format with dash: '3.0-4.1', '25-35'",
+                "- All boolean features must be exactly 'Yes' or 'No', never 'allowed', 'Preferred', etc.",
+                "- Always provide valid JSON output with search_type set to 'two_step'",
+                "",
+                "=" * 80,
+                "INTELLIGENT FEATURE MAPPING (USE THIS TO UNDERSTAND USER TERMINOLOGY):",
+                "=" * 80,
+                self._format_feature_mappings_guide(),
+                "=" * 80
+            ]
+        
+        return base_instructions
+    
+    def _format_feature_mappings_guide(self) -> str:
+        """Format feature mappings as a guide for the LLM"""
+        guide_lines = []
+        
+        feature_map = self.feature_mappings.get('feature_name_mappings', {})
+        value_map = self.feature_mappings.get('value_mappings', {})
+        
+        if feature_map:
+            guide_lines.append("\nFEATURE NAME SYNONYMS (User term → Database field):")
+            # Group by target feature
+            reverse_map = {}
+            for user_term, db_field in feature_map.items():
+                if db_field not in reverse_map:
+                    reverse_map[db_field] = []
+                reverse_map[db_field].append(user_term)
+            
+            # Show important mappings
+            important_features = [
+                'Flavour', 'Color', 'Application (Fruit filling)',
+                'Starch', 'Pectin', 'HALAL', 'KOSHER', 'VEGAN',
+                'pH range', 'Brix range', 'Artificial colors'
+            ]
+            
+            for db_field in important_features:
+                if db_field in reverse_map:
+                    synonyms = sorted(set(reverse_map[db_field]))[:8]  # Limit to 8 examples
+                    guide_lines.append(f"  {db_field}: {', '.join(synonyms)}")
+        
+        if value_map:
+            guide_lines.append("\nVALUE NORMALIZATION (User value → Database value):")
+            # Show key value mappings
+            important_value_features = ['HALAL', 'KOSHER', 'VEGAN', 'Starch', 'Pectin', 'Artificial colors']
+            for feature in important_value_features:
+                if feature in value_map:
+                    examples = list(value_map[feature].items())[:6]
+                    if examples:
+                        guide_lines.append(f"  {feature}:")
+                        for user_val, db_val in examples:
+                            guide_lines.append(f"    '{user_val}' → '{db_val}'")
+        
+        guide_lines.append("\nUSE THESE MAPPINGS TO:")
+        guide_lines.append("1. Map user terminology (any language/synonym) to exact database field names")
+        guide_lines.append("2. Normalize user values to match database values")
+        guide_lines.append("3. Handle case variations (lowercase/uppercase/mixed)")
+        guide_lines.append("4. Support multilingual inputs (English, German, French, etc.)")
+        
+        return "\n".join(guide_lines)
 
     def extract_and_route(self, supplier_brief: str, document_text: Optional[str] = None) -> Dict[str, Any]:
         """

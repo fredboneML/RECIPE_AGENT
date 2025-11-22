@@ -292,7 +292,8 @@ class RecipeSearchAgent:
 
     def search_recipes(self,
                        description: str,
-                       features: Optional[Union[pd.DataFrame, List[Dict[str, str]]]] = None,
+                       features: Optional[Union[pd.DataFrame,
+                                                List[Dict[str, str]]]] = None,
                        text_top_k: int = 20,
                        final_top_k: int = 3) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """

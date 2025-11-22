@@ -1,24 +1,31 @@
 #!/usr/bin/env python3
 """
-Vector Index Initialization with Qdrant Storage
+Vector Index Initialization with Qdrant Storage - Enhanced Version
 
-This version actually stores vectors in Qdrant instead of just in-memory.
+This version uses EnhancedTwoStepRecipeManager logic for sophisticated feature encoding
+with pre-analyzed feature types from charactDescr_valueCharLong_map.json.
 """
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 import os
-import sys
 import time
 import logging
 import json
 import pandas as pd
 from pathlib import Path
 import uuid
+from feature_analyzer import FeatureAnalyzer
+from src.two_step_recipe_search import EnhancedTwoStepRecipeManager
+import sys
 
 # Add the current directory to Python path to import local modules
+# Backend root (for feature_analyzer.py)
 sys.path.insert(0, '/usr/src/app')
-sys.path.insert(0, '/usr/src/app/src')
+sys.path.insert(0, '/usr/src/app/src')  # For two_step_recipe_search.py
+sys.path.insert(0, '/usr/src/app/data')  # For feature_mapping_generator.py
+
+# Now import everything else (AFTER sys.path setup)
 
 # Configure logging
 logging.basicConfig(
@@ -205,8 +212,8 @@ def load_recipes_from_data_dir(data_dir):
     return sorted(recipe_json_list)
 
 
-def create_qdrant_collection(qdrant_client, collection_name, vector_size=384):
-    """Create Qdrant collection if it doesn't exist"""
+def create_qdrant_collection(qdrant_client, collection_name, text_vector_size=384, feature_vector_size=484):
+    """Create Qdrant collection with named vectors for text and features"""
     try:
         collections = qdrant_client.get_collections()
         collection_names = [c.name for c in collections.collections]
@@ -216,16 +223,26 @@ def create_qdrant_collection(qdrant_client, collection_name, vector_size=384):
                 f"Collection '{collection_name}' already exists.")
             return True
 
-        # Create collection with proper vector configuration
+        # Create collection with named vectors configuration
+        # text_vector: for Step 1 text search (384 dim)
+        # feature_vector: for Step 2 feature refinement (484 dim = 384 text + 100 categorical)
         qdrant_client.create_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(
-                size=vector_size,
-                distance=Distance.COSINE
-            )
+            vectors_config={
+                "text": VectorParams(
+                    size=text_vector_size,
+                    distance=Distance.COSINE
+                ),
+                "features": VectorParams(
+                    size=feature_vector_size,
+                    distance=Distance.COSINE
+                )
+            }
         )
         logger.info(
-            f"Created collection '{collection_name}' with vector size {vector_size}")
+            f"Created collection '{collection_name}' with named vectors:")
+        logger.info(f"  - text: {text_vector_size} dimensions")
+        logger.info(f"  - features: {feature_vector_size} dimensions")
         return True
 
     except Exception as e:
@@ -233,9 +250,67 @@ def create_qdrant_collection(qdrant_client, collection_name, vector_size=384):
         return False
 
 
-def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, data_dir):
-    """Index recipes directly into Qdrant"""
+def pre_analyze_features(feature_map_path: str) -> dict:
+    """
+    Pre-analyze features using the charactDescr_valueCharLong_map.json
+
+    Returns:
+        Dictionary with feature analysis results
+    """
+    if not os.path.exists(feature_map_path):
+        logger.warning(f"Feature map not found at {feature_map_path}")
+        logger.warning(
+            "Proceeding without pre-analysis (will analyze during indexing)")
+        return None
+
     try:
+        logger.info("=" * 60)
+        logger.info("PRE-ANALYZING FEATURES")
+        logger.info("=" * 60)
+        logger.info(f"Loading feature map from: {feature_map_path}")
+
+        # Create analyzer
+        analyzer = FeatureAnalyzer(feature_map_path)
+
+        # Run analysis
+        analysis = analyzer.analyze_all_features()
+
+        # Print summary
+        analyzer.print_summary()
+
+        # Get simplified config for indexing
+        feature_config = analyzer.get_feature_config_for_indexing()
+
+        logger.info("=" * 60)
+        logger.info(f"✅ Pre-analyzed {len(feature_config)} features")
+        logger.info(f"   Binary: {len(analyzer.binary_features)}")
+        logger.info(f"   Numerical: {len(analyzer.numerical_features)}")
+        logger.info(f"   Range: {len(analyzer.range_features)}")
+        logger.info(f"   Categorical: {len(analyzer.categorical_features)}")
+        logger.info("=" * 60)
+
+        return {
+            'feature_config': feature_config,
+            'binary_features': analyzer.binary_features,
+            'numerical_features': analyzer.numerical_features,
+            'range_features': analyzer.range_features,
+            'categorical_features': analyzer.categorical_features
+        }
+
+    except Exception as e:
+        logger.error(f"Error in feature pre-analysis: {e}")
+        logger.warning("Proceeding without pre-analysis")
+        return None
+
+
+def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, data_dir, feature_map_path=None):
+    """Index recipes to Qdrant using EnhancedTwoStepRecipeManager logic with pre-analyzed features"""
+    try:
+        # Pre-analyze features if map is available
+        feature_analysis = None
+        if feature_map_path:
+            feature_analysis = pre_analyze_features(feature_map_path)
+
         # Load recipe files
         recipe_json_list = load_recipes_from_data_dir(data_dir)
 
@@ -244,16 +319,47 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
             return True
 
         logger.info(
-            f"Processing {len(recipe_json_list)} recipes for Qdrant indexing...")
+            f"Processing {len(recipe_json_list)} recipes with enhanced encoding...")
 
-        # Initialize sentence transformer for embeddings
-        logger.info(f"Loading embedding model: {embedding_model}")
-        model = SentenceTransformer(embedding_model)
+        # Initialize EnhancedTwoStepRecipeManager for sophisticated feature encoding
+        logger.info("Initializing EnhancedTwoStepRecipeManager...")
+        manager = EnhancedTwoStepRecipeManager(
+            collection_name=collection_name,
+            embedding_model=embedding_model,
+            max_features=200
+        )
 
-        # Process recipes in batches
-        batch_size = 10
-        points = []
+        # If we have pre-analyzed features, inject them into the manager
+        if feature_analysis and 'feature_config' in feature_analysis:
+            logger.info("Injecting pre-analyzed feature types into manager...")
+            feature_config = feature_analysis['feature_config']
 
+            # Inject binary features
+            for feature_name, feature_type in feature_config.items():
+                if feature_type == 'binary':
+                    manager.feature_types[feature_name] = 'binary'
+                elif feature_type == 'numerical':
+                    manager.feature_types[feature_name] = 'numerical'
+                elif feature_type == 'range':
+                    # Treat ranges as numerical
+                    manager.feature_types[feature_name] = 'numerical'
+
+            logger.info(
+                f"✅ Injected {len(feature_config)} pre-analyzed feature types")
+            logger.info(
+                f"   Binary features: {sum(1 for t in feature_config.values() if t == 'binary')}")
+            logger.info(
+                f"   Numerical features: {sum(1 for t in feature_config.values() if t in ['numerical', 'range'])}")
+            logger.info(
+                f"   Categorical features: {sum(1 for t in feature_config.values() if t == 'categorical')}")
+
+        # Collect all recipes first
+        features_list = []
+        values_list = []
+        descriptions_list = []
+        recipe_ids = []
+
+        logger.info("Step 1: Loading recipes from JSON files...")
         for i, recipe_path in enumerate(recipe_json_list):
             try:
                 # Extract features and values
@@ -272,45 +378,88 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
                         recipe_filename = os.path.basename(
                             recipe_path).split('.')[0]
 
-                        # Create embedding from description
-                        embedding = model.encode(description)
+                        features_list.append(features)
+                        values_list.append(values)
+                        descriptions_list.append(description)
+                        recipe_ids.append(recipe_filename)
 
-                        # Create point for Qdrant
-                        point = PointStruct(
-                            id=str(uuid.uuid4()),
-                            vector=embedding.tolist(),
-                            payload={
-                                "recipe_name": recipe_filename,
-                                "description": description,
-                                # Limit for payload size
-                                "features": features[:50],
-                                "values": [str(v) for v in values[:50]],
-                                "num_features": len(features)
-                            }
-                        )
-                        points.append(point)
-
-                        logger.info(
-                            f"Prepared recipe {i+1}/{len(recipe_json_list)}: {recipe_filename}")
-
-                        # Upload in batches
-                        if len(points) >= batch_size:
-                            qdrant_client.upsert(
-                                collection_name=collection_name,
-                                points=points
-                            )
+                        if (i + 1) % 1000 == 0:
                             logger.info(
-                                f"Uploaded batch of {len(points)} recipes to Qdrant")
-                            points = []
-
+                                f"Loaded {i + 1}/{len(recipe_json_list)} recipes")
                     else:
                         logger.warning(
                             f"Missing required columns in {recipe_path}")
                 else:
-                    logger.warning(
-                        f"Skipping invalid recipe: {recipe_path}")
+                    logger.warning(f"Skipping invalid recipe: {recipe_path}")
             except Exception as e:
-                logger.error(f"Error processing recipe {recipe_path}: {e}")
+                logger.error(f"Error loading recipe {recipe_path}: {e}")
+                continue
+
+        logger.info(f"Loaded {len(features_list)} valid recipes")
+
+        # Step 2: Use EnhancedTwoStepRecipeManager to process recipes
+        # This will analyze features, detect binary patterns, and create proper encodings
+        logger.info(
+            "Step 2: Processing recipes with EnhancedTwoStepRecipeManager...")
+        success = manager.update_recipes(
+            features_list=features_list,
+            values_list=values_list,
+            descriptions_list=descriptions_list,
+            recipe_ids=recipe_ids
+        )
+
+        if not success:
+            logger.error(
+                "Failed to process recipes with EnhancedTwoStepRecipeManager")
+            return False
+
+        # Step 3: Upload to Qdrant with named vectors
+        logger.info("Step 3: Uploading recipes to Qdrant with named vectors...")
+        batch_size = 10
+        points = []
+
+        for i, recipe_data in enumerate(manager.recipes):
+            try:
+                recipe_id = recipe_data["id"]
+                text_vector = recipe_data["text_vector"]
+                feature_vector = recipe_data["feature_vector"]
+                payload = recipe_data["payload"]
+
+                # Create point with named vectors
+                # Use deterministic UUID to avoid duplicates on re-indexing
+                point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, recipe_id))
+
+                point = PointStruct(
+                    id=point_id,
+                    vector={
+                        "text": text_vector.tolist(),
+                        "features": feature_vector.tolist()
+                    },
+                    payload={
+                        "recipe_name": payload.get("recipe_id", recipe_id),
+                        "description": payload.get("description", ""),
+                        # Limit for payload size
+                        "features": payload.get("features", [])[:50],
+                        "values": payload.get("values", [])[:50],
+                        "num_features": len(payload.get("features", [])),
+                        "feature_text": payload.get("feature_text", "")
+                    }
+                )
+                points.append(point)
+
+                # Upload in batches
+                if len(points) >= batch_size:
+                    qdrant_client.upsert(
+                        collection_name=collection_name,
+                        points=points
+                    )
+                    logger.info(
+                        f"Uploaded batch: {i - len(points) + 2} to {i + 1}/{len(manager.recipes)}")
+                    points = []
+
+            except Exception as e:
+                logger.error(
+                    f"Error creating point for recipe {recipe_id}: {e}")
                 continue
 
         # Upload remaining points
@@ -319,18 +468,31 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
                 collection_name=collection_name,
                 points=points
             )
-            logger.info(
-                f"Uploaded final batch of {len(points)} recipes to Qdrant")
+            logger.info(f"Uploaded final batch of {len(points)} recipes")
 
         # Get collection info
         collection_info = qdrant_client.get_collection(collection_name)
         logger.info(
             f"Successfully indexed {collection_info.points_count} recipes in Qdrant")
 
+        # Log feature analysis
+        stats = manager.get_stats()
+        logger.info("=" * 60)
+        logger.info("FEATURE ANALYSIS:")
+        logger.info(f"  Total unique features: {stats['total_features']}")
+        logger.info(
+            f"  Binary features detected: {len(stats['feature_analysis']['binary_feature_names'])}")
+        logger.info(
+            f"  Numerical features: {len(stats['feature_analysis']['numerical_features'])}")
+        logger.info(
+            f"  Categorical features: {len(stats['feature_analysis']['categorical_features'])}")
+        logger.info("=" * 60)
+
         return True
 
     except Exception as e:
         logger.error(f"Error indexing recipes to Qdrant: {e}")
+        logger.exception("Detailed error:")
         return False
 
 
@@ -346,30 +508,38 @@ def main():
             'EMBEDDING_MODEL', 'paraphrase-multilingual-MiniLM-L12-v2')
         data_dir = os.getenv(
             'RECIPE_DATA_DIR', '/usr/src/app/ai-analyzer/data')
+        feature_map_path = os.getenv(
+            'FEATURE_MAP_PATH', '/usr/src/app/Test_Input/charactDescr_valueCharLong_map.json')
 
         logger.info("=" * 60)
-        logger.info("Starting Qdrant Vector Index Initialization")
+        logger.info("Starting Qdrant Vector Index Initialization (Enhanced)")
         logger.info("=" * 60)
         logger.info(f"Qdrant Host: {qdrant_host}")
         logger.info(f"Qdrant Port: {qdrant_port}")
         logger.info(f"Collection Name: {collection_name}")
         logger.info(f"Embedding Model: {embedding_model}")
         logger.info(f"Data Directory: {data_dir}")
+        logger.info(f"Feature Map: {feature_map_path}")
         logger.info("=" * 60)
 
         # Wait for Qdrant to be ready
         logger.info("Waiting for Qdrant to be ready...")
         qdrant_client = wait_for_qdrant(qdrant_host, qdrant_port)
 
-        # Create Qdrant collection
-        logger.info("Creating Qdrant collection...")
+        # Create Qdrant collection with named vectors
+        logger.info("Creating Qdrant collection with named vectors...")
         create_qdrant_collection(
-            qdrant_client, collection_name, vector_size=384)
+            qdrant_client,
+            collection_name,
+            text_vector_size=384,      # Text embedding dimension
+            feature_vector_size=484    # Feature vector dimension (384 + 100)
+        )
 
-        # Index recipes directly into Qdrant
-        logger.info("Indexing recipes to Qdrant...")
+        # Index recipes directly into Qdrant with pre-analyzed features
+        logger.info(
+            "Indexing recipes to Qdrant with enhanced feature encoding...")
         success = index_recipes_to_qdrant(
-            qdrant_client, embedding_model, collection_name, data_dir)
+            qdrant_client, embedding_model, collection_name, data_dir, feature_map_path)
 
         if success:
             logger.info("=" * 60)

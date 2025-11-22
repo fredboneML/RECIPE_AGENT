@@ -71,48 +71,49 @@ services:
     volumes:
       - ./backend:/usr/src/app:delegated
       - ./data:/usr/src/app/data:ro
-      - ./backend/init_vector_index.py:/usr/src/app/init_vector_index.py:ro
-    command: ["python", "/usr/src/app/init_vector_index.py"]
+      - ./backend/init_vector_index_qdrant.py:/usr/src/app/init_vector_index_qdrant.py:ro
+      - ../Test_Input:/usr/src/app/Test_Input:ro
+    command: ["python", "/usr/src/app/init_vector_index_qdrant.py"]
     networks:
       - app-network
 
-  cron_app:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.cron
-      args:
-        - TARGETPLATFORM=linux/arm64
-    container_name: cron_app
-    depends_on:
-      db_init:
-        condition: service_completed_successfully
-      vector_index_init:
-        condition: service_completed_successfully
-      qdrant:
-        condition: service_healthy
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-      - DB_HOST=database
-      - DB_PORT=5432
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
-      - URL=${URL}
-      - API_KEY=${API_KEY}
-      - HOST=${HOST:-localhost}
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - PYTHONPATH=/usr/src/app/ai-analyzer
-      - PYTHONUNBUFFERED=1
-      - PYTHONIOENCODING=UTF-8
-    volumes:
-      - ./backend:/usr/src/app:delegated
-      - ./.env:/usr/src/app/.env:ro
-      - cron_logs:/var/log
-    restart: unless-stopped
-    networks:
-      - app-network
+  # cron_app:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile.cron
+  #     args:
+  #       - TARGETPLATFORM=linux/arm64
+  #   container_name: cron_app
+  #   depends_on:
+  #     db_init:
+  #       condition: service_completed_successfully
+  #     vector_index_init:
+  #       condition: service_completed_successfully
+  #     qdrant:
+  #       condition: service_healthy
+  #   environment:
+  #     - POSTGRES_USER=${POSTGRES_USER}
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+  #     - POSTGRES_DB=${POSTGRES_DB}
+  #     - DB_HOST=database
+  #     - DB_PORT=5432
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - AI_ANALYZER_OPENAI_API_KEY=${AI_ANALYZER_OPENAI_API_KEY}
+  #     - URL=${URL}
+  #     - API_KEY=${API_KEY}
+  #     - HOST=${HOST:-localhost}
+  #     - QDRANT_HOST=qdrant
+  #     - QDRANT_PORT=6333
+  #     - PYTHONPATH=/usr/src/app/ai-analyzer
+  #     - PYTHONUNBUFFERED=1
+  #     - PYTHONIOENCODING=UTF-8
+  #   volumes:
+  #     - ./backend:/usr/src/app:delegated
+  #     - ./.env:/usr/src/app/.env:ro
+  #     - cron_logs:/var/log
+  #   restart: unless-stopped
+  #   networks:
+  #     - app-network
 
   qdrant:
     build:
@@ -140,9 +141,9 @@ volumes:
   postgres_data:
     name: ai_analyzer_postgres_data
     driver: local
-  cron_logs:
-    name: ai_analyzer_cron_logs
-    driver: local
+  # cron_logs:
+  #   name: ai_analyzer_cron_logs
+  #   driver: local
   qdrant_data:
     name: ai_analyzer_qdrant_data
     driver: local

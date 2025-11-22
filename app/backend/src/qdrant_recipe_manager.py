@@ -8,10 +8,8 @@ replacing the in-memory approach of EnhancedTwoStepRecipeManager.
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
-import numpy as np
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -101,14 +99,28 @@ class QdrantRecipeManager:
             # Create embedding for query using SentenceTransformer
             query_vector = self.embedding_model.encode(text_description)
 
-            # Search in Qdrant
-            search_results = self.qdrant_client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector.tolist(),
-                limit=top_k,
-                with_payload=True,
-                with_vectors=False
-            )
+            # Try searching with named vector first (new format)
+            # If that fails, fallback to unnamed vector (old format)
+            try:
+                search_results = self.qdrant_client.search(
+                    collection_name=self.collection_name,
+                    # Named vector
+                    query_vector=("text", query_vector.tolist()),
+                    limit=top_k,
+                    with_payload=True,
+                    with_vectors=False
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Named vector search failed, trying unnamed vector: {e}")
+                # Fallback to unnamed vector for backward compatibility
+                search_results = self.qdrant_client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector.tolist(),
+                    limit=top_k,
+                    with_payload=True,
+                    with_vectors=False
+                )
 
             # Format results
             results = []
@@ -162,7 +174,7 @@ class QdrantRecipeManager:
         }
 
         # Step 1: Text-based search using Qdrant
-        logger.info(f"Step 1: Searching by text in Qdrant")
+        logger.info("Step 1: Searching by text in Qdrant")
         text_candidates = self.search_by_text_description(
             text_description, text_top_k)
 
@@ -171,16 +183,19 @@ class QdrantRecipeManager:
             return [], search_metadata
 
         search_metadata["text_results_found"] = len(text_candidates)
-        
+
         # Log all text search candidates for debugging
-        logger.info(f"Text search found {len(text_candidates)} candidates before refinement:")
+        logger.info(
+            f"Text search found {len(text_candidates)} candidates before refinement:")
         for i, candidate in enumerate(text_candidates, 1):
             recipe_name = candidate.get('recipe_name', 'Unknown')
             text_score = candidate.get('text_score', 0.0)
             num_features = candidate.get('num_features', 0)
             description = candidate.get('description', '')
-            description_preview = description[:80] + '...' if len(description) > 80 else description
-            logger.info(f"  {i}. {recipe_name} | Text Score: {text_score:.4f} | Features: {num_features} | Desc: {description_preview}")
+            description_preview = description[:80] + \
+                '...' if len(description) > 80 else description
+            logger.info(
+                f"  {i}. {recipe_name} | Text Score: {text_score:.4f} | Features: {num_features} | Desc: {description_preview}")
 
         # Step 2: Feature refinement (if query_df provided)
         if query_df is not None and not query_df.empty:
@@ -211,6 +226,53 @@ class QdrantRecipeManager:
 
         return final_results, search_metadata
 
+    def _normalize_boolean(self, value: str) -> str:
+        """Normalize boolean-like values to a standard format"""
+        value = value.lower().strip()
+
+        # Positive values
+        if value in ['yes', 'ja', 'oui', 'si', 'sim', 'allowed', 'permitted', 'true', '1']:
+            return 'yes'
+
+        # Negative values
+        if value in ['no', 'nein', 'non', 'não', 'not allowed', 'forbidden', 'false', '0']:
+            return 'no'
+
+        # Return original if not a boolean
+        return value
+
+    def _match_feature_value(self, query_val: str, cand_val: str) -> bool:
+        """
+        Enhanced feature value matching compatible with EnhancedTwoStepRecipeManager encoding.
+        Uses multiple strategies for robust matching.
+        """
+        query_lower = query_val.lower().strip()
+        cand_lower = cand_val.lower().strip()
+
+        # Strategy 1: Exact match
+        if query_lower == cand_lower:
+            return True
+
+        # Strategy 2: Normalized boolean match
+        query_norm = self._normalize_boolean(query_val)
+        cand_norm = self._normalize_boolean(cand_val)
+        if query_norm in ['yes', 'no'] and cand_norm in ['yes', 'no']:
+            if query_norm == cand_norm:
+                return True
+
+        # Strategy 3: Substring match (bidirectional)
+        if query_lower in cand_lower or cand_lower in query_lower:
+            return True
+
+        # Strategy 4: Partial word match (for multi-word values like flavors)
+        query_words = set(
+            word for word in query_lower.split() if len(word) > 2)
+        cand_words = set(word for word in cand_lower.split() if len(word) > 2)
+        if query_words and cand_words and not query_words.isdisjoint(cand_words):
+            return True
+
+        return False
+
     def _refine_by_features(self,
                             candidates: List[Dict[str, Any]],
                             query_features: List[str],
@@ -229,12 +291,6 @@ class QdrantRecipeManager:
             Refined and reranked results
         """
         try:
-            # Create query feature set for matching
-            query_feature_dict = {
-                feat.lower(): str(val).lower()
-                for feat, val in zip(query_features, query_values)
-            }
-
             # Calculate feature similarity for each candidate
             for candidate in candidates:
                 candidate_features = candidate.get("features", [])
@@ -244,17 +300,17 @@ class QdrantRecipeManager:
                 matching_count = 0
                 total_features = len(query_features)
 
-                for i, (query_feat, query_val) in enumerate(zip(query_features, query_values)):
+                for query_feat, query_val in zip(query_features, query_values):
                     query_feat_lower = query_feat.lower()
-                    query_val_lower = str(query_val).lower()
 
                     # Check if this feature exists in candidate
                     for j, cand_feat in enumerate(candidate_features):
                         if cand_feat.lower() == query_feat_lower:
                             cand_val = str(
                                 candidate_values[j]) if j < len(candidate_values) else ""
-                            # Fuzzy match for values
-                            if query_val_lower in cand_val.lower() or cand_val.lower() in query_val_lower:
+
+                            # Use enhanced matching logic
+                            if self._match_feature_value(str(query_val), cand_val):
                                 matching_count += 1
                             break
 
@@ -277,16 +333,17 @@ class QdrantRecipeManager:
 
             logger.info(
                 f"Feature refinement completed, returning top {min(top_k, len(refined_results))} results")
-            
+
             # Log refined results with all scores for debugging
-            logger.info(f"Refined results (sorted by combined score):")
+            logger.info("Refined results (sorted by combined score):")
             for i, result in enumerate(refined_results[:top_k], 1):
                 recipe_name = result.get('recipe_name', 'Unknown')
                 text_score = result.get('text_score', 0.0)
                 feature_score = result.get('feature_score', 0.0)
                 combined_score = result.get('combined_score', 0.0)
-                logger.info(f"  {i}. {recipe_name} | Combined: {combined_score:.4f} (Text: {text_score:.4f} × 0.3 + Feature: {feature_score:.4f} × 0.7)")
-            
+                logger.info(
+                    f"  {i}. {recipe_name} | Combined: {combined_score:.4f} (Text: {text_score:.4f} × 0.3 + Feature: {feature_score:.4f} × 0.7)")
+
             return refined_results[:top_k]
 
         except Exception as e:
