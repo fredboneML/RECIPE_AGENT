@@ -10,4 +10,4 @@ venv
 app/backend/ai-analyzer/data
 app/brief.txt
 app/database
-Test_Input/charactDescr_valueCharLong_map.json
+#Test_Input/charactDescr_valueCharLong_map.json
