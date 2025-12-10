@@ -6,13 +6,36 @@ This manager actually uses Qdrant for persistent recipe storage and search,
 replacing the in-memory approach of EnhancedTwoStepRecipeManager.
 """
 import logging
+import re
 from typing import List, Dict, Any, Optional, Tuple
+import numpy as np
 import pandas as pd
+from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Feature encoding constants (matching two_step_recipe_search.py)
+NEGATIVE_INDICATORS = [
+    'no ', 'not ', 'without ', 'non-', 'non ', 'free', 'absent',
+    'none', 'zero', 'nil', 'false', 'inactive', 'negative',
+    'excluded', 'forbidden', 'prohibited', 'banned', 'restricted',
+    'nein', 'kein', 'ohne', 'frei von', 'nicht'  # German
+]
+
+POSITIVE_INDICATORS = [
+    'yes', 'with ', 'contains', 'includes', 'present', 'active',
+    'true', 'positive', 'allowed', 'permitted', 'approved',
+    'ja', 'mit ', 'enthält', 'aktiv'  # German
+]
+
+BINARY_FEATURE_NAMES = [
+    'allergen', 'preserve', 'artificial', 'natural', 'gmo', 'organic',
+    'kosher', 'halal', 'color', 'flavor', 'sweetener', 'starch',
+    'pectin', 'blend', 'aspartame', 'additive', 'chemical'
+]
 
 
 class QdrantRecipeManager:
@@ -82,6 +105,251 @@ class QdrantRecipeManager:
         except Exception as e:
             logger.error(f"Error validating collection: {e}")
 
+    def _create_feature_text(self, features: List[str], values: List[Any]) -> str:
+        """
+        Create text representation from features and values for embedding.
+
+        Args:
+            features: List of feature names
+            values: List of feature values
+
+        Returns:
+            Text representation of features
+        """
+        parts = []
+        for feat, val in zip(features, values):
+            val_str = str(val).strip() if val is not None else ""
+            if val_str and val_str.lower() not in ['nan', 'none', '']:
+                parts.append(f"{feat}: {val_str}")
+        return ", ".join(parts)
+
+    def _detect_value_type(self, value: Any) -> Tuple[str, float]:
+        """
+        Detect value type and extract numerical value if applicable.
+        Matches the logic from EnhancedTwoStepRecipeManager.
+        """
+        if pd.isna(value) or value is None or str(value).strip() == '' or str(value).strip().lower() == 'none':
+            return 'missing', 0.0
+
+        value_str = str(value).strip()
+
+        # Handle European percentage format (e.g., "45,5%")
+        percentage_pattern = r'^(\d+(?:,\d+)?)\s*%?$'
+        if value_str.endswith('%') or re.match(percentage_pattern, value_str):
+            try:
+                num_str = value_str.replace('%', '').replace(',', '.').strip()
+                num_val = float(num_str)
+                return 'percentage', num_val
+            except ValueError:
+                return 'categorical', 0.0
+
+        # Handle European decimal format (e.g., "3,5")
+        european_number_pattern = r'^(\d+(?:,\d+)?)\s*[a-zA-Z]*$'
+        if re.match(european_number_pattern, value_str):
+            try:
+                number_match = re.match(r'^(\d+(?:,\d+)?)', value_str)
+                if number_match:
+                    num_str = number_match.group(1).replace(',', '.')
+                    num_val = float(num_str)
+                    return 'numerical', num_val
+            except ValueError:
+                pass
+
+        # Try standard number parsing
+        try:
+            num_val = float(value_str)
+            return 'numerical', num_val
+        except ValueError:
+            pass
+
+        return 'categorical', 0.0
+
+    def _is_likely_binary_feature(self, feature_name: str, value: str) -> bool:
+        """Check if a feature is likely binary based on name and value."""
+        value_lower = value.lower() if value else ""
+
+        # Check if feature name suggests binary
+        name_suggests_binary = any(name in feature_name.lower()
+                                   for name in BINARY_FEATURE_NAMES)
+
+        # Check if value contains binary indicators
+        has_negative = any(neg in value_lower for neg in NEGATIVE_INDICATORS)
+        has_positive = any(pos in value_lower for pos in POSITIVE_INDICATORS)
+
+        return name_suggests_binary or has_negative or has_positive
+
+    def _encode_binary_feature(self, feature_name: str, value: str) -> float:
+        """
+        Encode binary feature value to -1.0, 0.0, or 1.0.
+        Matches the logic from EnhancedTwoStepRecipeManager.
+        """
+        if not value or pd.isna(value):
+            return 0.0
+
+        value_clean = str(value).lower().strip()
+
+        # Check for negative indicators
+        for neg_indicator in NEGATIVE_INDICATORS:
+            if neg_indicator in value_clean:
+                return -1.0
+
+        # Check for positive indicators
+        for pos_indicator in POSITIVE_INDICATORS:
+            if pos_indicator in value_clean:
+                return 1.0
+
+        # If feature name is in value, it's likely positive
+        if feature_name.lower() in value_clean or any(
+            word in value_clean for word in feature_name.lower().split()
+        ):
+            return 1.0
+
+        return 0.0
+
+    def _encode_categorical_feature(self, feature_name: str, value: str) -> float:
+        """
+        Encode categorical feature using hash-based approach.
+        This approximates the LabelEncoder behavior from indexing.
+        """
+        if not value or pd.isna(value):
+            return 0.0
+
+        # Use hash to get consistent encoding for same value
+        # Normalize to [0, 1] range and scale similarly to indexing (/ 20.0)
+        value_clean = str(value).lower().strip()
+        hash_val = hash(f"{feature_name}:{value_clean}") % 1000
+        return (hash_val / 1000.0) / 20.0  # Match indexing scale
+
+    def _encode_mixed_features(self, features: List[str], values: List[Any]) -> np.ndarray:
+        """
+        Encode features using the same logic as EnhancedTwoStepRecipeManager.
+        Creates a 100-dimensional categorical vector.
+
+        This handles:
+        - Binary features (encoded as -1.0, 0.0, 1.0)
+        - Numerical/percentage features (normalized to [-1, 1])
+        - Categorical features (hash-based encoding)
+        """
+        categorical_dim = 100
+        categorical_vector = np.zeros(categorical_dim)
+
+        # Sort features for consistent ordering (matching indexing behavior)
+        feature_dict = {feat: val for feat, val in zip(features, values)}
+        sorted_features = sorted(feature_dict.keys())
+
+        for i, feature_name in enumerate(sorted_features[:categorical_dim]):
+            value = feature_dict[feature_name]
+            value_str = str(value) if value is not None else ""
+
+            # Detect value type
+            value_type, num_val = self._detect_value_type(value)
+
+            if value_type == 'missing':
+                categorical_vector[i] = 0.0
+
+            elif value_type in ['numerical', 'percentage']:
+                # Normalize to [-1, 1] range (matching indexing: / 100.0)
+                categorical_vector[i] = min(max(num_val / 100.0, -1.0), 1.0)
+
+            elif self._is_likely_binary_feature(feature_name, value_str):
+                # Binary encoding
+                categorical_vector[i] = self._encode_binary_feature(
+                    feature_name, value_str)
+
+            else:
+                # Categorical encoding (hash-based approximation)
+                categorical_vector[i] = self._encode_categorical_feature(
+                    feature_name, value_str)
+
+        return categorical_vector
+
+    def search_by_features(self,
+                           query_features: List[str],
+                           query_values: List[Any],
+                           top_k: int = 20) -> List[Dict[str, Any]]:
+        """
+        Search recipes by features using the feature vector in Qdrant.
+
+        This method creates a feature vector that matches the indexing structure:
+        - First 384 dim: Text embedding of feature text
+        - Last 100 dim: Encoded features (binary, numerical, categorical)
+
+        Args:
+            query_features: List of feature names
+            query_values: List of feature values
+            top_k: Number of results to return
+
+        Returns:
+            List of matching recipes with scores
+        """
+        try:
+            # Create text from features
+            feature_text = self._create_feature_text(
+                query_features, query_values)
+
+            if not feature_text:
+                logger.warning("No valid features provided for feature search")
+                return []
+
+            # Create embedding for the feature text (384 dim)
+            text_embedding = self.embedding_model.encode(feature_text)
+
+            # Create categorical encoding (100 dim) - matches indexing logic
+            # This encodes binary, numerical, and categorical features
+            categorical_vector = self._encode_mixed_features(
+                query_features, query_values)
+
+            # Combine to create full feature vector (484 dim = 384 text + 100 categorical)
+            feature_vector = np.concatenate(
+                [text_embedding, categorical_vector])
+
+            logger.info(
+                f"Feature search: text_embedding={text_embedding.shape}, "
+                f"categorical={categorical_vector.shape}, "
+                f"combined={feature_vector.shape}"
+            )
+
+            # Search using the "features" named vector
+            try:
+                search_results = self.qdrant_client.search(
+                    collection_name=self.collection_name,
+                    query_vector=("features", feature_vector.tolist()),
+                    limit=top_k,
+                    with_payload=True,
+                    with_vectors=False
+                )
+            except Exception as e:
+                logger.warning(f"Feature vector search failed: {e}")
+                return []
+
+            # Format results
+            results = []
+            for result in search_results:
+                payload = result.payload if result.payload is not None else {}
+                recipe_data = {
+                    "id": result.id,
+                    "feature_search_score": float(result.score),
+                    "text_score": 0.0,  # Will be updated if also found in text search
+                    "recipe_name": payload.get("recipe_name", ""),
+                    "description": payload.get("description", ""),
+                    "features": payload.get("features", []),
+                    "values": payload.get("values", []),
+                    "num_features": payload.get("num_features", 0),
+                    "metadata": {
+                        "recipe_name": payload.get("recipe_name", "")
+                    },
+                    "search_source": "features"
+                }
+                results.append(recipe_data)
+
+            logger.info(
+                f"Feature search found {len(results)} recipes for {len(query_features)} features")
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in feature search: {e}")
+            return []
+
     def search_by_text_description(self,
                                    text_description: str,
                                    top_k: int = 20) -> List[Dict[str, Any]]:
@@ -129,6 +397,7 @@ class QdrantRecipeManager:
                 recipe_data = {
                     "id": result.id,
                     "text_score": float(result.score),
+                    "feature_search_score": 0.0,  # Will be updated if also found in feature search
                     "recipe_name": payload.get("recipe_name", ""),
                     "description": payload.get("description", ""),
                     "features": payload.get("features", []),
@@ -136,17 +405,111 @@ class QdrantRecipeManager:
                     "num_features": payload.get("num_features", 0),
                     "metadata": {
                         "recipe_name": payload.get("recipe_name", "")
-                    }
+                    },
+                    "search_source": "text"
                 }
                 results.append(recipe_data)
 
             logger.info(
-                f"Found {len(results)} recipes for query: '{text_description[:50]}...'")
+                f"Text search found {len(results)} recipes for query: '{text_description[:50]}...'")
             return results
 
         except Exception as e:
             logger.error(f"Error in Qdrant search: {e}")
             return []
+
+    def _merge_candidates(self,
+                          text_candidates: List[Dict[str, Any]],
+                          feature_candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Merge candidates from text and feature searches, deduplicating by ID.
+
+        Args:
+            text_candidates: Candidates from text-based search
+            feature_candidates: Candidates from feature-based search
+
+        Returns:
+            Merged and deduplicated list of candidates
+        """
+        merged = {}
+
+        # Add text candidates first
+        for candidate in text_candidates:
+            recipe_id = candidate["id"]
+            merged[recipe_id] = candidate.copy()
+            merged[recipe_id]["search_source"] = "text"
+
+        # Add or merge feature candidates
+        for candidate in feature_candidates:
+            recipe_id = candidate["id"]
+            if recipe_id in merged:
+                # Recipe found in both searches - merge scores
+                merged[recipe_id]["feature_search_score"] = candidate.get(
+                    "feature_search_score", 0.0)
+                merged[recipe_id]["search_source"] = "both"
+            else:
+                # New recipe from feature search only
+                merged[recipe_id] = candidate.copy()
+                merged[recipe_id]["search_source"] = "features"
+
+        return list(merged.values())
+
+    def _calculate_text_scores_for_feature_only(self,
+                                                candidates: List[Dict[str, Any]],
+                                                text_description: str) -> List[Dict[str, Any]]:
+        """
+        Calculate text similarity scores for candidates found only in feature search.
+
+        This ensures fair comparison in the combined scoring by computing text scores
+        for recipes that were discovered via feature search but not text search.
+
+        Args:
+            candidates: List of merged candidates
+            text_description: The query text description
+
+        Returns:
+            Updated candidates with text scores calculated for feature-only recipes
+        """
+        # Find feature-only candidates that need text scores
+        feature_only_candidates = [
+            c for c in candidates if c.get("search_source") == "features"
+        ]
+
+        if not feature_only_candidates:
+            return candidates
+
+        logger.info(
+            f"Calculating text scores for {len(feature_only_candidates)} feature-only candidates")
+
+        try:
+            # Create query text embedding
+            query_embedding = self.embedding_model.encode(text_description)
+
+            # Calculate text scores for each feature-only candidate
+            for candidate in feature_only_candidates:
+                description = candidate.get("description", "")
+                if description:
+                    # Create embedding for candidate's description
+                    candidate_embedding = self.embedding_model.encode(
+                        description)
+
+                    # Calculate cosine similarity
+                    similarity = cosine_similarity(
+                        [query_embedding], [candidate_embedding]
+                    )[0][0]
+
+                    candidate["text_score"] = float(similarity)
+                    logger.info(
+                        f"  Calculated text score for {candidate.get('recipe_name', 'Unknown')}: {similarity:.4f}"
+                    )
+                else:
+                    candidate["text_score"] = 0.0
+
+        except Exception as e:
+            logger.error(f"Error calculating text scores: {e}")
+            # Keep text_score as 0.0 if calculation fails
+
+        return candidates
 
     def search_two_step(self,
                         text_description: str,
@@ -154,39 +517,53 @@ class QdrantRecipeManager:
                         text_top_k: int = 50,
                         final_top_k: int = 10) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Two-step search: text description + optional feature refinement
+        Two-step hybrid search: 
+        - Step 1: Get candidates from both text search AND feature search (50/50 split)
+        - Step 2: Feature-based refinement on merged candidates
 
         Args:
             text_description: Recipe description for search
             query_df: Optional DataFrame with features for refinement
-            text_top_k: Number of candidates from text search
+            text_top_k: Total number of candidates (split between text and feature search)
             final_top_k: Final number of results
 
         Returns:
             Tuple of (results, metadata)
         """
         search_metadata = {
-            "search_type": "two_step",
+            "search_type": "two_step_hybrid",
             "text_description": text_description,
             "has_feature_refinement": query_df is not None,
-            "text_candidates": text_top_k,
+            "total_candidates_requested": text_top_k,
             "final_results": final_top_k
         }
 
-        # Step 1: Text-based search using Qdrant
-        logger.info("Step 1: Searching by text in Qdrant")
-        text_candidates = self.search_by_text_description(
-            text_description, text_top_k)
+        # Calculate split for hybrid search (half text, half feature)
+        half_k = text_top_k // 2
+        text_search_k = half_k
+        feature_search_k = text_top_k - half_k  # Handle odd numbers
 
-        if not text_candidates:
-            logger.warning("No candidates found in text search")
-            return [], search_metadata
+        # Extract features for feature-based search
+        query_features = []
+        query_values = []
+        if query_df is not None and not query_df.empty:
+            if 'charactDescr' in query_df.columns and 'valueCharLong' in query_df.columns:
+                query_features = query_df['charactDescr'].tolist()
+                query_values = query_df['valueCharLong'].tolist()
+            else:
+                query_features = query_df.iloc[:, 0].tolist()
+                query_values = query_df.iloc[:, 1].tolist()
+
+        # Step 1a: Text-based search using Qdrant
+        logger.info(
+            f"Step 1a: Text-based search in Qdrant (top {text_search_k})")
+        text_candidates = self.search_by_text_description(
+            text_description, text_search_k)
 
         search_metadata["text_results_found"] = len(text_candidates)
 
-        # Log all text search candidates for debugging
-        logger.info(
-            f"Text search found {len(text_candidates)} candidates before refinement:")
+        # Log text search candidates
+        logger.info(f"Text search found {len(text_candidates)} candidates:")
         for i, candidate in enumerate(text_candidates, 1):
             recipe_name = candidate.get('recipe_name', 'Unknown')
             text_score = candidate.get('text_score', 0.0)
@@ -197,29 +574,85 @@ class QdrantRecipeManager:
             logger.info(
                 f"  {i}. {recipe_name} | Text Score: {text_score:.4f} | Features: {num_features} | Desc: {description_preview}")
 
-        # Step 2: Feature refinement (if query_df provided)
-        if query_df is not None and not query_df.empty:
-            logger.info("Step 2: Refining with feature-based similarity")
+        # Step 1b: Feature-based search using Qdrant (if features available)
+        feature_candidates = []
+        if query_features:
+            logger.info(
+                f"Step 1b: Feature-based search in Qdrant (top {feature_search_k})")
+            feature_candidates = self.search_by_features(
+                query_features, query_values, feature_search_k)
 
-            # Extract features and values from DataFrame
-            if 'charactDescr' in query_df.columns and 'valueCharLong' in query_df.columns:
-                query_features = query_df['charactDescr'].tolist()
-                query_values = query_df['valueCharLong'].tolist()
-            else:
-                query_features = query_df.iloc[:, 0].tolist()
-                query_values = query_df.iloc[:, 1].tolist()
+            search_metadata["feature_search_results_found"] = len(
+                feature_candidates)
 
+            # Log feature search candidates
+            logger.info(
+                f"Feature search found {len(feature_candidates)} candidates:")
+            for i, candidate in enumerate(feature_candidates, 1):
+                recipe_name = candidate.get('recipe_name', 'Unknown')
+                feature_search_score = candidate.get(
+                    'feature_search_score', 0.0)
+                num_features = candidate.get('num_features', 0)
+                description = candidate.get('description', '')
+                description_preview = description[:80] + \
+                    '...' if len(description) > 80 else description
+                logger.info(
+                    f"  {i}. {recipe_name} | Feature Search Score: {feature_search_score:.4f} | Features: {num_features} | Desc: {description_preview}")
+        else:
+            logger.info(
+                "Step 1b: Skipped feature search (no features provided)")
+            # If no features, use full text search instead
+            if len(text_candidates) < text_top_k:
+                additional_text = self.search_by_text_description(
+                    text_description, text_top_k)
+                text_candidates = additional_text
+
+        # Merge candidates from both searches
+        if feature_candidates:
+            all_candidates = self._merge_candidates(
+                text_candidates, feature_candidates)
+            logger.info(f"Merged candidates: {len(all_candidates)} unique recipes "
+                        f"(from {len(text_candidates)} text + {len(feature_candidates)} feature, "
+                        f"with deduplication)")
+
+            # Calculate text scores for feature-only candidates
+            # This ensures fair comparison in combined scoring
+            all_candidates = self._calculate_text_scores_for_feature_only(
+                all_candidates, text_description)
+        else:
+            all_candidates = text_candidates
+
+        search_metadata["merged_candidates"] = len(all_candidates)
+
+        if not all_candidates:
+            logger.warning("No candidates found in either search")
+            return [], search_metadata
+
+        # Count sources
+        text_only = sum(1 for c in all_candidates if c.get(
+            "search_source") == "text")
+        feature_only = sum(1 for c in all_candidates if c.get(
+            "search_source") == "features")
+        both = sum(1 for c in all_candidates if c.get(
+            "search_source") == "both")
+        logger.info(
+            f"Candidate sources: {text_only} text-only, {feature_only} feature-only, {both} from both")
+
+        # Step 2: Feature refinement on merged candidates
+        if query_features:
+            logger.info(
+                "Step 2: Refining merged candidates with feature-based similarity")
             search_metadata["query_features_count"] = len(query_features)
 
-            # Refine candidates based on feature matching
+            # Refine all_candidates (merged from text + feature search) based on feature matching
             final_results = self._refine_by_features(
-                text_candidates, query_features, query_values, final_top_k
+                all_candidates, query_features, query_values, final_top_k
             )
             search_metadata["refinement_completed"] = True
 
         else:
             logger.info("Step 2: Skipped (no feature data provided)")
-            final_results = text_candidates[:final_top_k]
+            final_results = all_candidates[:final_top_k]
             search_metadata["refinement_completed"] = False
 
         search_metadata["final_results_count"] = len(final_results)
@@ -279,10 +712,15 @@ class QdrantRecipeManager:
                             query_values: List[Any],
                             top_k: int) -> List[Dict[str, Any]]:
         """
-        Refine candidates using feature-based similarity
+        Refine candidates using feature-based similarity with language-independent scoring.
+
+        The combined score uses three components:
+        - Text score (10%): Language-dependent, minimal influence
+        - Feature search score (20%): Partially language-independent (includes categorical encoding)
+        - Feature refinement score (70%): Fully language-independent (exact feature matching)
 
         Args:
-            candidates: Candidate recipes from text search
+            candidates: Candidate recipes from text and feature search
             query_features: Feature names to match
             query_values: Feature values to match
             top_k: Number of results to return
@@ -314,17 +752,31 @@ class QdrantRecipeManager:
                                 matching_count += 1
                             break
 
-                # Calculate feature similarity score
-                feature_score = matching_count / \
+                # Calculate feature refinement score (language-independent)
+                feature_refinement_score = matching_count / \
                     total_features if total_features > 0 else 0
 
-                # Combined score (weighted average)
-                text_weight = 0.3
-                feature_weight = 0.7
-                combined_score = (text_weight * candidate["text_score"] +
-                                  feature_weight * feature_score)
+                # Get scores for combined calculation
+                text_score = candidate.get("text_score", 0.0)
+                feature_search_score = candidate.get(
+                    "feature_search_score", 0.0)
 
-                candidate["feature_score"] = feature_score
+                # Combined score with language-independent weighting:
+                # - Text (10%): Minimal influence, language-dependent
+                # - Feature Search (50%): Vector similarity with categorical encoding (multilingual embeddings)
+                # - Feature Refinement (40%): Exact feature matching (can be language-dependent on feature names)
+                text_weight = 0.1
+                feature_search_weight = 0.5
+                feature_refinement_weight = 0.4
+
+                combined_score = (
+                    text_weight * text_score +
+                    feature_search_weight * feature_search_score +
+                    feature_refinement_weight * feature_refinement_score
+                )
+
+                candidate["feature_score"] = feature_refinement_score
+                candidate["feature_search_score"] = feature_search_score
                 candidate["combined_score"] = combined_score
 
             # Sort by combined score
@@ -339,10 +791,13 @@ class QdrantRecipeManager:
             for i, result in enumerate(refined_results[:top_k], 1):
                 recipe_name = result.get('recipe_name', 'Unknown')
                 text_score = result.get('text_score', 0.0)
+                feature_search_score = result.get('feature_search_score', 0.0)
                 feature_score = result.get('feature_score', 0.0)
                 combined_score = result.get('combined_score', 0.0)
                 logger.info(
-                    f"  {i}. {recipe_name} | Combined: {combined_score:.4f} (Text: {text_score:.4f} × 0.3 + Feature: {feature_score:.4f} × 0.7)")
+                    f"  {i}. {recipe_name} | Combined: {combined_score:.4f} "
+                    f"(Text: {text_score:.4f}×0.1 + FeatSearch: {feature_search_score:.4f}×0.5 + FeatMatch: {feature_score:.4f}×0.4)"
+                )
 
             return refined_results[:top_k]
 
