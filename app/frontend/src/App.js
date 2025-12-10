@@ -16,6 +16,8 @@ function App() {
   const [isRequestCanceled, setIsRequestCanceled] = useState(false);
   const [uploadedDocument, setUploadedDocument] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [countries, setCountries] = useState([]);
+  const [selectedCountry, setSelectedCountry] = useState('All');
   
   const navigate = useNavigate();
   const textareaRef = useRef(null);
@@ -91,6 +93,22 @@ function App() {
     tokenManager.scheduleRefresh();
   }, []);
 
+  // Load countries from JSON file
+  useEffect(() => {
+    const loadCountries = async () => {
+      try {
+        const response = await fetch('/countries.json');
+        if (response.ok) {
+          const data = await response.json();
+          setCountries(data.countries || []);
+        }
+      } catch (error) {
+        console.error('Error loading countries:', error);
+      }
+    };
+    loadCountries();
+  }, []);
+
   // Replace getHeaders with tokenManager logic
   const getHeaders = () => ({
     'Content-Type': 'application/json',
@@ -146,7 +164,8 @@ function App() {
       
       const response = await tokenManager.post('/query', {
         query: finalQuery,
-        conversation_id: currentConversation?.id
+        conversation_id: currentConversation?.id,
+        country_filter: selectedCountry === 'All' ? null : selectedCountry
       }, {
         signal: abortControllerRef.current.signal
       });
@@ -340,6 +359,21 @@ function App() {
 
       <div className="content">
         <div className="top-bar">
+          <div className="country-filter">
+            <label htmlFor="country-select">Country:</label>
+            <select
+              id="country-select"
+              value={selectedCountry}
+              onChange={(e) => setSelectedCountry(e.target.value)}
+              className="country-dropdown"
+            >
+              {countries.map((country) => (
+                <option key={country.code} value={country.name}>
+                  {country.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="user-initial" onClick={() => setShowPopup(!showPopup)}>
             <button>{userInitial}</button>
           </div>

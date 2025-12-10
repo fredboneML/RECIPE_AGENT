@@ -13,6 +13,7 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -266,7 +267,8 @@ class QdrantRecipeManager:
     def search_by_features(self,
                            query_features: List[str],
                            query_values: List[Any],
-                           top_k: int = 20) -> List[Dict[str, Any]]:
+                           top_k: int = 20,
+                           country_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Search recipes by features using the feature vector in Qdrant.
 
@@ -278,6 +280,7 @@ class QdrantRecipeManager:
             query_features: List of feature names
             query_values: List of feature values
             top_k: Number of results to return
+            country_filter: Optional country name to filter results (None or "All" means no filter)
 
         Returns:
             List of matching recipes with scores
@@ -309,11 +312,26 @@ class QdrantRecipeManager:
                 f"combined={feature_vector.shape}"
             )
 
+            # Build filter if country is specified
+            query_filter = None
+            if country_filter and country_filter != "All":
+                query_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="country",
+                            match=MatchValue(value=country_filter)
+                        )
+                    ]
+                )
+                logger.info(
+                    f"Applying country filter in feature search: {country_filter}")
+
             # Search using the "features" named vector
             try:
                 search_results = self.qdrant_client.search(
                     collection_name=self.collection_name,
                     query_vector=("features", feature_vector.tolist()),
+                    query_filter=query_filter,
                     limit=top_k,
                     with_payload=True,
                     with_vectors=False
@@ -352,13 +370,15 @@ class QdrantRecipeManager:
 
     def search_by_text_description(self,
                                    text_description: str,
-                                   top_k: int = 20) -> List[Dict[str, Any]]:
+                                   top_k: int = 20,
+                                   country_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Search recipes by text description using Qdrant vector search
 
         Args:
             text_description: Text description for search
             top_k: Number of results to return
+            country_filter: Optional country name to filter results (None or "All" means no filter)
 
         Returns:
             List of matching recipes with scores
@@ -367,6 +387,19 @@ class QdrantRecipeManager:
             # Create embedding for query using SentenceTransformer
             query_vector = self.embedding_model.encode(text_description)
 
+            # Build filter if country is specified
+            query_filter = None
+            if country_filter and country_filter != "All":
+                query_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="country",
+                            match=MatchValue(value=country_filter)
+                        )
+                    ]
+                )
+                logger.info(f"Applying country filter: {country_filter}")
+
             # Try searching with named vector first (new format)
             # If that fails, fallback to unnamed vector (old format)
             try:
@@ -374,6 +407,7 @@ class QdrantRecipeManager:
                     collection_name=self.collection_name,
                     # Named vector
                     query_vector=("text", query_vector.tolist()),
+                    query_filter=query_filter,
                     limit=top_k,
                     with_payload=True,
                     with_vectors=False
@@ -385,6 +419,7 @@ class QdrantRecipeManager:
                 search_results = self.qdrant_client.search(
                     collection_name=self.collection_name,
                     query_vector=query_vector.tolist(),
+                    query_filter=query_filter,
                     limit=top_k,
                     with_payload=True,
                     with_vectors=False
@@ -515,7 +550,8 @@ class QdrantRecipeManager:
                         text_description: str,
                         query_df: Optional[pd.DataFrame] = None,
                         text_top_k: int = 50,
-                        final_top_k: int = 10) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                        final_top_k: int = 10,
+                        country_filter: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Two-step hybrid search: 
         - Step 1: Get candidates from both text search AND feature search (50/50 split)
@@ -526,6 +562,7 @@ class QdrantRecipeManager:
             query_df: Optional DataFrame with features for refinement
             text_top_k: Total number of candidates (split between text and feature search)
             final_top_k: Final number of results
+            country_filter: Optional country name to filter results (None or "All" means no filter)
 
         Returns:
             Tuple of (results, metadata)
@@ -535,7 +572,8 @@ class QdrantRecipeManager:
             "text_description": text_description,
             "has_feature_refinement": query_df is not None,
             "total_candidates_requested": text_top_k,
-            "final_results": final_top_k
+            "final_results": final_top_k,
+            "country_filter": country_filter
         }
 
         # Calculate split for hybrid search (half text, half feature)
@@ -558,7 +596,7 @@ class QdrantRecipeManager:
         logger.info(
             f"Step 1a: Text-based search in Qdrant (top {text_search_k})")
         text_candidates = self.search_by_text_description(
-            text_description, text_search_k)
+            text_description, text_search_k, country_filter)
 
         search_metadata["text_results_found"] = len(text_candidates)
 
@@ -580,7 +618,7 @@ class QdrantRecipeManager:
             logger.info(
                 f"Step 1b: Feature-based search in Qdrant (top {feature_search_k})")
             feature_candidates = self.search_by_features(
-                query_features, query_values, feature_search_k)
+                query_features, query_values, feature_search_k, country_filter)
 
             search_metadata["feature_search_results_found"] = len(
                 feature_candidates)

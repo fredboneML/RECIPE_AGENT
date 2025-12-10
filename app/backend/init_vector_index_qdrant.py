@@ -15,9 +15,40 @@ import json
 import pandas as pd
 from pathlib import Path
 import uuid
+import re
 from feature_analyzer import FeatureAnalyzer
 from src.two_step_recipe_search import EnhancedTwoStepRecipeManager
 import sys
+
+# Country code to country name mapping
+COUNTRY_CODE_MAP = {
+    "AT": "Austria",
+    "DZ": "Algeria",
+    "AR": "Argentina",
+    "AU": "Australia",
+    "BE": "Belgium",
+    "BA": "Bosnia and Herzegovina",
+    "BR": "Brazil",
+    "BG": "Bulgaria",
+    "CN": "China",
+    "CZ": "Czech Republic",
+    "EG": "Egypt",
+    "FR": "France",
+    "DE": "Germany",
+    "HU": "Hungary",
+    "JP": "Japan",
+    "MX": "Mexico",
+    "MA": "Morocco",
+    "PL": "Poland",
+    "RO": "Romania",
+    "RU": "Russia",
+    "SK": "Slovakia",
+    "ZA": "South Africa",
+    "KR": "South Korea",
+    "TR": "Turkey",
+    "UA": "Ukraine",
+    "US": "United States"
+}
 
 # Add the current directory to Python path to import local modules
 # Backend root (for feature_analyzer.py)
@@ -33,6 +64,32 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('vector_index_init')
+
+
+def get_country_code(filename: str) -> str:
+    """
+    Extracts the 2-letter country code from filenames like:
+    '000000000000375392_AT10_02_P.json'
+    '000000000000096221_DE10_01_P.json'
+    '000000000000382151_US60_08_P.json'
+
+    If no valid pattern is found, returns 'Other'.
+    """
+    # Look for: underscore + 2 uppercase letters + 2 digits + underscore
+    # e.g. '_AT10_', '_FR20_', '_US60_', '_CN10_', etc.
+    match = re.search(r'_([A-Z]{2})\d{2}_', filename)
+    if match:
+        return match.group(1)
+    return "Other"
+
+
+def get_country_name(filename: str) -> str:
+    """
+    Extracts the country name from the filename using the country code.
+    Returns 'Other' if the country code is not found in the mapping.
+    """
+    country_code = get_country_code(filename)
+    return COUNTRY_CODE_MAP.get(country_code, "Other")
 
 
 def wait_for_qdrant(qdrant_host="qdrant", qdrant_port=6333, max_retries=30, delay=2):
@@ -358,6 +415,7 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
         values_list = []
         descriptions_list = []
         recipe_ids = []
+        countries_list = []
 
         logger.info("Step 1: Loading recipes from JSON files...")
         for i, recipe_path in enumerate(recipe_json_list):
@@ -367,6 +425,10 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
 
                 # Extract description
                 description = extract_recipe_description(recipe_path)
+
+                # Extract country name from filename
+                recipe_filename_full = os.path.basename(recipe_path)
+                country_name = get_country_name(recipe_filename_full)
 
                 if recipe_data is not None and isinstance(recipe_data, pd.DataFrame):
                     if 'charactDescr' in recipe_data.columns and 'valueCharLong' in recipe_data.columns:
@@ -382,6 +444,7 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
                         values_list.append(values)
                         descriptions_list.append(description)
                         recipe_ids.append(recipe_filename)
+                        countries_list.append(country_name)
 
                         if (i + 1) % 1000 == 0:
                             logger.info(
@@ -413,6 +476,16 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
                 "Failed to process recipes with EnhancedTwoStepRecipeManager")
             return False
 
+        # Create a mapping of recipe_id to country for quick lookup
+        recipe_country_map = {recipe_id: country for recipe_id,
+                              country in zip(recipe_ids, countries_list)}
+
+        # Log country distribution
+        country_counts = {}
+        for country in countries_list:
+            country_counts[country] = country_counts.get(country, 0) + 1
+        logger.info(f"Country distribution: {country_counts}")
+
         # Step 3: Upload to Qdrant with named vectors
         logger.info("Step 3: Uploading recipes to Qdrant with named vectors...")
         batch_size = 10
@@ -424,6 +497,9 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
                 text_vector = recipe_data["text_vector"]
                 feature_vector = recipe_data["feature_vector"]
                 payload = recipe_data["payload"]
+
+                # Get country for this recipe
+                country = recipe_country_map.get(recipe_id, "Other")
 
                 # Create point with named vectors
                 # Use deterministic UUID to avoid duplicates on re-indexing
@@ -442,7 +518,8 @@ def index_recipes_to_qdrant(qdrant_client, embedding_model, collection_name, dat
                         "features": payload.get("features", [])[:50],
                         "values": payload.get("values", [])[:50],
                         "num_features": len(payload.get("features", [])),
-                        "feature_text": payload.get("feature_text", "")
+                        "feature_text": payload.get("feature_text", ""),
+                        "country": country
                     }
                 )
                 points.append(point)

@@ -528,6 +528,7 @@ async def process_query(
         features = body.get("features", None)
         text_top_k = body.get("text_top_k", 20)
         final_top_k = body.get("final_top_k", 3)
+        country_filter = body.get("country_filter", None)
 
         # Validate input
         if not query:
@@ -584,12 +585,14 @@ async def process_query(
 
         # Search for recipes with extracted features
         # Pass original query for language detection (the extracted description may be in English)
+        logger.info(f"/api/query: Country filter: {country_filter}")
         results, metadata, formatted_response, detected_language, comparison_table = recipe_search_agent.search_recipes(
             description=text_description,
             features=extracted_features_df,
             text_top_k=text_top_k,
             final_top_k=final_top_k,
-            original_query=query
+            original_query=query,
+            country_filter=country_filter
         )
 
         # Use the formatted response from the agent

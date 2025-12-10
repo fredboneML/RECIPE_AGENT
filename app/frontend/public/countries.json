@@ -1,0 +1,32 @@
+{
+  "countries": [
+    { "name": "All", "code": "ALL" },
+    { "name": "Other", "code": "Other" },
+    { "name": "Austria", "code": "AT" },
+    { "name": "Germany", "code": "DE" },
+    { "name": "France", "code": "FR" },
+    { "name": "Poland", "code": "PL" },
+    { "name": "Belgium", "code": "BE" },
+    { "name": "United States", "code": "US" },
+    { "name": "Mexico", "code": "MX" },
+    { "name": "China", "code": "CN" },
+    { "name": "Algeria", "code": "DZ" },
+    { "name": "Argentina", "code": "AR" },
+    { "name": "Australia", "code": "AU" },
+    { "name": "Bosnia and Herzegovina", "code": "BA" },
+    { "name": "Brazil", "code": "BR" },
+    { "name": "Bulgaria", "code": "BG" },
+    { "name": "Czech Republic", "code": "CZ" },
+    { "name": "Egypt", "code": "EG" },
+    { "name": "Hungary", "code": "HU" },
+    { "name": "Japan", "code": "JP" },
+    { "name": "Morocco", "code": "MA" },
+    { "name": "Romania", "code": "RO" },
+    { "name": "Russia", "code": "RU" },
+    { "name": "Slovakia", "code": "SK" },
+    { "name": "South Africa", "code": "ZA" },
+    { "name": "South Korea", "code": "KR" },
+    { "name": "Turkey", "code": "TR" },
+    { "name": "Ukraine", "code": "UA" }
+  ]
+}
