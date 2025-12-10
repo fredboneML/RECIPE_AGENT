@@ -295,15 +295,17 @@ class RecipeSearchAgent:
                        features: Optional[Union[pd.DataFrame,
                                                 List[Dict[str, str]]]] = None,
                        text_top_k: int = 20,
-                       final_top_k: int = 3) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
+                       final_top_k: int = 3,
+                       original_query: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
         Search for similar recipes based on description and optional features
 
         Args:
-            description: Recipe description (mandatory)
+            description: Recipe description (mandatory) - used for semantic search
             features: Optional DataFrame or list of dicts with 'charactDescr' and 'valueCharLong'
             text_top_k: Number of candidates from text search
             final_top_k: Final number of results to return
+            original_query: Original user query (used for language detection if provided)
 
         Returns:
             Tuple of (results, metadata, formatted_response, detected_language, comparison_table)
@@ -318,10 +320,12 @@ class RecipeSearchAgent:
                 logger.warning("Empty description provided")
                 return [], {"error": "Recipe description is required"}, "Recipe description is required", "en", None
 
-            # Detect language of the user's query using AI
-            detected_language = detect_language_with_ai(description)
+            # Detect language from the original user query (if provided) to preserve user's language intent
+            # This is important because the description may have been translated/extracted to English
+            language_source = original_query if original_query else description
+            detected_language = detect_language_with_ai(language_source)
             logger.info(
-                f"AI detected language: {detected_language} for query: '{description[:100]}...'")
+                f"AI detected language: {detected_language} for query: '{language_source[:100]}...'")
 
             logger.info(
                 f"Searching recipes for description: '{description[:100]}...'")

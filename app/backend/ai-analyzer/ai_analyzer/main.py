@@ -305,7 +305,7 @@ async def startup_event():
 
         # Initialize recipe search agent
         initialize_recipe_search_agent()
-        
+
         # Initialize data extractor router agent
         initialize_data_extractor_router_agent()
 
@@ -557,33 +557,39 @@ async def process_query(
 
         # Extract features from the query using the data extractor router agent
         logger.info("/api/query: Extracting features from query...")
-        extraction_result = data_extractor_router_agent.extract_and_route(query)
-        
+        extraction_result = data_extractor_router_agent.extract_and_route(
+            query)
+
         # Use extracted features for the search
         extracted_features_df = extraction_result.get('features_df')
         text_description = extraction_result.get('text_description', query)
-        
-        logger.info(f"/api/query: Search type: {extraction_result.get('search_type')}")
-        logger.info(f"/api/query: Reasoning: {extraction_result.get('reasoning')}")
-        
+
+        logger.info(
+            f"/api/query: Search type: {extraction_result.get('search_type')}")
+        logger.info(
+            f"/api/query: Reasoning: {extraction_result.get('reasoning')}")
+
         # Detailed logging for debugging
         if extracted_features_df is not None and not extracted_features_df.empty:
             features_list = []
             for idx, row in extracted_features_df.iterrows():
                 feature_str = f"{row.get('charactDescr', 'N/A')}: {row.get('valueCharLong', 'N/A')}"
                 features_list.append(feature_str)
-            logger.info(f"/api/query: Extracted {len(extracted_features_df)} features: {', '.join(features_list)}")
+            logger.info(
+                f"/api/query: Extracted {len(extracted_features_df)} features: {', '.join(features_list)}")
         else:
             logger.info("/api/query: Extracted 0 features")
-        
+
         logger.info(f"/api/query: Extracted description: {text_description}")
-        
+
         # Search for recipes with extracted features
+        # Pass original query for language detection (the extracted description may be in English)
         results, metadata, formatted_response, detected_language, comparison_table = recipe_search_agent.search_recipes(
             description=text_description,
             features=extracted_features_df,
             text_top_k=text_top_k,
-            final_top_k=final_top_k
+            final_top_k=final_top_k,
+            original_query=query
         )
 
         # Use the formatted response from the agent
@@ -689,11 +695,13 @@ async def search_recipes(
             f"Searching recipes for description: '{request.description[:100]}...'")
 
         # Search for recipes
-        results, metadata, formatted_response, detected_language = recipe_search_agent.search_recipes(
+        # Pass original description for language detection
+        results, metadata, formatted_response, detected_language, comparison_table = recipe_search_agent.search_recipes(
             description=request.description,
             features=request.features,
             text_top_k=request.text_top_k,
-            final_top_k=request.final_top_k
+            final_top_k=request.final_top_k,
+            original_query=request.description
         )
 
         if not results:
