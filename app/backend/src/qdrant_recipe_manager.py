@@ -944,7 +944,9 @@ class QdrantRecipeManager:
         try:
             # Define flavor-related feature names
             FLAVOR_FEATURES = {'flavour', 'flavor', 'geschmack', 'aroma'}
-            FLAVOR_BONUS = 0.15  # Significant bonus added to combined score for flavor match
+            FLAVOR_BONUS = 0.20  # Base bonus added to combined score for flavor match
+            # Extra boost for text-only candidates (compensates for missing feature search score)
+            TEXT_ONLY_FLAVOR_BOOST = 0.25  # Additional boost when feature_search_score is 0
             
             # Extract query flavor value for boosting
             query_flavor = None
@@ -952,6 +954,10 @@ class QdrantRecipeManager:
                 if any(flav in qf.lower() for flav in FLAVOR_FEATURES):
                     query_flavor = str(qv).lower().strip()
                     break
+            
+            # Log extracted query flavors for debugging
+            if query_flavor:
+                logger.info(f"Flavor boost enabled. Query flavors: {query_flavor[:100]}...")
             
             # Calculate feature similarity for each candidate
             for candidate in candidates:
@@ -979,22 +985,53 @@ class QdrantRecipeManager:
                 
                 # Check for flavor match in description or recipe name (semantic matching)
                 # This catches cases where Flavour feature name doesn't match exactly
+                # ENHANCED: Supports multiple comma-separated flavors AND multi-word flavors
                 if query_flavor:
                     recipe_desc = candidate.get("description", "").lower()
                     recipe_name = candidate.get("recipe_name", "").lower()
+                    
+                    # Split query_flavor into individual flavor KEYWORDS for matching
+                    # Step 1: Split by comma: "Gyros, Honey BBQ" → ["Gyros", "Honey BBQ"]
+                    # Step 2: Split each by space: ["Gyros", "Honey", "BBQ"]
+                    # This handles "Matcha tea" → ["matcha", "tea"] so "matcha" can match "MATCHA"
+                    query_flavor_keywords = set()
+                    for flavor_phrase in query_flavor.split(','):
+                        flavor_phrase = flavor_phrase.strip().lower()
+                        if flavor_phrase:
+                            # Add the full phrase
+                            query_flavor_keywords.add(flavor_phrase)
+                            # Also add individual words (≥3 chars to avoid noise)
+                            for word in flavor_phrase.split():
+                                if len(word) >= 3:
+                                    query_flavor_keywords.add(word)
                     
                     # Also check candidate's Flavour feature value
                     for j, cand_feat in enumerate(candidate_features):
                         if any(flav in cand_feat.lower() for flav in FLAVOR_FEATURES):
                             cand_val = str(candidate_values[j]).lower() if j < len(candidate_values) else ""
-                            if query_flavor in cand_val or cand_val in query_flavor:
-                                flavor_matched = True
+                            # Match if ANY query flavor keyword matches the candidate flavor
+                            for qf in query_flavor_keywords:
+                                if len(qf) >= 3 and (qf in cand_val or cand_val in qf):
+                                    flavor_matched = True
+                                    break
+                            if flavor_matched:
                                 break
                     
                     # Also check description and recipe name for flavor keywords
                     if not flavor_matched:
-                        if query_flavor in recipe_desc or query_flavor in recipe_name:
-                            flavor_matched = True
+                        matched_keyword = None
+                        for qf in query_flavor_keywords:
+                            # Skip very short flavor names to avoid false matches
+                            if len(qf) >= 3 and (qf in recipe_desc or qf in recipe_name):
+                                flavor_matched = True
+                                matched_keyword = qf
+                                break
+                        
+                        # Log flavor match found in description/name (for debugging)
+                        if flavor_matched:
+                            logger.debug(
+                                f"  ★ Flavor match: '{matched_keyword}' found in {candidate.get('recipe_name', 'Unknown')[:50]}"
+                            )
 
                 # Calculate feature refinement score
                 feature_refinement_score = matching_count / total_features if total_features > 0 else 0
@@ -1025,6 +1062,18 @@ class QdrantRecipeManager:
                 # Recipes matching the query flavor get a significant boost
                 if flavor_matched:
                     combined_score += FLAVOR_BONUS
+                    
+                    # EXTRA BOOST: Text-only candidates (found via text search but not feature search)
+                    # get additional bonus to compensate for missing feature_search_score
+                    # This ensures flavor-matched recipes found via text search can compete
+                    is_text_only = feature_search_score == 0.0 and text_score > 0.0
+                    if is_text_only:
+                        combined_score += TEXT_ONLY_FLAVOR_BOOST
+                        candidate["_text_only_boost"] = True
+                        logger.info(
+                            f"  ★★ TEXT-ONLY FLAVOR BOOST: {candidate.get('recipe_name', 'Unknown')[:50]} "
+                            f"+{TEXT_ONLY_FLAVOR_BOOST} (total flavor boost: +{FLAVOR_BONUS + TEXT_ONLY_FLAVOR_BOOST})"
+                        )
 
                 candidate["feature_score"] = feature_refinement_score
                 candidate["feature_search_score"] = feature_search_score
@@ -1046,8 +1095,17 @@ class QdrantRecipeManager:
                 feature_score = result.get('feature_score', 0.0)
                 combined_score = result.get('combined_score', 0.0)
                 flavor_matched = result.get('_flavor_matched', False)
+                text_only_boost = result.get('_text_only_boost', False)
                 
-                flavor_info = f" ★FLAVOR+{FLAVOR_BONUS}" if flavor_matched else ""
+                # Show flavor boost info with correct amounts
+                if flavor_matched:
+                    if text_only_boost:
+                        total_boost = FLAVOR_BONUS + TEXT_ONLY_FLAVOR_BOOST
+                        flavor_info = f" ★★FLAVOR+{total_boost:.2f}"
+                    else:
+                        flavor_info = f" ★FLAVOR+{FLAVOR_BONUS}"
+                else:
+                    flavor_info = ""
                 
                 logger.info(
                     f"  {i}. {recipe_name}{flavor_info} | Combined: {combined_score:.4f} "
