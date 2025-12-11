@@ -108,6 +108,8 @@ class QdrantRecipeManager:
         - Binary opposition mapping (e.g., 'no sugar' vs 'sugar')
         - Numerical feature normalization
         - Categorical feature encoding
+        
+        OPTIMIZATION: Shares the embedding model instance to avoid loading twice.
         """
         try:
             logger.info("Initializing feature encoder (EnhancedTwoStepRecipeManager)...")
@@ -118,6 +120,11 @@ class QdrantRecipeManager:
                 embedding_model=embedding_model,
                 max_features=200
             )
+            
+            # OPTIMIZATION: Share the embedding model instance to avoid double memory usage
+            # and speed up initialization
+            self.feature_encoder.embedding_model = self.embedding_model
+            logger.info("Shared embedding model instance with feature encoder")
             
             # Load and inject pre-analyzed feature types (same as indexing)
             self._load_and_inject_feature_types(feature_map_path)
@@ -501,7 +508,8 @@ class QdrantRecipeManager:
     def search_by_text_description(self,
                                    text_description: str,
                                    top_k: int = 20,
-                                   country_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+                                   country_filter: Optional[str] = None,
+                                   return_embedding: bool = False):
         """
         Search recipes by text description using Qdrant vector search
 
@@ -509,9 +517,11 @@ class QdrantRecipeManager:
             text_description: Text description for search
             top_k: Number of results to return
             country_filter: Optional country name to filter results (None or "All" means no filter)
+            return_embedding: If True, also return the query embedding for reuse
 
         Returns:
             List of matching recipes with scores
+            If return_embedding=True: Tuple of (results, query_embedding)
         """
         try:
             # Create embedding for query using SentenceTransformer
@@ -577,10 +587,15 @@ class QdrantRecipeManager:
 
             logger.info(
                 f"Text search found {len(results)} recipes for query: '{text_description[:50]}...'")
+            
+            if return_embedding:
+                return results, query_vector
             return results
 
         except Exception as e:
             logger.error(f"Error in Qdrant search: {e}")
+            if return_embedding:
+                return [], None
             return []
 
     def _merge_candidates(self,
@@ -621,16 +636,20 @@ class QdrantRecipeManager:
 
     def _calculate_text_scores_for_feature_only(self,
                                                 candidates: List[Dict[str, Any]],
-                                                text_description: str) -> List[Dict[str, Any]]:
+                                                text_description: str,
+                                                query_embedding: Optional[np.ndarray] = None) -> List[Dict[str, Any]]:
         """
         Calculate text similarity scores for candidates found only in feature search.
 
         This ensures fair comparison in the combined scoring by computing text scores
         for recipes that were discovered via feature search but not text search.
 
+        OPTIMIZED: Uses batch encoding and accepts pre-computed query embedding.
+
         Args:
             candidates: List of merged candidates
             text_description: The query text description
+            query_embedding: Optional pre-computed query embedding (avoids re-encoding)
 
         Returns:
             Updated candidates with text scores calculated for feature-only recipes
@@ -647,28 +666,42 @@ class QdrantRecipeManager:
             f"Calculating text scores for {len(feature_only_candidates)} feature-only candidates")
 
         try:
-            # Create query text embedding
-            query_embedding = self.embedding_model.encode(text_description)
+            # Use pre-computed query embedding if available, otherwise compute it
+            if query_embedding is None:
+                query_embedding = self.embedding_model.encode(text_description)
 
-            # Calculate text scores for each feature-only candidate
-            for candidate in feature_only_candidates:
+            # OPTIMIZATION: Batch encode all candidate descriptions at once
+            descriptions = []
+            valid_indices = []
+            for i, candidate in enumerate(feature_only_candidates):
                 description = candidate.get("description", "")
                 if description:
-                    # Create embedding for candidate's description
-                    candidate_embedding = self.embedding_model.encode(
-                        description)
+                    descriptions.append(description)
+                    valid_indices.append(i)
+                else:
+                    candidate["text_score"] = 0.0
 
-                    # Calculate cosine similarity
-                    similarity = cosine_similarity(
-                        [query_embedding], [candidate_embedding]
-                    )[0][0]
+            if descriptions:
+                # Single batch encode call instead of multiple individual calls
+                candidate_embeddings = self.embedding_model.encode(
+                    descriptions,
+                    batch_size=32,
+                    show_progress_bar=False
+                )
 
-                    candidate["text_score"] = float(similarity)
+                # Calculate cosine similarities in batch
+                similarities = cosine_similarity(
+                    [query_embedding], candidate_embeddings
+                )[0]
+
+                # Assign scores
+                for idx, valid_idx in enumerate(valid_indices):
+                    candidate = feature_only_candidates[valid_idx]
+                    similarity = float(similarities[idx])
+                    candidate["text_score"] = similarity
                     logger.info(
                         f"  Calculated text score for {candidate.get('recipe_name', 'Unknown')}: {similarity:.4f}"
                     )
-                else:
-                    candidate["text_score"] = 0.0
 
         except Exception as e:
             logger.error(f"Error calculating text scores: {e}")
@@ -723,10 +756,18 @@ class QdrantRecipeManager:
                 query_values = query_df.iloc[:, 1].tolist()
 
         # Step 1a: Text-based search using Qdrant
+        # OPTIMIZATION: Get query embedding to reuse later (avoids re-encoding)
         logger.info(
             f"Step 1a: Text-based search in Qdrant (top {text_search_k})")
-        text_candidates = self.search_by_text_description(
-            text_description, text_search_k, country_filter)
+        text_search_result = self.search_by_text_description(
+            text_description, text_search_k, country_filter, return_embedding=True)
+        
+        # Handle return value (may be tuple if return_embedding=True)
+        if isinstance(text_search_result, tuple):
+            text_candidates, cached_query_embedding = text_search_result
+        else:
+            text_candidates = text_search_result
+            cached_query_embedding = None
 
         search_metadata["text_results_found"] = len(text_candidates)
 
@@ -785,8 +826,9 @@ class QdrantRecipeManager:
 
             # Calculate text scores for feature-only candidates
             # This ensures fair comparison in combined scoring
+            # OPTIMIZATION: Reuse cached query embedding from text search
             all_candidates = self._calculate_text_scores_for_feature_only(
-                all_candidates, text_description)
+                all_candidates, text_description, cached_query_embedding)
         else:
             all_candidates = text_candidates
 
