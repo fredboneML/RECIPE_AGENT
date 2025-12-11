@@ -430,6 +430,10 @@ def analyze_features_for_binary_patterns(
         file_entries = 0
         for i, recipe_path in enumerate(sample_files):
             try:
+                # Skip empty files
+                if os.path.getsize(recipe_path) == 0:
+                    continue
+
                 recipe_data = read_recipe_json(recipe_path)
 
                 if recipe_data is not None and isinstance(recipe_data, pd.DataFrame):
@@ -579,6 +583,13 @@ def index_recipes_to_qdrant_batched(
 
             for recipe_path in batch_files:
                 try:
+                    # Skip empty files (safe fallback)
+                    if os.path.getsize(recipe_path) == 0:
+                        logger.warning(
+                            f"Skipping empty JSON file: {recipe_path}")
+                        total_skipped += 1
+                        continue
+
                     recipe_data = read_recipe_json(recipe_path)
                     description = extract_recipe_description(recipe_path)
                     filename = os.path.basename(recipe_path)
