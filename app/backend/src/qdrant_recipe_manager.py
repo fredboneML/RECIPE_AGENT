@@ -4,9 +4,14 @@ Qdrant Recipe Manager
 
 This manager actually uses Qdrant for persistent recipe storage and search,
 replacing the in-memory approach of EnhancedTwoStepRecipeManager.
+
+IMPORTANT: Uses EnhancedTwoStepRecipeManager for feature encoding to ensure
+binary opposition mapping and all feature encoding is IDENTICAL to indexing.
 """
 import logging
 import re
+import os
+import json
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
@@ -15,10 +20,13 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
+# Import EnhancedTwoStepRecipeManager for consistent encoding with indexing
+from src.two_step_recipe_search import EnhancedTwoStepRecipeManager
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Feature encoding constants (matching two_step_recipe_search.py)
+# Feature encoding constants (kept for backward compatibility)
 NEGATIVE_INDICATORS = [
     'no ', 'not ', 'without ', 'non-', 'non ', 'free', 'absent',
     'none', 'zero', 'nil', 'false', 'inactive', 'negative',
@@ -49,7 +57,8 @@ class QdrantRecipeManager:
                  collection_name: str = "food_recipes_two_step",
                  embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2",
                  qdrant_host: str = "qdrant",
-                 qdrant_port: int = 6333):
+                 qdrant_port: int = 6333,
+                 feature_map_path: str = "/usr/src/app/Test_Input/charactDescr_valueCharLong_map.json"):
         """
         Initialize the Qdrant Recipe Manager
 
@@ -58,6 +67,7 @@ class QdrantRecipeManager:
             embedding_model: Sentence transformer model name
             qdrant_host: Qdrant server host
             qdrant_port: Qdrant server port
+            feature_map_path: Path to the feature map JSON for pre-analysis
         """
         self.collection_name = collection_name
         self.embedding_model_name = embedding_model
@@ -82,8 +92,110 @@ class QdrantRecipeManager:
             logger.error(f"Failed to load embedding model: {e}")
             raise
 
+        # Initialize EnhancedTwoStepRecipeManager for CONSISTENT feature encoding
+        # This ensures binary opposition mapping and all feature encoding matches indexing
+        self._init_feature_encoder(embedding_model, feature_map_path)
+
         # Check if collection exists
         self._validate_collection()
+
+    def _init_feature_encoder(self, embedding_model: str, feature_map_path: str):
+        """
+        Initialize EnhancedTwoStepRecipeManager for feature encoding.
+        
+        This ensures that feature vectors created during search match exactly
+        how they were created during indexing, including:
+        - Binary opposition mapping (e.g., 'no sugar' vs 'sugar')
+        - Numerical feature normalization
+        - Categorical feature encoding
+        """
+        try:
+            logger.info("Initializing feature encoder (EnhancedTwoStepRecipeManager)...")
+            
+            # Create the manager for encoding
+            self.feature_encoder = EnhancedTwoStepRecipeManager(
+                collection_name=self.collection_name,
+                embedding_model=embedding_model,
+                max_features=200
+            )
+            
+            # Load and inject pre-analyzed feature types (same as indexing)
+            self._load_and_inject_feature_types(feature_map_path)
+            
+            # Run feature analysis on the feature map to build binary oppositions
+            self._analyze_feature_map(feature_map_path)
+            
+            logger.info("Feature encoder initialized successfully")
+            
+        except Exception as e:
+            logger.warning(f"Failed to initialize feature encoder: {e}")
+            logger.warning("Falling back to basic encoding (may affect search quality)")
+            self.feature_encoder = None
+
+    def _load_and_inject_feature_types(self, feature_map_path: str):
+        """Load pre-analyzed feature types and inject into the encoder"""
+        if not os.path.exists(feature_map_path):
+            logger.warning(f"Feature map not found at {feature_map_path}")
+            return
+            
+        try:
+            # Use FeatureAnalyzer if available, otherwise do simple analysis
+            try:
+                from feature_analyzer import FeatureAnalyzer
+                analyzer = FeatureAnalyzer(feature_map_path)
+                analyzer.analyze_all_features()
+                feature_config = analyzer.get_feature_config_for_indexing()
+                
+                # Inject feature types into encoder
+                for feature_name, feature_type in feature_config.items():
+                    if feature_type == 'binary':
+                        self.feature_encoder.feature_types[feature_name] = 'binary'
+                    elif feature_type in ['numerical', 'range']:
+                        self.feature_encoder.feature_types[feature_name] = 'numerical'
+                
+                logger.info(f"Injected {len(feature_config)} pre-analyzed feature types")
+                logger.info(f"  Binary: {sum(1 for t in feature_config.values() if t == 'binary')}")
+                logger.info(f"  Numerical: {sum(1 for t in feature_config.values() if t in ['numerical', 'range'])}")
+                
+            except ImportError:
+                logger.warning("FeatureAnalyzer not available, using basic feature type detection")
+                
+        except Exception as e:
+            logger.warning(f"Error loading feature types: {e}")
+
+    def _analyze_feature_map(self, feature_map_path: str):
+        """
+        Analyze the feature map to build binary opposition mappings.
+        This matches what indexing does with analyze_features_for_binary_patterns().
+        """
+        if not os.path.exists(feature_map_path):
+            return
+            
+        try:
+            logger.info("Analyzing feature map for binary opposition patterns...")
+            
+            with open(feature_map_path, 'r', encoding='utf-8') as f:
+                feature_map = json.load(f)
+            
+            # Convert feature map to features/values format for analysis
+            features_list = []
+            values_list = []
+            
+            for feature_name, values in feature_map.items():
+                if values:
+                    for value in values:
+                        features_list.append([feature_name])
+                        values_list.append([value])
+            
+            # Run the encoder's feature analysis to build binary oppositions
+            self.feature_encoder._analyze_feature_values(features_list, values_list)
+            
+            logger.info(f"Binary opposition analysis complete:")
+            logger.info(f"  Feature types detected: {len(self.feature_encoder.feature_types)}")
+            logger.info(f"  Binary features with oppositions: {len(self.feature_encoder.binary_features)}")
+            
+        except Exception as e:
+            logger.warning(f"Error analyzing feature map: {e}")
 
     def _validate_collection(self):
         """Validate that the collection exists in Qdrant"""
@@ -276,6 +388,9 @@ class QdrantRecipeManager:
         - First 384 dim: Text embedding of feature text
         - Last 100 dim: Encoded features (binary, numerical, categorical)
 
+        IMPORTANT: Uses EnhancedTwoStepRecipeManager for encoding to ensure
+        binary opposition mapping matches exactly how recipes were indexed.
+
         Args:
             query_features: List of feature names
             query_values: List of feature values
@@ -286,31 +401,46 @@ class QdrantRecipeManager:
             List of matching recipes with scores
         """
         try:
-            # Create text from features
-            feature_text = self._create_feature_text(
-                query_features, query_values)
-
-            if not feature_text:
-                logger.warning("No valid features provided for feature search")
+            if not query_features:
+                logger.warning("No features provided for feature search")
                 return []
 
-            # Create embedding for the feature text (384 dim)
-            text_embedding = self.embedding_model.encode(feature_text)
+            # Use EnhancedTwoStepRecipeManager for CONSISTENT encoding with indexing
+            if self.feature_encoder is not None:
+                # This ensures binary opposition mapping matches indexing exactly
+                feature_vector = self.feature_encoder._create_feature_vector(
+                    query_features, query_values, fit=False)
+                
+                logger.info(
+                    f"Feature search: using EnhancedTwoStepRecipeManager encoding, "
+                    f"vector shape={feature_vector.shape}"
+                )
+            else:
+                # Fallback to basic encoding if encoder not available
+                logger.warning("Feature encoder not available, using basic encoding")
+                feature_text = self._create_feature_text(
+                    query_features, query_values)
 
-            # Create categorical encoding (100 dim) - matches indexing logic
-            # This encodes binary, numerical, and categorical features
-            categorical_vector = self._encode_mixed_features(
-                query_features, query_values)
+                if not feature_text:
+                    logger.warning("No valid features provided for feature search")
+                    return []
 
-            # Combine to create full feature vector (484 dim = 384 text + 100 categorical)
-            feature_vector = np.concatenate(
-                [text_embedding, categorical_vector])
+                # Create embedding for the feature text (384 dim)
+                text_embedding = self.embedding_model.encode(feature_text)
 
-            logger.info(
-                f"Feature search: text_embedding={text_embedding.shape}, "
-                f"categorical={categorical_vector.shape}, "
-                f"combined={feature_vector.shape}"
-            )
+                # Create categorical encoding (100 dim)
+                categorical_vector = self._encode_mixed_features(
+                    query_features, query_values)
+
+                # Combine to create full feature vector (484 dim)
+                feature_vector = np.concatenate(
+                    [text_embedding, categorical_vector])
+
+                logger.info(
+                    f"Feature search: text_embedding={text_embedding.shape}, "
+                    f"categorical={categorical_vector.shape}, "
+                    f"combined={feature_vector.shape}"
+                )
 
             # Build filter if country is specified
             query_filter = None

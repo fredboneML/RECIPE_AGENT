@@ -331,6 +331,46 @@ Provide your response as a JSON object following the specified format.
                 f"Extraction completed. Search type: {result['search_type']}")
             logger.info(f"Reasoning: {result.get('reasoning', 'N/A')}")
 
+            # ============================================================
+            # DEBUG LOGGING: Full extraction details for comparison
+            # ============================================================
+            logger.info("=" * 80)
+            logger.info("DEBUG: EXTRACTION DETAILS FOR DEBUGGING")
+            logger.info("=" * 80)
+            
+            # Log the input (combined brief)
+            logger.info("INPUT (Combined Brief):")
+            logger.info("-" * 40)
+            for line in combined_brief.strip().split('\n'):
+                logger.info(f"  {line}")
+            logger.info("-" * 40)
+            
+            # Log the extracted text description (FULL, not truncated)
+            logger.info("EXTRACTED TEXT DESCRIPTION:")
+            logger.info("-" * 40)
+            text_desc = result.get('text_description', 'N/A')
+            logger.info(f"  {text_desc}")
+            logger.info("-" * 40)
+            
+            # Log ALL extracted features with their values
+            logger.info("EXTRACTED FEATURES AND VALUES:")
+            logger.info("-" * 40)
+            if result.get('features'):
+                for i, feature in enumerate(result['features'], 1):
+                    feature_name = feature.get('feature_name', 'N/A')
+                    feature_value = feature.get('feature_value', 'N/A')
+                    logger.info(f"  {i:2d}. {feature_name}: {feature_value}")
+            else:
+                logger.info("  No features extracted")
+            logger.info("-" * 40)
+            
+            # Log reasoning
+            logger.info("EXTRACTION REASONING:")
+            logger.info("-" * 40)
+            logger.info(f"  {result.get('reasoning', 'N/A')}")
+            logger.info("=" * 80)
+            # ============================================================
+
             return result
 
         except Exception as e:
