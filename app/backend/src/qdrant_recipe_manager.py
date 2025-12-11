@@ -925,9 +925,12 @@ class QdrantRecipeManager:
         Refine candidates using feature-based similarity with language-independent scoring.
 
         The combined score uses three components:
-        - Text score (10%): Language-dependent, minimal influence
-        - Feature search score (20%): Partially language-independent (includes categorical encoding)
-        - Feature refinement score (70%): Fully language-independent (exact feature matching)
+        - Text score (15%): Language-dependent, minimal influence
+        - Feature search score (65%): Partially language-independent (includes categorical encoding)
+        - Feature refinement score (20%): Fully language-independent (exact feature matching)
+
+        ENHANCED with:
+        - Flavor boosting: Recipes matching the query Flavour get a significant bonus
 
         Args:
             candidates: Candidate recipes from text and feature search
@@ -939,14 +942,26 @@ class QdrantRecipeManager:
             Refined and reranked results
         """
         try:
+            # Define flavor-related feature names
+            FLAVOR_FEATURES = {'flavour', 'flavor', 'geschmack', 'aroma'}
+            FLAVOR_BONUS = 0.15  # Significant bonus added to combined score for flavor match
+            
+            # Extract query flavor value for boosting
+            query_flavor = None
+            for qf, qv in zip(query_features, query_values):
+                if any(flav in qf.lower() for flav in FLAVOR_FEATURES):
+                    query_flavor = str(qv).lower().strip()
+                    break
+            
             # Calculate feature similarity for each candidate
             for candidate in candidates:
                 candidate_features = candidate.get("features", [])
                 candidate_values = candidate.get("values", [])
 
-                # Count matching features
+                # Count matching features (standard approach)
                 matching_count = 0
                 total_features = len(query_features)
+                flavor_matched = False
 
                 for query_feat, query_val in zip(query_features, query_values):
                     query_feat_lower = query_feat.lower()
@@ -961,23 +976,41 @@ class QdrantRecipeManager:
                             if self._match_feature_value(str(query_val), cand_val):
                                 matching_count += 1
                             break
+                
+                # Check for flavor match in description or recipe name (semantic matching)
+                # This catches cases where Flavour feature name doesn't match exactly
+                if query_flavor:
+                    recipe_desc = candidate.get("description", "").lower()
+                    recipe_name = candidate.get("recipe_name", "").lower()
+                    
+                    # Also check candidate's Flavour feature value
+                    for j, cand_feat in enumerate(candidate_features):
+                        if any(flav in cand_feat.lower() for flav in FLAVOR_FEATURES):
+                            cand_val = str(candidate_values[j]).lower() if j < len(candidate_values) else ""
+                            if query_flavor in cand_val or cand_val in query_flavor:
+                                flavor_matched = True
+                                break
+                    
+                    # Also check description and recipe name for flavor keywords
+                    if not flavor_matched:
+                        if query_flavor in recipe_desc or query_flavor in recipe_name:
+                            flavor_matched = True
 
-                # Calculate feature refinement score (language-independent)
-                feature_refinement_score = matching_count / \
-                    total_features if total_features > 0 else 0
+                # Calculate feature refinement score
+                feature_refinement_score = matching_count / total_features if total_features > 0 else 0
+                
+                # Store debug info
+                candidate["_flavor_matched"] = flavor_matched
 
                 # Get scores for combined calculation
                 text_score = candidate.get("text_score", 0.0)
                 feature_search_score = candidate.get(
                     "feature_search_score", 0.0)
 
-                # Combined score with language-independent weighting:
                 # Combined score weighting:
-                # - Text (10%): Minimal influence, language-dependent
+                # - Text (15%): Minimal influence, language-dependent
                 # - Feature Search (65%): Vector similarity with categorical encoding (multilingual embeddings)
-                #   Best for flavor matching as it uses semantic vectors
-                # - Feature Refinement (20%): Exact feature matching (can be language-dependent on feature names)
-                #   Reduced to prevent generic features (certifications) from dominating
+                # - Feature Refinement (20%): Exact feature matching
                 text_weight = 0.15
                 feature_search_weight = 0.65
                 feature_refinement_weight = 0.20
@@ -987,6 +1020,11 @@ class QdrantRecipeManager:
                     feature_search_weight * feature_search_score +
                     feature_refinement_weight * feature_refinement_score
                 )
+                
+                # Apply flavor bonus - this is the key differentiator!
+                # Recipes matching the query flavor get a significant boost
+                if flavor_matched:
+                    combined_score += FLAVOR_BONUS
 
                 candidate["feature_score"] = feature_refinement_score
                 candidate["feature_search_score"] = feature_search_score
@@ -1007,8 +1045,12 @@ class QdrantRecipeManager:
                 feature_search_score = result.get('feature_search_score', 0.0)
                 feature_score = result.get('feature_score', 0.0)
                 combined_score = result.get('combined_score', 0.0)
+                flavor_matched = result.get('_flavor_matched', False)
+                
+                flavor_info = f" ★FLAVOR+{FLAVOR_BONUS}" if flavor_matched else ""
+                
                 logger.info(
-                    f"  {i}. {recipe_name} | Combined: {combined_score:.4f} "
+                    f"  {i}. {recipe_name}{flavor_info} | Combined: {combined_score:.4f} "
                     f"(Text: {text_score:.4f}×0.15 + FeatSearch: {feature_search_score:.4f}×0.65 + FeatMatch: {feature_score:.4f}×0.20)"
                 )
 
