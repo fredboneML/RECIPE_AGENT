@@ -367,6 +367,23 @@
   border-top: 1px solid #e0e0e0;
 }
 
+/* Uploaded Documents Container - for multiple files */
+.uploaded-documents-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: center;
+}
+
+.documents-count {
+  font-size: 0.8rem;
+  color: #666;
+  padding: 4px 8px;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+}
+
 /* Uploaded Document Indicator */
 .uploaded-document-indicator {
   display: flex;
@@ -375,9 +392,9 @@
   background-color: #e8f5e9;
   border: 1px solid #a5d6a7;
   border-radius: 6px;
-  padding: 8px 12px;
-  margin-bottom: 10px;
-  font-size: 0.9rem;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  gap: 8px;
 }
 
 .document-name {

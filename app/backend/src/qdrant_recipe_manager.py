@@ -972,12 +972,15 @@ class QdrantRecipeManager:
                     "feature_search_score", 0.0)
 
                 # Combined score with language-independent weighting:
+                # Combined score weighting:
                 # - Text (10%): Minimal influence, language-dependent
-                # - Feature Search (50%): Vector similarity with categorical encoding (multilingual embeddings)
-                # - Feature Refinement (40%): Exact feature matching (can be language-dependent on feature names)
-                text_weight = 0.1
-                feature_search_weight = 0.5
-                feature_refinement_weight = 0.4
+                # - Feature Search (65%): Vector similarity with categorical encoding (multilingual embeddings)
+                #   Best for flavor matching as it uses semantic vectors
+                # - Feature Refinement (20%): Exact feature matching (can be language-dependent on feature names)
+                #   Reduced to prevent generic features (certifications) from dominating
+                text_weight = 0.15
+                feature_search_weight = 0.65
+                feature_refinement_weight = 0.20
 
                 combined_score = (
                     text_weight * text_score +
@@ -1006,7 +1009,7 @@ class QdrantRecipeManager:
                 combined_score = result.get('combined_score', 0.0)
                 logger.info(
                     f"  {i}. {recipe_name} | Combined: {combined_score:.4f} "
-                    f"(Text: {text_score:.4f}×0.1 + FeatSearch: {feature_search_score:.4f}×0.5 + FeatMatch: {feature_score:.4f}×0.4)"
+                    f"(Text: {text_score:.4f}×0.15 + FeatSearch: {feature_search_score:.4f}×0.65 + FeatMatch: {feature_score:.4f}×0.20)"
                 )
 
             return refined_results[:top_k]

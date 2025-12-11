@@ -13,6 +13,7 @@ and all sophisticated feature detection for proper search functionality.
 """
 from src.two_step_recipe_search import EnhancedTwoStepRecipeManager
 from feature_analyzer import FeatureAnalyzer
+from feature_normalizer import FeatureNormalizer
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from qdrant_client import QdrantClient
 import os
@@ -465,7 +466,8 @@ def index_recipes_to_qdrant_batched(
     embedding_model_name: str,
     collection_name: str,
     data_dir: str,
-    feature_map_path: Optional[str] = None
+    feature_map_path: Optional[str] = None,
+    feature_mappings_path: Optional[str] = None
 ) -> bool:
     """
     Index recipes to Qdrant using TRUE BATCH PROCESSING with EnhancedTwoStepRecipeManager.
@@ -474,13 +476,21 @@ def index_recipes_to_qdrant_batched(
     - Binary opposition mapping
     - Numerical feature detection
     - Categorical encoding
+    - MULTILINGUAL FEATURE NORMALIZATION (German/French/etc → English)
 
     Processes files in chunks to:
     1. Avoid loading all files into memory
     2. Show progress as recipes are indexed
     3. Use EnhancedTwoStepRecipeManager for proper encoding
+    4. Normalize multilingual features to English for consistent search
     """
     try:
+        # Initialize feature normalizer for multilingual support
+        logger.info(
+            "Initializing feature normalizer for multilingual support...")
+        normalizer = FeatureNormalizer(feature_mappings_path)
+        logger.info("✅ Feature normalizer initialized")
+
         # Pre-analyze features from feature map
         feature_analysis = None
         if feature_map_path:
@@ -580,11 +590,24 @@ def index_recipes_to_qdrant_batched(
                             features = recipe_data['charactDescr'].tolist()
                             values = recipe_data['valueCharLong'].tolist()
 
+                            # MULTILINGUAL NORMALIZATION: Convert German/French/etc to English
+                            # This enables English queries to match non-English recipes
+                            normalized_features, normalized_values = normalizer.normalize_features(
+                                features, values
+                            )
+
+                            # Enhance description with key searchable terms
+                            enhanced_description = normalizer.enhance_description(
+                                description, features, values
+                            )
+
                             batch_data.append({
                                 'recipe_id': recipe_id,
-                                'features': features,
-                                'values': values,
-                                'description': description,
+                                'features': normalized_features,
+                                'values': normalized_values,
+                                'original_features': features,  # Keep originals for payload
+                                'original_values': values,
+                                'description': enhanced_description,
                                 'country': country_name
                             })
                 except Exception as e:
@@ -640,13 +663,20 @@ def index_recipes_to_qdrant_batched(
                     recipe_id = recipe['recipe_id']
                     point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, recipe_id))
 
-                    # Create feature text for payload
+                    # Create feature text for payload using NORMALIZED features
+                    # This enables consistent search matching
                     feature_text = manager._create_feature_text(
                         recipe['features'], recipe['values'])
 
-                    # Clean values for payload
+                    # Store original values for display (preserves original language)
+                    original_features = recipe.get(
+                        'original_features', recipe['features'])
+                    original_values = recipe.get(
+                        'original_values', recipe['values'])
+
+                    # Clean original values for payload display
                     clean_values = [manager._clean_value(
-                        v) for v in recipe['values'][:50]]
+                        v) for v in original_values[:50]]
 
                     point = PointStruct(
                         id=point_id,
@@ -657,11 +687,11 @@ def index_recipes_to_qdrant_batched(
                         payload={
                             "recipe_name": recipe_id,
                             "description": recipe['description'],
-                            # Limit for payload size
-                            "features": recipe['features'][:50],
+                            # Store ORIGINAL features/values for display (preserves source language)
+                            "features": original_features[:50],
                             "values": clean_values,
-                            "num_features": len(recipe['features']),
-                            # Limit text length
+                            "num_features": len(original_features),
+                            # Store NORMALIZED feature text for debugging/analysis
                             "feature_text": feature_text[:1000],
                             "country": recipe['country']
                         }
@@ -766,10 +796,13 @@ def main():
             'RECIPE_DATA_DIR', '/usr/src/app/ai-analyzer/data')
         feature_map_path = os.getenv(
             'FEATURE_MAP_PATH', '/usr/src/app/Test_Input/charactDescr_valueCharLong_map.json')
+        feature_mappings_path = os.getenv(
+            'FEATURE_MAPPINGS_PATH', '/usr/src/app/data/feature_extraction_mappings.json')
 
         logger.info("=" * 60)
         logger.info("Starting Qdrant Vector Index Initialization")
         logger.info("TRUE BATCH PROCESSING with EnhancedTwoStepRecipeManager")
+        logger.info("+ MULTILINGUAL FEATURE NORMALIZATION (DE/FR/etc → EN)")
         logger.info("=" * 60)
         logger.info(f"Qdrant Host: {qdrant_host}")
         logger.info(f"Qdrant Port: {qdrant_port}")
@@ -777,6 +810,7 @@ def main():
         logger.info(f"Embedding Model: {embedding_model}")
         logger.info(f"Data Directory: {data_dir}")
         logger.info(f"Feature Map: {feature_map_path}")
+        logger.info(f"Feature Mappings: {feature_mappings_path}")
         logger.info(f"File Batch Size: {FILE_BATCH_SIZE:,}")
         logger.info(
             f"Additional File Sample for Analysis: {FEATURE_ANALYSIS_FILE_SAMPLE:,}")
@@ -797,14 +831,16 @@ def main():
         )
 
         # Index recipes using TRUE BATCH PROCESSING with EnhancedTwoStepRecipeManager
+        # + MULTILINGUAL FEATURE NORMALIZATION
         logger.info(
-            "Starting batch indexing with EnhancedTwoStepRecipeManager...")
+            "Starting batch indexing with EnhancedTwoStepRecipeManager + Feature Normalization...")
         success = index_recipes_to_qdrant_batched(
             qdrant_client,
             embedding_model,
             collection_name,
             data_dir,
-            feature_map_path
+            feature_map_path,
+            feature_mappings_path
         )
 
         if success:

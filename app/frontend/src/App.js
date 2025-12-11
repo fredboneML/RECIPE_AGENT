@@ -14,7 +14,7 @@ function App() {
   const [showPopup, setShowPopup] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRequestCanceled, setIsRequestCanceled] = useState(false);
-  const [uploadedDocument, setUploadedDocument] = useState(null);
+  const [uploadedDocuments, setUploadedDocuments] = useState([]); // Support up to 5 documents
   const [isUploading, setIsUploading] = useState(false);
   const [countries, setCountries] = useState([]);
   const [selectedCountry, setSelectedCountry] = useState('All');
@@ -156,10 +156,13 @@ function App() {
     abortControllerRef.current = new AbortController();
     
     try {
-      // Combine query with uploaded document text if available
+      // Combine query with all uploaded documents' text if available
       let finalQuery = query;
-      if (uploadedDocument && uploadedDocument.extractedText) {
-        finalQuery = `${query}\n\n[Extracted from document: ${uploadedDocument.filename}]\n${uploadedDocument.extractedText}`;
+      if (uploadedDocuments.length > 0) {
+        const documentsText = uploadedDocuments
+          .map(doc => `[Extracted from document: ${doc.filename}]\n${doc.extractedText}`)
+          .join('\n\n');
+        finalQuery = `${query}\n\n${documentsText}`;
       }
       
       const response = await tokenManager.post('/query', {
@@ -227,7 +230,7 @@ function App() {
       }
       setIsRequestCanceled(false);
       setQuery('');
-      setUploadedDocument(null); // Clear uploaded document after submission
+      setUploadedDocuments([]); // Clear uploaded documents after submission
     }
   };
 
@@ -263,50 +266,74 @@ function App() {
     setMessages([]);
     setQuery('');
     setResult('');
-    setUploadedDocument(null);
+    setUploadedDocuments([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
   };
 
+  const MAX_DOCUMENTS = 5;
+
   const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+    const files = Array.from(event.target.files);
+    if (!files.length) return;
+
+    // Check if adding these files would exceed the limit
+    const remainingSlots = MAX_DOCUMENTS - uploadedDocuments.length;
+    if (remainingSlots <= 0) {
+      alert(`Maximum ${MAX_DOCUMENTS} documents allowed. Please remove some documents first.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // Only process up to the remaining slots
+    const filesToProcess = files.slice(0, remainingSlots);
+    if (files.length > remainingSlots) {
+      alert(`Only ${remainingSlots} more document(s) can be added. Processing first ${remainingSlots} file(s).`);
+    }
 
     setIsUploading(true);
     
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      // Don't set Content-Type header - let the browser set it automatically with boundary
-      const response = await tokenManager.post('/upload-document', formData);
-
-      if (!response.ok) {
-        let errorMessage = 'Failed to upload document';
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
-        } catch (e) {
-          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
+      const newDocuments = [];
       
-      if (data.success) {
-        setUploadedDocument({
-          filename: data.filename,
-          extractedText: data.extracted_text
-        });
-        
-        // Optionally, pre-fill the query with a message about the uploaded document
-        setQuery(`[Document uploaded: ${data.filename}]\n\n`);
-        
-        if (textareaRef.current) {
-          textareaRef.current.focus();
+      for (const file of filesToProcess) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        // Don't set Content-Type header - let the browser set it automatically with boundary
+        const response = await tokenManager.post('/upload-document', formData);
+
+        if (!response.ok) {
+          let errorMessage = 'Failed to upload document';
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
+          } catch (e) {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          }
+          throw new Error(`${file.name}: ${errorMessage}`);
         }
+
+        const data = await response.json();
+        
+        if (data.success) {
+          newDocuments.push({
+            filename: data.filename,
+            extractedText: data.extracted_text
+          });
+        }
+      }
+      
+      // Add new documents to existing ones
+      setUploadedDocuments(prev => [...prev, ...newDocuments]);
+      
+      // Update query with all document names
+      const allDocNames = [...uploadedDocuments, ...newDocuments].map(d => d.filename);
+      setQuery(`[Documents uploaded: ${allDocNames.join(', ')}]\n\n`);
+      
+      if (textareaRef.current) {
+        textareaRef.current.focus();
       }
     } catch (error) {
       console.error('Error uploading document:', error);
@@ -326,9 +353,18 @@ function App() {
     }
   };
 
-  const handleRemoveDocument = () => {
-    setUploadedDocument(null);
-    setQuery('');
+  const handleRemoveDocument = (indexToRemove) => {
+    setUploadedDocuments(prev => {
+      const updated = prev.filter((_, index) => index !== indexToRemove);
+      // Update query with remaining document names
+      if (updated.length > 0) {
+        const docNames = updated.map(d => d.filename);
+        setQuery(`[Documents uploaded: ${docNames.join(', ')}]\n\n`);
+      } else {
+        setQuery('');
+      }
+      return updated;
+    });
   };
 
   return (
@@ -519,16 +555,25 @@ function App() {
           )}
 
           <div className="input-container">
-            {uploadedDocument && (
-              <div className="uploaded-document-indicator">
-                <span className="document-name">📎 {uploadedDocument.filename}</span>
-                <button 
-                  className="remove-document-btn"
-                  onClick={handleRemoveDocument}
-                  title="Remove document"
-                >
-                  ✕
-                </button>
+            {uploadedDocuments.length > 0 && (
+              <div className="uploaded-documents-container">
+                {uploadedDocuments.map((doc, index) => (
+                  <div key={index} className="uploaded-document-indicator">
+                    <span className="document-name">📎 {doc.filename}</span>
+                    <button 
+                      className="remove-document-btn"
+                      onClick={() => handleRemoveDocument(index)}
+                      title="Remove document"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {uploadedDocuments.length < MAX_DOCUMENTS && (
+                  <div className="documents-count">
+                    {uploadedDocuments.length}/{MAX_DOCUMENTS} documents
+                  </div>
+                )}
               </div>
             )}
             <div className="query-input">
@@ -537,13 +582,14 @@ function App() {
                 ref={fileInputRef}
                 onChange={handleFileUpload}
                 accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.webp,.svg,.html,.htm,.txt,.rtf,.odt"
+                multiple
                 style={{ display: 'none' }}
               />
               <button 
                 className="upload-button"
                 onClick={handleUploadClick}
-                disabled={isUploading || isProcessing}
-                title="Document uploaded"
+                disabled={isUploading || isProcessing || uploadedDocuments.length >= MAX_DOCUMENTS}
+                title={uploadedDocuments.length >= MAX_DOCUMENTS ? `Maximum ${MAX_DOCUMENTS} documents reached` : "Upload documents (up to 5)"}
               >
                 <img 
                   src="/upload.png" 
