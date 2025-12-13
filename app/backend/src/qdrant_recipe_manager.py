@@ -739,10 +739,9 @@ class QdrantRecipeManager:
             "country_filter": country_filter
         }
 
-        # Calculate split for hybrid search (half text, half feature)
-        half_k = text_top_k // 2
-        text_search_k = half_k
-        feature_search_k = text_top_k - half_k  # Handle odd numbers
+        # Calculate split for hybrid search (both searches return 15 candidates)
+        text_search_k = 15
+        feature_search_k = 15
 
         # Extract features for feature-based search
         query_features = []
