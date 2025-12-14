@@ -853,74 +853,157 @@ class QdrantRecipeManager:
                             if len(word) >= 3:
                                 flavor_keywords.add(word.lower())
                 
-                # Search for recipes with flavor in description/name
-                # Use flavor as the query text to find recipes containing it
+                # SAFEGUARD: Direct keyword search + Vector search hybrid approach
+                # 1. Vector search for semantic matches (fast, catches most cases)
+                # 2. Direct keyword search for exact matches (catches edge cases)
                 existing_ids = {c.get("id") for c in all_candidates}
-                flavor_search_results = self.search_by_text_description(
+                flavor_matched_candidates = []
+                skipped_already_in_pool = 0
+                
+                # Method 1: Vector search for semantic matches (top 50)
+                vector_flavor_results = self.search_by_text_description(
                     query_flavor, top_k=100, country_filter=country_filter)
                 
                 logger.info(
-                    f"Flavor safeguard: Searched for '{query_flavor}', found {len(flavor_search_results)} candidates. "
+                    f"Flavor safeguard (vector search): Found {len(vector_flavor_results)} candidates for '{query_flavor}'. "
                     f"Existing pool has {len(existing_ids)} recipes."
                 )
                 
-                # Add top flavor search results that aren't already in the pool
-                # We trust the vector search to find semantically relevant recipes
-                flavor_matched_candidates = []
-                skipped_already_in_pool = 0
-                for candidate in flavor_search_results[:50]:  # Limit to top 50 to avoid too many candidates
+                # Add top vector search results (semantic matches)
+                for candidate in vector_flavor_results[:50]:  # Limit to top 50 from vector search
                     if candidate.get("id") in existing_ids:
                         skipped_already_in_pool += 1
-                        continue  # Already in candidate pool
-                    
-                    # Check if flavor keyword appears in description/name (for logging/debugging)
-                    recipe_desc = candidate.get("description", "").lower()
-                    recipe_name = candidate.get("recipe_name", "").lower()
-                    recipe_id = candidate.get("recipe_name", candidate.get("id", "Unknown"))
-                    
-                    matched_keyword = None
-                    for keyword in flavor_keywords:
-                        if len(keyword) >= 3:
-                            if keyword in recipe_desc or keyword in recipe_name:
-                                matched_keyword = keyword
-                                break
-                    
-                    # Add all candidates from flavor search (vector search already did semantic filtering)
+                        continue
                     flavor_matched_candidates.append(candidate)
-                    if matched_keyword:
-                        logger.info(
-                            f"  ✓ Flavor match found: {recipe_id[:50]} "
-                            f"(exact keyword: '{matched_keyword}')"
-                        )
-                    else:
-                        logger.info(
-                            f"  ✓ Flavor semantic match: {recipe_id[:50]} "
-                            f"(semantically similar to '{query_flavor}')"
-                        )
+                    existing_ids.add(candidate.get("id"))
+                
+                # Method 2: Direct keyword search using Qdrant scroll (catches exact keyword matches)
+                # This ensures we find recipes that contain the keyword even if embedding similarity is low
+                logger.info(
+                    f"Flavor safeguard (direct keyword search): Searching for keywords {flavor_keywords} "
+                    f"in description/recipe_name..."
+                )
+                
+                # Build filter for country if specified
+                keyword_search_filter = None
+                if country_filter and country_filter != "All":
+                    keyword_search_filter = Filter(
+                        must=[
+                            FieldCondition(
+                                key="country",
+                                match=MatchValue(value=country_filter)
+                            )
+                        ]
+                    )
+                
+                # Scroll through recipes and filter for keyword matches
+                # Limit scroll to 10000 recipes to balance performance and recall
+                # For 600k recipes, this should catch most keyword matches
+                try:
+                    scroll_limit = 10000  # Reasonable limit for performance
+                    scroll_results = self.qdrant_client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=keyword_search_filter,
+                        limit=scroll_limit,
+                        with_payload=True,
+                        with_vectors=False
+                    )[0]  # scroll returns (points, next_page_offset)
+                    
+                    keyword_matches_found = 0
+                    for point in scroll_results:
+                        if keyword_matches_found >= 50:  # Limit to 50 additional keyword matches
+                            break
+                        if point.id in existing_ids:
+                            continue  # Already in pool
+                        
+                        payload = point.payload if point.payload is not None else {}
+                        recipe_desc = str(payload.get("description", "")).lower()
+                        recipe_name = str(payload.get("recipe_name", "")).lower()
+                        
+                        # Check if any flavor keyword appears in description or name
+                        matched_keyword = None
+                        for keyword in flavor_keywords:
+                            if len(keyword) >= 3:
+                                if keyword in recipe_desc or keyword in recipe_name:
+                                    matched_keyword = keyword
+                                    break
+                        
+                        if matched_keyword:
+                            # Found a direct keyword match
+                            recipe_data = {
+                                "id": point.id,
+                                "text_score": 0.0,  # Will be calculated in refinement
+                                "feature_search_score": 0.0,  # Direct match, not from feature search
+                                "recipe_name": payload.get("recipe_name", ""),
+                                "description": payload.get("description", ""),
+                                "features": payload.get("features", []),
+                                "values": payload.get("values", []),
+                                "num_features": payload.get("num_features", 0),
+                                "metadata": {
+                                    "recipe_name": payload.get("recipe_name", "")
+                                },
+                                "search_source": "flavor_keyword"
+                            }
+                            flavor_matched_candidates.append(recipe_data)
+                            existing_ids.add(point.id)
+                            keyword_matches_found += 1
+                            logger.info(
+                                f"  ✓ Direct keyword match: {recipe_data.get('recipe_name', 'Unknown')[:50]} "
+                                f"(keyword: '{matched_keyword}')"
+                            )
+                    
+                    logger.info(
+                        f"Flavor safeguard (direct keyword search): Scanned {len(scroll_results)} recipes, "
+                        f"found {keyword_matches_found} additional keyword matches."
+                    )
+                except Exception as e:
+                    logger.warning(f"Flavor safeguard direct keyword search failed: {e}")
                 
                 logger.info(
                     f"Flavor safeguard: {skipped_already_in_pool} already in pool, "
-                    f"{len(flavor_matched_candidates)} new flavor matches added"
+                    f"{len(flavor_matched_candidates)} total new flavor matches added "
+                    f"({len([c for c in flavor_matched_candidates if c.get('search_source') == 'flavor_keyword'])} direct keyword matches)"
                 )
                 
                 # Add flavor-matched candidates to pool
                 if flavor_matched_candidates:
-                    # Calculate feature_search_score for these (they were found via text search)
+                    # Calculate text scores for keyword matches (vector matches already have scores)
+                    keyword_only_matches = [
+                        c for c in flavor_matched_candidates 
+                        if c.get("search_source") == "flavor_keyword"
+                    ]
+                    if keyword_only_matches:
+                        # Temporarily set search_source to "features" so _calculate_text_scores works
+                        for kw_match in keyword_only_matches:
+                            kw_match["search_source"] = "features"
+                        
+                        # Calculate text scores using cached embedding
+                        keyword_only_matches = self._calculate_text_scores_for_feature_only(
+                            keyword_only_matches, text_description, cached_query_embedding
+                        )
+                        
+                        # Restore search_source and update scores in main list
+                        for kw_match in keyword_only_matches:
+                            kw_match["search_source"] = "flavor_keyword"
+                            # Update corresponding candidate in flavor_matched_candidates
+                            for candidate in flavor_matched_candidates:
+                                if candidate.get("id") == kw_match.get("id"):
+                                    candidate["text_score"] = kw_match.get("text_score", 0.0)
+                                    break
+                    
+                    # Ensure all flavor matches have feature_search_score set
                     for candidate in flavor_matched_candidates:
-                        candidate["feature_search_score"] = 0.0
-                        candidate["search_source"] = "flavor_text"
+                        if candidate.get("search_source") == "flavor_keyword":
+                            candidate["feature_search_score"] = 0.0
+                    
                     all_candidates.extend(flavor_matched_candidates)
                     logger.info(
                         f"Added {len(flavor_matched_candidates)} flavor-matched recipes to candidate pool"
                     )
                 else:
-                    # Log a sample of what was found to help debug
-                    sample_ids = [c.get("recipe_name", c.get("id", "Unknown"))[:50] 
-                                 for c in flavor_search_results[:5]]
                     logger.warning(
-                        f"Flavor safeguard: Found {len(flavor_search_results)} recipes with flavor '{query_flavor}', "
-                        f"but none matched after filtering (keywords: {flavor_keywords}). "
-                        f"Sample recipe IDs: {sample_ids}"
+                        f"Flavor safeguard: No new flavor matches found for '{query_flavor}' "
+                        f"(keywords: {flavor_keywords})"
                     )
 
         search_metadata["merged_candidates"] = len(all_candidates)
