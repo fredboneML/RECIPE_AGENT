@@ -298,42 +298,42 @@ function App() {
       const newDocuments = [];
       
       for (const file of filesToProcess) {
-        const formData = new FormData();
-        formData.append('file', file);
+      const formData = new FormData();
+      formData.append('file', file);
 
-        // Don't set Content-Type header - let the browser set it automatically with boundary
-        const response = await tokenManager.post('/upload-document', formData);
+      // Don't set Content-Type header - let the browser set it automatically with boundary
+      const response = await tokenManager.post('/upload-document', formData);
 
-        if (!response.ok) {
-          let errorMessage = 'Failed to upload document';
-          try {
-            const errorData = await response.json();
-            errorMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
-          } catch (e) {
-            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-          }
-          throw new Error(`${file.name}: ${errorMessage}`);
+      if (!response.ok) {
+        let errorMessage = 'Failed to upload document';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
+        } catch (e) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
         }
+          throw new Error(`${file.name}: ${errorMessage}`);
+      }
 
-        const data = await response.json();
-        
-        if (data.success) {
+      const data = await response.json();
+      
+      if (data.success) {
           newDocuments.push({
-            filename: data.filename,
-            extractedText: data.extracted_text
-          });
+          filename: data.filename,
+          extractedText: data.extracted_text
+        });
         }
       }
       
       // Add new documents to existing ones
       setUploadedDocuments(prev => [...prev, ...newDocuments]);
-      
+        
       // Update query with all document names
       const allDocNames = [...uploadedDocuments, ...newDocuments].map(d => d.filename);
       setQuery(`[Documents uploaded: ${allDocNames.join(', ')}]\n\n`);
-      
-      if (textareaRef.current) {
-        textareaRef.current.focus();
+        
+        if (textareaRef.current) {
+          textareaRef.current.focus();
       }
     } catch (error) {
       console.error('Error uploading document:', error);
@@ -361,7 +361,7 @@ function App() {
         const docNames = updated.map(d => d.filename);
         setQuery(`[Documents uploaded: ${docNames.join(', ')}]\n\n`);
       } else {
-        setQuery('');
+    setQuery('');
       }
       return updated;
     });
@@ -560,13 +560,13 @@ function App() {
                 {uploadedDocuments.map((doc, index) => (
                   <div key={index} className="uploaded-document-indicator">
                     <span className="document-name">📎 {doc.filename}</span>
-                    <button 
-                      className="remove-document-btn"
+                <button 
+                  className="remove-document-btn"
                       onClick={() => handleRemoveDocument(index)}
-                      title="Remove document"
-                    >
-                      ✕
-                    </button>
+                  title="Remove document"
+                >
+                  ✕
+                </button>
                   </div>
                 ))}
                 {uploadedDocuments.length < MAX_DOCUMENTS && (

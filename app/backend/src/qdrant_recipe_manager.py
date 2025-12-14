@@ -831,6 +831,64 @@ class QdrantRecipeManager:
         else:
             all_candidates = text_candidates
 
+        # SAFEGUARD: If we have flavor in query, search for recipes with flavor in name/description
+        # This catches recipes that might be missed by initial searches
+        if query_features:
+            FLAVOR_FEATURES = {'flavour', 'flavor', 'geschmack', 'aroma'}
+            query_flavor = None
+            for qf, qv in zip(query_features, query_values):
+                if any(flav in qf.lower() for flav in FLAVOR_FEATURES):
+                    query_flavor = str(qv).strip()
+                    break
+            
+            if query_flavor:
+                # Extract flavor keywords (split by comma and space)
+                flavor_keywords = set()
+                for flavor_phrase in query_flavor.split(','):
+                    flavor_phrase = flavor_phrase.strip()
+                    if flavor_phrase:
+                        flavor_keywords.add(flavor_phrase.lower())
+                        # Also add individual words (≥3 chars)
+                        for word in flavor_phrase.split():
+                            if len(word) >= 3:
+                                flavor_keywords.add(word.lower())
+                
+                # Search for recipes with flavor in description/name
+                # Use flavor as the query text to find recipes containing it
+                existing_ids = {c.get("id") for c in all_candidates}
+                flavor_search_results = self.search_by_text_description(
+                    query_flavor, top_k=50, country_filter=country_filter)
+                
+                # Filter to only recipes with flavor keywords in description/name
+                flavor_matched_candidates = []
+                for candidate in flavor_search_results:
+                    if candidate.get("id") in existing_ids:
+                        continue  # Already in candidate pool
+                    
+                    recipe_desc = candidate.get("description", "").lower()
+                    recipe_name = candidate.get("recipe_name", "").lower()
+                    
+                    # Check if any flavor keyword appears in description or name
+                    for keyword in flavor_keywords:
+                        if len(keyword) >= 3 and (keyword in recipe_desc or keyword in recipe_name):
+                            flavor_matched_candidates.append(candidate)
+                            logger.info(
+                                f"  ✓ Flavor match found: {candidate.get('recipe_name', 'Unknown')[:50]} "
+                                f"(flavor keyword: '{keyword}')"
+                            )
+                            break
+                
+                # Add flavor-matched candidates to pool
+                if flavor_matched_candidates:
+                    # Calculate feature_search_score for these (they were found via text search)
+                    for candidate in flavor_matched_candidates:
+                        candidate["feature_search_score"] = 0.0
+                        candidate["search_source"] = "flavor_text"
+                    all_candidates.extend(flavor_matched_candidates)
+                    logger.info(
+                        f"Added {len(flavor_matched_candidates)} flavor-matched recipes to candidate pool"
+                    )
+
         search_metadata["merged_candidates"] = len(all_candidates)
 
         if not all_candidates:
@@ -844,8 +902,10 @@ class QdrantRecipeManager:
             "search_source") == "features")
         both = sum(1 for c in all_candidates if c.get(
             "search_source") == "both")
+        flavor_text = sum(1 for c in all_candidates if c.get(
+            "search_source") == "flavor_text")
         logger.info(
-            f"Candidate sources: {text_only} text-only, {feature_only} feature-only, {both} from both")
+            f"Candidate sources: {text_only} text-only, {feature_only} feature-only, {both} from both, {flavor_text} flavor-text")
 
         # Step 2: Feature refinement on merged candidates
         if query_features:
