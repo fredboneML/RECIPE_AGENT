@@ -857,7 +857,12 @@ class QdrantRecipeManager:
                 # Use flavor as the query text to find recipes containing it
                 existing_ids = {c.get("id") for c in all_candidates}
                 flavor_search_results = self.search_by_text_description(
-                    query_flavor, top_k=50, country_filter=country_filter)
+                    query_flavor, top_k=100, country_filter=country_filter)
+                
+                logger.info(
+                    f"Flavor safeguard: Searched for '{query_flavor}', found {len(flavor_search_results)} candidates. "
+                    f"Existing pool has {len(existing_ids)} recipes."
+                )
                 
                 # Filter to only recipes with flavor keywords in description/name
                 flavor_matched_candidates = []
@@ -869,14 +874,18 @@ class QdrantRecipeManager:
                     recipe_name = candidate.get("recipe_name", "").lower()
                     
                     # Check if any flavor keyword appears in description or name
+                    matched_keyword = None
                     for keyword in flavor_keywords:
                         if len(keyword) >= 3 and (keyword in recipe_desc or keyword in recipe_name):
-                            flavor_matched_candidates.append(candidate)
-                            logger.info(
-                                f"  ✓ Flavor match found: {candidate.get('recipe_name', 'Unknown')[:50]} "
-                                f"(flavor keyword: '{keyword}')"
-                            )
+                            matched_keyword = keyword
                             break
+                    
+                    if matched_keyword:
+                        flavor_matched_candidates.append(candidate)
+                        logger.info(
+                            f"  ✓ Flavor match found: {candidate.get('recipe_name', 'Unknown')[:50]} "
+                            f"(flavor keyword: '{matched_keyword}')"
+                        )
                 
                 # Add flavor-matched candidates to pool
                 if flavor_matched_candidates:
@@ -887,6 +896,11 @@ class QdrantRecipeManager:
                     all_candidates.extend(flavor_matched_candidates)
                     logger.info(
                         f"Added {len(flavor_matched_candidates)} flavor-matched recipes to candidate pool"
+                    )
+                else:
+                    logger.warning(
+                        f"Flavor safeguard: Found {len(flavor_search_results)} recipes with flavor '{query_flavor}', "
+                        f"but none matched after filtering (keywords: {flavor_keywords})"
                     )
 
         search_metadata["merged_candidates"] = len(all_candidates)
