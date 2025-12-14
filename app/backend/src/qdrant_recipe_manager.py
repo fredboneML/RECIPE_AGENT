@@ -897,10 +897,11 @@ class QdrantRecipeManager:
                     )
                 
                 # Scroll through recipes and filter for keyword matches
-                # Limit scroll to 10000 recipes to balance performance and recall
-                # For 600k recipes, this should catch most keyword matches
+                # Limit scroll to 1000 recipes to balance performance and recall
+                # For 600k recipes, this is a reasonable sample that should catch most keyword matches
+                # while avoiding timeouts. Combined with vector search, this provides good coverage.
                 try:
-                    scroll_limit = 10000  # Reasonable limit for performance
+                    scroll_limit = 1000  # Reduced to avoid timeout while still catching matches
                     scroll_results = self.qdrant_client.scroll(
                         collection_name=self.collection_name,
                         scroll_filter=keyword_search_filter,
