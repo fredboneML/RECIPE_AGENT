@@ -864,28 +864,44 @@ class QdrantRecipeManager:
                     f"Existing pool has {len(existing_ids)} recipes."
                 )
                 
-                # Filter to only recipes with flavor keywords in description/name
+                # Add top flavor search results that aren't already in the pool
+                # We trust the vector search to find semantically relevant recipes
                 flavor_matched_candidates = []
-                for candidate in flavor_search_results:
+                skipped_already_in_pool = 0
+                for candidate in flavor_search_results[:50]:  # Limit to top 50 to avoid too many candidates
                     if candidate.get("id") in existing_ids:
+                        skipped_already_in_pool += 1
                         continue  # Already in candidate pool
                     
+                    # Check if flavor keyword appears in description/name (for logging/debugging)
                     recipe_desc = candidate.get("description", "").lower()
                     recipe_name = candidate.get("recipe_name", "").lower()
+                    recipe_id = candidate.get("recipe_name", candidate.get("id", "Unknown"))
                     
-                    # Check if any flavor keyword appears in description or name
                     matched_keyword = None
                     for keyword in flavor_keywords:
-                        if len(keyword) >= 3 and (keyword in recipe_desc or keyword in recipe_name):
-                            matched_keyword = keyword
-                            break
+                        if len(keyword) >= 3:
+                            if keyword in recipe_desc or keyword in recipe_name:
+                                matched_keyword = keyword
+                                break
                     
+                    # Add all candidates from flavor search (vector search already did semantic filtering)
+                    flavor_matched_candidates.append(candidate)
                     if matched_keyword:
-                        flavor_matched_candidates.append(candidate)
                         logger.info(
-                            f"  ✓ Flavor match found: {candidate.get('recipe_name', 'Unknown')[:50]} "
-                            f"(flavor keyword: '{matched_keyword}')"
+                            f"  ✓ Flavor match found: {recipe_id[:50]} "
+                            f"(exact keyword: '{matched_keyword}')"
                         )
+                    else:
+                        logger.info(
+                            f"  ✓ Flavor semantic match: {recipe_id[:50]} "
+                            f"(semantically similar to '{query_flavor}')"
+                        )
+                
+                logger.info(
+                    f"Flavor safeguard: {skipped_already_in_pool} already in pool, "
+                    f"{len(flavor_matched_candidates)} new flavor matches added"
+                )
                 
                 # Add flavor-matched candidates to pool
                 if flavor_matched_candidates:
@@ -898,9 +914,13 @@ class QdrantRecipeManager:
                         f"Added {len(flavor_matched_candidates)} flavor-matched recipes to candidate pool"
                     )
                 else:
+                    # Log a sample of what was found to help debug
+                    sample_ids = [c.get("recipe_name", c.get("id", "Unknown"))[:50] 
+                                 for c in flavor_search_results[:5]]
                     logger.warning(
                         f"Flavor safeguard: Found {len(flavor_search_results)} recipes with flavor '{query_flavor}', "
-                        f"but none matched after filtering (keywords: {flavor_keywords})"
+                        f"but none matched after filtering (keywords: {flavor_keywords}). "
+                        f"Sample recipe IDs: {sample_ids}"
                     )
 
         search_metadata["merged_candidates"] = len(all_candidates)
