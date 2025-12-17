@@ -1000,7 +1000,7 @@ class QdrantRecipeManager:
                     # Search for each keyword using Qdrant's full-text search
                     # We search both recipe_name AND description to maximize recall
                     for keyword in flavor_keywords:
-                        if keyword_matches_found >= 50:  # Limit to 50 additional keyword matches
+                        if keyword_matches_found >= 100:  # Limit to 100 additional keyword matches
                             break
                         if len(keyword) < 3:  # Skip very short keywords
                             continue
@@ -1008,7 +1008,7 @@ class QdrantRecipeManager:
                         # Search both recipe_name and description fields
                         # Using 'should' (OR) logic to find matches in either field
                         for field_name in ["recipe_name", "description"]:
-                            if keyword_matches_found >= 50:
+                            if keyword_matches_found >= 100:
                                 break
 
                             # Build filter conditions for full-text search
@@ -1046,7 +1046,7 @@ class QdrantRecipeManager:
                                 )
 
                             for point in scroll_results:
-                                if keyword_matches_found >= 50:
+                                if keyword_matches_found >= 100:
                                     break
                                 if point.id in existing_ids:
                                     continue  # Already in pool
