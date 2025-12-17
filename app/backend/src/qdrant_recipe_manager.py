@@ -18,7 +18,7 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue, MatchText
 
 # Import EnhancedTwoStepRecipeManager for consistent encoding with indexing
 from src.two_step_recipe_search import EnhancedTwoStepRecipeManager
@@ -102,41 +102,43 @@ class QdrantRecipeManager:
     def _init_feature_encoder(self, embedding_model: str, feature_map_path: str):
         """
         Initialize EnhancedTwoStepRecipeManager for feature encoding.
-        
+
         This ensures that feature vectors created during search match exactly
         how they were created during indexing, including:
         - Binary opposition mapping (e.g., 'no sugar' vs 'sugar')
         - Numerical feature normalization
         - Categorical feature encoding
-        
+
         OPTIMIZATION: Shares the embedding model instance to avoid loading twice.
         """
         try:
-            logger.info("Initializing feature encoder (EnhancedTwoStepRecipeManager)...")
-            
+            logger.info(
+                "Initializing feature encoder (EnhancedTwoStepRecipeManager)...")
+
             # Create the manager for encoding
             self.feature_encoder = EnhancedTwoStepRecipeManager(
                 collection_name=self.collection_name,
                 embedding_model=embedding_model,
                 max_features=200
             )
-            
+
             # OPTIMIZATION: Share the embedding model instance to avoid double memory usage
             # and speed up initialization
             self.feature_encoder.embedding_model = self.embedding_model
             logger.info("Shared embedding model instance with feature encoder")
-            
+
             # Load and inject pre-analyzed feature types (same as indexing)
             self._load_and_inject_feature_types(feature_map_path)
-            
+
             # Run feature analysis on the feature map to build binary oppositions
             self._analyze_feature_map(feature_map_path)
-            
+
             logger.info("Feature encoder initialized successfully")
-            
+
         except Exception as e:
             logger.warning(f"Failed to initialize feature encoder: {e}")
-            logger.warning("Falling back to basic encoding (may affect search quality)")
+            logger.warning(
+                "Falling back to basic encoding (may affect search quality)")
             self.feature_encoder = None
 
     def _load_and_inject_feature_types(self, feature_map_path: str):
@@ -144,7 +146,7 @@ class QdrantRecipeManager:
         if not os.path.exists(feature_map_path):
             logger.warning(f"Feature map not found at {feature_map_path}")
             return
-            
+
         try:
             # Use FeatureAnalyzer if available, otherwise do simple analysis
             try:
@@ -152,21 +154,25 @@ class QdrantRecipeManager:
                 analyzer = FeatureAnalyzer(feature_map_path)
                 analyzer.analyze_all_features()
                 feature_config = analyzer.get_feature_config_for_indexing()
-                
+
                 # Inject feature types into encoder
                 for feature_name, feature_type in feature_config.items():
                     if feature_type == 'binary':
                         self.feature_encoder.feature_types[feature_name] = 'binary'
                     elif feature_type in ['numerical', 'range']:
                         self.feature_encoder.feature_types[feature_name] = 'numerical'
-                
-                logger.info(f"Injected {len(feature_config)} pre-analyzed feature types")
-                logger.info(f"  Binary: {sum(1 for t in feature_config.values() if t == 'binary')}")
-                logger.info(f"  Numerical: {sum(1 for t in feature_config.values() if t in ['numerical', 'range'])}")
-                
+
+                logger.info(
+                    f"Injected {len(feature_config)} pre-analyzed feature types")
+                logger.info(
+                    f"  Binary: {sum(1 for t in feature_config.values() if t == 'binary')}")
+                logger.info(
+                    f"  Numerical: {sum(1 for t in feature_config.values() if t in ['numerical', 'range'])}")
+
             except ImportError:
-                logger.warning("FeatureAnalyzer not available, using basic feature type detection")
-                
+                logger.warning(
+                    "FeatureAnalyzer not available, using basic feature type detection")
+
         except Exception as e:
             logger.warning(f"Error loading feature types: {e}")
 
@@ -177,30 +183,34 @@ class QdrantRecipeManager:
         """
         if not os.path.exists(feature_map_path):
             return
-            
+
         try:
-            logger.info("Analyzing feature map for binary opposition patterns...")
-            
+            logger.info(
+                "Analyzing feature map for binary opposition patterns...")
+
             with open(feature_map_path, 'r', encoding='utf-8') as f:
                 feature_map = json.load(f)
-            
+
             # Convert feature map to features/values format for analysis
             features_list = []
             values_list = []
-            
+
             for feature_name, values in feature_map.items():
                 if values:
                     for value in values:
                         features_list.append([feature_name])
                         values_list.append([value])
-            
+
             # Run the encoder's feature analysis to build binary oppositions
-            self.feature_encoder._analyze_feature_values(features_list, values_list)
-            
+            self.feature_encoder._analyze_feature_values(
+                features_list, values_list)
+
             logger.info(f"Binary opposition analysis complete:")
-            logger.info(f"  Feature types detected: {len(self.feature_encoder.feature_types)}")
-            logger.info(f"  Binary features with oppositions: {len(self.feature_encoder.binary_features)}")
-            
+            logger.info(
+                f"  Feature types detected: {len(self.feature_encoder.feature_types)}")
+            logger.info(
+                f"  Binary features with oppositions: {len(self.feature_encoder.binary_features)}")
+
         except Exception as e:
             logger.warning(f"Error analyzing feature map: {e}")
 
@@ -417,19 +427,21 @@ class QdrantRecipeManager:
                 # This ensures binary opposition mapping matches indexing exactly
                 feature_vector = self.feature_encoder._create_feature_vector(
                     query_features, query_values, fit=False)
-                
+
                 logger.info(
                     f"Feature search: using EnhancedTwoStepRecipeManager encoding, "
                     f"vector shape={feature_vector.shape}"
                 )
             else:
                 # Fallback to basic encoding if encoder not available
-                logger.warning("Feature encoder not available, using basic encoding")
+                logger.warning(
+                    "Feature encoder not available, using basic encoding")
                 feature_text = self._create_feature_text(
                     query_features, query_values)
 
                 if not feature_text:
-                    logger.warning("No valid features provided for feature search")
+                    logger.warning(
+                        "No valid features provided for feature search")
                     return []
 
                 # Create embedding for the feature text (384 dim)
@@ -587,7 +599,7 @@ class QdrantRecipeManager:
 
             logger.info(
                 f"Text search found {len(results)} recipes for query: '{text_description[:50]}...'")
-            
+
             if return_embedding:
                 return results, query_vector
             return results
@@ -760,7 +772,7 @@ class QdrantRecipeManager:
             f"Step 1a: Text-based search in Qdrant (top {text_search_k})")
         text_search_result = self.search_by_text_description(
             text_description, text_search_k, country_filter, return_embedding=True)
-        
+
         # Handle return value (may be tuple if return_embedding=True)
         if isinstance(text_search_result, tuple):
             text_candidates, cached_query_embedding = text_search_result
@@ -840,7 +852,7 @@ class QdrantRecipeManager:
                 if any(flav in qf.lower() for flav in FLAVOR_FEATURES):
                     query_flavor = str(qv).strip()
                     break
-            
+
             if query_flavor:
                 # Extract flavor keywords (split by comma and space)
                 flavor_keywords = set()
@@ -852,151 +864,172 @@ class QdrantRecipeManager:
                         for word in flavor_phrase.split():
                             if len(word) >= 3:
                                 flavor_keywords.add(word.lower())
-                
+
                 # SAFEGUARD: Direct keyword search + Vector search hybrid approach
                 # 1. Vector search for semantic matches (fast, catches most cases)
                 # 2. Direct keyword search for exact matches (catches edge cases)
                 existing_ids = {c.get("id") for c in all_candidates}
                 flavor_matched_candidates = []
                 skipped_already_in_pool = 0
-                
+
                 # Method 1: Vector search for semantic matches (top 50)
                 vector_flavor_results = self.search_by_text_description(
                     query_flavor, top_k=100, country_filter=country_filter)
-                
+
                 logger.info(
                     f"Flavor safeguard (vector search): Found {len(vector_flavor_results)} candidates for '{query_flavor}'. "
                     f"Existing pool has {len(existing_ids)} recipes."
                 )
-                
+
                 # Add top vector search results (semantic matches)
-                for candidate in vector_flavor_results[:50]:  # Limit to top 50 from vector search
+                # Limit to top 50 from vector search
+                for candidate in vector_flavor_results[:50]:
                     if candidate.get("id") in existing_ids:
                         skipped_already_in_pool += 1
                         continue
                     flavor_matched_candidates.append(candidate)
                     existing_ids.add(candidate.get("id"))
-                
-                # Method 2: Direct keyword search using Qdrant scroll (catches exact keyword matches)
+
+                # Method 2: Direct keyword search using Qdrant full-text search (catches exact keyword matches)
                 # This ensures we find recipes that contain the keyword even if embedding similarity is low
+                # Uses Qdrant's MatchText for efficient full-text search across ALL recipes
                 logger.info(
-                    f"Flavor safeguard (direct keyword search): Searching for keywords {flavor_keywords} "
+                    f"Flavor safeguard (full-text search): Searching for keywords {flavor_keywords} "
                     f"in description/recipe_name..."
                 )
-                
-                # Build filter for country if specified
-                keyword_search_filter = None
-                if country_filter and country_filter != "All":
-                    keyword_search_filter = Filter(
-                        must=[
-                            FieldCondition(
-                                key="country",
-                                match=MatchValue(value=country_filter)
-                            )
-                        ]
-                    )
-                
-                # Scroll through recipes and filter for keyword matches
-                # Limit scroll to 1000 recipes to balance performance and recall
-                # For 600k recipes, this is a reasonable sample that should catch most keyword matches
-                # while avoiding timeouts. Combined with vector search, this provides good coverage.
+
+                keyword_matches_found = 0
+
                 try:
-                    scroll_limit = 1000  # Reduced to avoid timeout while still catching matches
-                    scroll_results = self.qdrant_client.scroll(
-                        collection_name=self.collection_name,
-                        scroll_filter=keyword_search_filter,
-                        limit=scroll_limit,
-                        with_payload=True,
-                        with_vectors=False
-                    )[0]  # scroll returns (points, next_page_offset)
-                    
-                    keyword_matches_found = 0
-                    for point in scroll_results:
+                    # Search for each keyword using Qdrant's full-text search
+                    # We search both recipe_name AND description to maximize recall
+                    for keyword in flavor_keywords:
                         if keyword_matches_found >= 50:  # Limit to 50 additional keyword matches
                             break
-                        if point.id in existing_ids:
-                            continue  # Already in pool
-                        
-                        payload = point.payload if point.payload is not None else {}
-                        recipe_desc = str(payload.get("description", "")).lower()
-                        recipe_name = str(payload.get("recipe_name", "")).lower()
-                        
-                        # Check if any flavor keyword appears in description or name
-                        matched_keyword = None
-                        for keyword in flavor_keywords:
-                            if len(keyword) >= 3:
-                                if keyword in recipe_desc or keyword in recipe_name:
-                                    matched_keyword = keyword
-                                    break
-                        
-                        if matched_keyword:
-                            # Found a direct keyword match
-                            recipe_data = {
-                                "id": point.id,
-                                "text_score": 0.0,  # Will be calculated in refinement
-                                "feature_search_score": 0.0,  # Direct match, not from feature search
-                                "recipe_name": payload.get("recipe_name", ""),
-                                "description": payload.get("description", ""),
-                                "features": payload.get("features", []),
-                                "values": payload.get("values", []),
-                                "num_features": payload.get("num_features", 0),
-                                "metadata": {
-                                    "recipe_name": payload.get("recipe_name", "")
-                                },
-                                "search_source": "flavor_keyword"
-                            }
-                            flavor_matched_candidates.append(recipe_data)
-                            existing_ids.add(point.id)
-                            keyword_matches_found += 1
-                            logger.info(
-                                f"  ✓ Direct keyword match: {recipe_data.get('recipe_name', 'Unknown')[:50]} "
-                                f"(keyword: '{matched_keyword}')"
+                        if len(keyword) < 3:  # Skip very short keywords
+                            continue
+
+                        # Search both recipe_name and description fields
+                        # Using 'should' (OR) logic to find matches in either field
+                        for field_name in ["recipe_name", "description"]:
+                            if keyword_matches_found >= 50:
+                                break
+
+                            # Build filter conditions for full-text search
+                            filter_conditions = [
+                                FieldCondition(
+                                    key=field_name,
+                                    match=MatchText(text=keyword)
+                                )
+                            ]
+
+                            # Add country filter if specified
+                            if country_filter and country_filter != "All":
+                                filter_conditions.append(
+                                    FieldCondition(
+                                        key="country",
+                                        match=MatchValue(value=country_filter)
+                                    )
+                                )
+
+                            keyword_filter = Filter(must=filter_conditions)
+
+                            # Use scroll with full-text filter - this searches ALL recipes efficiently
+                            # REQUIRES text index on the field (run add_text_index.py to create)
+                            scroll_results, _ = self.qdrant_client.scroll(
+                                collection_name=self.collection_name,
+                                scroll_filter=keyword_filter,
+                                limit=100,  # Get up to 100 matches per keyword per field
+                                with_payload=True,
+                                with_vectors=False
                             )
-                    
+
+                            if scroll_results:
+                                logger.info(
+                                    f"  Full-text search for '{keyword}' in {field_name}: found {len(scroll_results)} matches"
+                                )
+
+                            for point in scroll_results:
+                                if keyword_matches_found >= 50:
+                                    break
+                                if point.id in existing_ids:
+                                    continue  # Already in pool
+
+                                payload = point.payload if point.payload is not None else {}
+
+                                # Found a direct keyword match
+                                recipe_data = {
+                                    "id": point.id,
+                                    "text_score": 0.0,  # Will be calculated in refinement
+                                    "feature_search_score": 0.0,  # Direct match, not from feature search
+                                    "recipe_name": payload.get("recipe_name", ""),
+                                    "description": payload.get("description", ""),
+                                    "features": payload.get("features", []),
+                                    "values": payload.get("values", []),
+                                    "num_features": payload.get("num_features", 0),
+                                    "metadata": {
+                                        "recipe_name": payload.get("recipe_name", "")
+                                    },
+                                    "search_source": "flavor_keyword"
+                                }
+                                flavor_matched_candidates.append(recipe_data)
+                                existing_ids.add(point.id)
+                                keyword_matches_found += 1
+                                logger.info(
+                                    f"  ✓ Full-text match: {recipe_data.get('recipe_name', 'Unknown')[:50]} "
+                                    f"(keyword: '{keyword}' in {field_name})"
+                                )
+
                     logger.info(
-                        f"Flavor safeguard (direct keyword search): Scanned {len(scroll_results)} recipes, "
-                        f"found {keyword_matches_found} additional keyword matches."
+                        f"Flavor safeguard (full-text search): Found {keyword_matches_found} keyword matches "
+                        f"across all {len(flavor_keywords)} keywords."
                     )
                 except Exception as e:
-                    logger.warning(f"Flavor safeguard direct keyword search failed: {e}")
-                
+                    logger.warning(
+                        f"Flavor safeguard full-text search failed: {e}")
+                    logger.warning(
+                        "Note: Full-text search requires text indexes on 'recipe_name' and 'description' fields.")
+                    logger.warning(
+                        "Run: docker-compose exec backend python src/add_text_index.py --host qdrant")
+
                 logger.info(
                     f"Flavor safeguard: {skipped_already_in_pool} already in pool, "
                     f"{len(flavor_matched_candidates)} total new flavor matches added "
                     f"({len([c for c in flavor_matched_candidates if c.get('search_source') == 'flavor_keyword'])} direct keyword matches)"
                 )
-                
+
                 # Add flavor-matched candidates to pool
                 if flavor_matched_candidates:
                     # Calculate text scores for keyword matches (vector matches already have scores)
                     keyword_only_matches = [
-                        c for c in flavor_matched_candidates 
+                        c for c in flavor_matched_candidates
                         if c.get("search_source") == "flavor_keyword"
                     ]
                     if keyword_only_matches:
                         # Temporarily set search_source to "features" so _calculate_text_scores works
                         for kw_match in keyword_only_matches:
                             kw_match["search_source"] = "features"
-                        
+
                         # Calculate text scores using cached embedding
                         keyword_only_matches = self._calculate_text_scores_for_feature_only(
                             keyword_only_matches, text_description, cached_query_embedding
                         )
-                        
+
                         # Restore search_source and update scores in main list
                         for kw_match in keyword_only_matches:
                             kw_match["search_source"] = "flavor_keyword"
                             # Update corresponding candidate in flavor_matched_candidates
                             for candidate in flavor_matched_candidates:
                                 if candidate.get("id") == kw_match.get("id"):
-                                    candidate["text_score"] = kw_match.get("text_score", 0.0)
+                                    candidate["text_score"] = kw_match.get(
+                                        "text_score", 0.0)
                                     break
-                    
+
                     # Ensure all flavor matches have feature_search_score set
                     for candidate in flavor_matched_candidates:
                         if candidate.get("search_source") == "flavor_keyword":
                             candidate["feature_search_score"] = 0.0
-                    
+
                     all_candidates.extend(flavor_matched_candidates)
                     logger.info(
                         f"Added {len(flavor_matched_candidates)} flavor-matched recipes to candidate pool"
@@ -1124,18 +1157,19 @@ class QdrantRecipeManager:
             FLAVOR_BONUS = 0.20  # Base bonus added to combined score for flavor match
             # Extra boost for text-only candidates (compensates for missing feature search score)
             TEXT_ONLY_FLAVOR_BOOST = 0.25  # Additional boost when feature_search_score is 0
-            
+
             # Extract query flavor value for boosting
             query_flavor = None
             for qf, qv in zip(query_features, query_values):
                 if any(flav in qf.lower() for flav in FLAVOR_FEATURES):
                     query_flavor = str(qv).lower().strip()
                     break
-            
+
             # Log extracted query flavors for debugging
             if query_flavor:
-                logger.info(f"Flavor boost enabled. Query flavors: {query_flavor[:100]}...")
-            
+                logger.info(
+                    f"Flavor boost enabled. Query flavors: {query_flavor[:100]}...")
+
             # Calculate feature similarity for each candidate
             for candidate in candidates:
                 candidate_features = candidate.get("features", [])
@@ -1159,14 +1193,14 @@ class QdrantRecipeManager:
                             if self._match_feature_value(str(query_val), cand_val):
                                 matching_count += 1
                             break
-                
+
                 # Check for flavor match in description or recipe name (semantic matching)
                 # This catches cases where Flavour feature name doesn't match exactly
                 # ENHANCED: Supports multiple comma-separated flavors AND multi-word flavors
                 if query_flavor:
                     recipe_desc = candidate.get("description", "").lower()
                     recipe_name = candidate.get("recipe_name", "").lower()
-                    
+
                     # Split query_flavor into individual flavor KEYWORDS for matching
                     # Step 1: Split by comma: "Gyros, Honey BBQ" → ["Gyros", "Honey BBQ"]
                     # Step 2: Split each by space: ["Gyros", "Honey", "BBQ"]
@@ -1181,11 +1215,12 @@ class QdrantRecipeManager:
                             for word in flavor_phrase.split():
                                 if len(word) >= 3:
                                     query_flavor_keywords.add(word)
-                    
+
                     # Also check candidate's Flavour feature value
                     for j, cand_feat in enumerate(candidate_features):
                         if any(flav in cand_feat.lower() for flav in FLAVOR_FEATURES):
-                            cand_val = str(candidate_values[j]).lower() if j < len(candidate_values) else ""
+                            cand_val = str(candidate_values[j]).lower(
+                            ) if j < len(candidate_values) else ""
                             # Match if ANY query flavor keyword matches the candidate flavor
                             for qf in query_flavor_keywords:
                                 if len(qf) >= 3 and (qf in cand_val or cand_val in qf):
@@ -1193,7 +1228,7 @@ class QdrantRecipeManager:
                                     break
                             if flavor_matched:
                                 break
-                    
+
                     # Also check description and recipe name for flavor keywords
                     if not flavor_matched:
                         matched_keyword = None
@@ -1203,7 +1238,7 @@ class QdrantRecipeManager:
                                 flavor_matched = True
                                 matched_keyword = qf
                                 break
-                        
+
                         # Log flavor match found in description/name (for debugging)
                         if flavor_matched:
                             logger.debug(
@@ -1211,8 +1246,9 @@ class QdrantRecipeManager:
                             )
 
                 # Calculate feature refinement score
-                feature_refinement_score = matching_count / total_features if total_features > 0 else 0
-                
+                feature_refinement_score = matching_count / \
+                    total_features if total_features > 0 else 0
+
                 # Store debug info
                 candidate["_flavor_matched"] = flavor_matched
 
@@ -1234,12 +1270,12 @@ class QdrantRecipeManager:
                     feature_search_weight * feature_search_score +
                     feature_refinement_weight * feature_refinement_score
                 )
-                
+
                 # Apply flavor bonus - this is the key differentiator!
                 # Recipes matching the query flavor get a significant boost
                 if flavor_matched:
                     combined_score += FLAVOR_BONUS
-                    
+
                     # EXTRA BOOST: Text-only candidates (found via text search but not feature search)
                     # get additional bonus to compensate for missing feature_search_score
                     # This ensures flavor-matched recipes found via text search can compete
@@ -1273,7 +1309,7 @@ class QdrantRecipeManager:
                 combined_score = result.get('combined_score', 0.0)
                 flavor_matched = result.get('_flavor_matched', False)
                 text_only_boost = result.get('_text_only_boost', False)
-                
+
                 # Show flavor boost info with correct amounts
                 if flavor_matched:
                     if text_only_boost:
@@ -1283,7 +1319,7 @@ class QdrantRecipeManager:
                         flavor_info = f" ★FLAVOR+{FLAVOR_BONUS}"
                 else:
                     flavor_info = ""
-                
+
                 logger.info(
                     f"  {i}. {recipe_name}{flavor_info} | Combined: {combined_score:.4f} "
                     f"(Text: {text_score:.4f}×0.15 + FeatSearch: {feature_search_score:.4f}×0.65 + FeatMatch: {feature_score:.4f}×0.20)"
