@@ -721,6 +721,102 @@ class QdrantRecipeManager:
 
         return candidates
 
+    def _calculate_feature_scores_for_keyword_matches(self,
+                                                      candidates: List[Dict[str, Any]],
+                                                      query_features: List[str],
+                                                      query_values: List[Any]) -> List[Dict[str, Any]]:
+        """
+        Calculate feature search scores for candidates found via keyword search.
+
+        This gives keyword-matched recipes a fair chance to compete with feature-search
+        results by computing the same cosine similarity score they would have received
+        if they had been found via feature search.
+
+        Args:
+            candidates: List of keyword-matched candidates needing feature scores
+            query_features: Query feature names
+            query_values: Query feature values
+
+        Returns:
+            Updated candidates with feature_search_score calculated
+        """
+        if not candidates or not query_features:
+            return candidates
+
+        try:
+            logger.info(
+                f"Calculating feature scores for {len(candidates)} keyword-matched candidates")
+
+            # Create query feature vector using the same method as feature search
+            if self.feature_encoder is not None:
+                query_feature_vector = self.feature_encoder._create_feature_vector(
+                    query_features, query_values, fit=False)
+            else:
+                # Fallback to basic encoding
+                feature_text = self._create_feature_text(
+                    query_features, query_values)
+                if not feature_text:
+                    return candidates
+                text_embedding = self.embedding_model.encode(feature_text)
+                categorical_vector = self._encode_mixed_features(
+                    query_features, query_values)
+                query_feature_vector = np.concatenate(
+                    [text_embedding, categorical_vector])
+
+            # Get recipe IDs to retrieve their feature vectors
+            recipe_ids = [c.get("id") for c in candidates if c.get("id")]
+
+            if not recipe_ids:
+                return candidates
+
+            # Retrieve feature vectors from Qdrant for these specific recipes
+            try:
+                points = self.qdrant_client.retrieve(
+                    collection_name=self.collection_name,
+                    ids=recipe_ids,
+                    with_payload=False,
+                    with_vectors=["features"]  # Only get the features vector
+                )
+            except Exception as e:
+                logger.warning(f"Failed to retrieve feature vectors: {e}")
+                return candidates
+
+            # Build a map of recipe_id -> feature_vector
+            recipe_vectors = {}
+            for point in points:
+                if point.vector and "features" in point.vector:
+                    recipe_vectors[point.id] = np.array(
+                        point.vector["features"])
+
+            # Calculate cosine similarity for each candidate
+            for candidate in candidates:
+                recipe_id = candidate.get("id")
+                if recipe_id in recipe_vectors:
+                    recipe_vector = recipe_vectors[recipe_id]
+
+                    # Cosine similarity
+                    dot_product = np.dot(query_feature_vector, recipe_vector)
+                    query_norm = np.linalg.norm(query_feature_vector)
+                    recipe_norm = np.linalg.norm(recipe_vector)
+
+                    if query_norm > 0 and recipe_norm > 0:
+                        similarity = dot_product / (query_norm * recipe_norm)
+                        candidate["feature_search_score"] = float(similarity)
+                        logger.info(
+                            f"  Calculated feature score for {candidate.get('recipe_name', 'Unknown')[:50]}: {similarity:.4f}"
+                        )
+                    else:
+                        candidate["feature_search_score"] = 0.0
+                else:
+                    candidate["feature_search_score"] = 0.0
+
+        except Exception as e:
+            logger.error(
+                f"Error calculating feature scores for keyword matches: {e}")
+            # Keep feature_search_score as 0.0 if calculation fails
+
+        return candidates
+
     def search_two_step(self,
                         text_description: str,
                         query_df: Optional[pd.DataFrame] = None,
@@ -1025,10 +1121,25 @@ class QdrantRecipeManager:
                                         "text_score", 0.0)
                                     break
 
-                    # Ensure all flavor matches have feature_search_score set
-                    for candidate in flavor_matched_candidates:
-                        if candidate.get("search_source") == "flavor_keyword":
-                            candidate["feature_search_score"] = 0.0
+                    # Calculate feature search scores for keyword matches
+                    # This gives them a fair chance to compete with feature-search results
+                    keyword_matches_needing_feature_scores = [
+                        c for c in flavor_matched_candidates
+                        if c.get("search_source") == "flavor_keyword" and c.get("feature_search_score", 0.0) == 0.0
+                    ]
+                    if keyword_matches_needing_feature_scores and query_features:
+                        self._calculate_feature_scores_for_keyword_matches(
+                            keyword_matches_needing_feature_scores,
+                            query_features,
+                            query_values
+                        )
+                        # Update scores in main list
+                        for kw_match in keyword_matches_needing_feature_scores:
+                            for candidate in flavor_matched_candidates:
+                                if candidate.get("id") == kw_match.get("id"):
+                                    candidate["feature_search_score"] = kw_match.get(
+                                        "feature_search_score", 0.0)
+                                    break
 
                     all_candidates.extend(flavor_matched_candidates)
                     logger.info(
