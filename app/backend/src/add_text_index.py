@@ -22,6 +22,7 @@ Example:
 import argparse
 import logging
 import sys
+import time
 from qdrant_client import QdrantClient
 from qdrant_client.models import TextIndexParams, TokenizerType
 
@@ -49,9 +50,10 @@ def add_text_index(
         True if successful, False otherwise
     """
     try:
-        # Connect to Qdrant
+        # Connect to Qdrant with extended timeout for large collections
         logger.info(f"Connecting to Qdrant at {host}:{port}...")
-        client = QdrantClient(host=host, port=port)
+        client = QdrantClient(host=host, port=port,
+                              timeout=300)  # 5 minute timeout
 
         # Verify collection exists
         collections = client.get_collections()
@@ -87,27 +89,72 @@ def add_text_index(
         logger.info("  Tokenizer: WORD (splits on whitespace/punctuation)")
         logger.info("  Min token length: 2")
         logger.info("  Lowercase: True (case-insensitive)")
+        logger.info(
+            f"  Collection size: {collection_info.points_count} points")
+        logger.info("  This may take several minutes for large collections...")
 
+        # Use wait=False for large collections to avoid timeout, then poll for completion
         client.create_payload_index(
             collection_name=collection_name,
             field_name="recipe_name",
             field_schema=text_index_params,
-            wait=True  # Wait for index to be created
+            wait=False  # Don't wait - index creation happens in background
         )
 
-        logger.info("✓ Full-text index on 'recipe_name' created successfully!")
+        # Poll until index is created
+        logger.info("  Index creation started, waiting for completion...")
+        max_wait_seconds = 600  # 10 minutes max
+        poll_interval = 5  # Check every 5 seconds
+        elapsed = 0
+
+        while elapsed < max_wait_seconds:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+
+            # Check if index exists
+            info = client.get_collection(collection_name)
+            if info.payload_schema and "recipe_name" in info.payload_schema:
+                logger.info(
+                    f"✓ Full-text index on 'recipe_name' created successfully! (took {elapsed}s)")
+                break
+
+            if elapsed % 30 == 0:  # Log progress every 30 seconds
+                logger.info(f"  Still indexing... ({elapsed}s elapsed)")
+        else:
+            logger.warning(
+                f"  Index creation still in progress after {max_wait_seconds}s - continuing anyway")
 
         # Also create index on description field for broader keyword matching
         logger.info("Creating full-text index on 'description' field...")
+        logger.info("  This may take several minutes for large collections...")
 
         client.create_payload_index(
             collection_name=collection_name,
             field_name="description",
             field_schema=text_index_params,
-            wait=True
+            wait=False  # Don't wait - index creation happens in background
         )
 
-        logger.info("✓ Full-text index on 'description' created successfully!")
+        # Poll until index is created
+        logger.info("  Index creation started, waiting for completion...")
+        elapsed = 0
+
+        while elapsed < max_wait_seconds:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+
+            # Check if index exists
+            info = client.get_collection(collection_name)
+            if info.payload_schema and "description" in info.payload_schema:
+                logger.info(
+                    f"✓ Full-text index on 'description' created successfully! (took {elapsed}s)")
+                break
+
+            if elapsed % 30 == 0:  # Log progress every 30 seconds
+                logger.info(f"  Still indexing... ({elapsed}s elapsed)")
+        else:
+            logger.warning(
+                f"  Index creation still in progress after {max_wait_seconds}s - continuing anyway")
 
         # Verify indexes were created
         collection_info = client.get_collection(collection_name)
