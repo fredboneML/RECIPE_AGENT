@@ -460,7 +460,7 @@ function App() {
                               <tr className="recipe-names">
                                 {message.comparison_table.recipes.map((recipe, idx) => (
                                   <th key={idx} colSpan="2" className="recipe-header">
-                                    {recipe.recipe_name || recipe.recipe_id}
+                                    {idx + 1}. {recipe.recipe_name || recipe.recipe_id}
                                   </th>
                                 ))}
                               </tr>

@@ -817,12 +817,131 @@ class QdrantRecipeManager:
 
         return candidates
 
+    def _check_exact_recipe_name_match(self,
+                                       query: str,
+                                       country_filter: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Check if the query is an exact recipe name match.
+
+        This handles cases where users search with just a recipe name like
+        "FZ APFEL MATCHA SIGGIS o.A." - we should find exact matches first.
+
+        Args:
+            query: The search query (potentially a recipe name)
+            country_filter: Optional country filter
+
+        Returns:
+            Recipe dict with high text_score (0.95) if exact match found, None otherwise
+        """
+        try:
+            # Heuristic: Check if query looks like a recipe name
+            # Recipe names are typically:
+            # - Short to medium length (20-150 chars)
+            # - May contain underscores, numbers, abbreviations
+            # - Often start with codes like "FZ", "ZB", etc.
+            query_clean = query.strip()
+
+            # Skip if query is too long (likely a description, not a name)
+            if len(query_clean) > 150:
+                return None
+
+            # Skip if query is too short (likely not a recipe name)
+            if len(query_clean) < 5:
+                return None
+
+            # Try to find exact match in description field (where MaterialMasterShorttext is stored)
+            # Recipe names are typically in format: "MaterialMasterShorttext: FZ APFEL MATCHA SIGGIS o.A."
+            # So we search for the query text in the description field using full-text search
+            filter_conditions = [
+                FieldCondition(
+                    key="description",
+                    match=MatchText(text=query_clean)
+                )
+            ]
+
+            # Add country filter if specified
+            if country_filter and country_filter != "All":
+                filter_conditions.append(
+                    FieldCondition(
+                        key="country",
+                        match=MatchValue(value=country_filter)
+                    )
+                )
+
+            exact_filter = Filter(must=filter_conditions)
+
+            # Search for exact match using scroll (more efficient for exact matches)
+            scroll_results, _ = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=exact_filter,
+                limit=10,  # Get a few results to find the best match
+                with_payload=True,
+                with_vectors=False
+            )
+
+            if scroll_results and len(scroll_results) > 0:
+                # Find the best match - one where the query appears in MaterialMasterShorttext
+                best_match = None
+                query_lower = query_clean.lower()
+
+                for point in scroll_results:
+                    payload = point.payload if point.payload is not None else {}
+                    description = payload.get("description", "")
+
+                    # Check if query appears in MaterialMasterShorttext part of description
+                    # Format is typically: "MaterialMasterShorttext: FZ APFEL MATCHA SIGGIS o.A., ..."
+                    if "MaterialMasterShorttext:" in description:
+                        # Extract the MaterialMasterShorttext value
+                        mst_part = description.split("MaterialMasterShorttext:")[
+                            1].split(",")[0].strip()
+                        if query_lower == mst_part.lower():
+                            best_match = point
+                            break
+
+                # If no exact MaterialMasterShorttext match, use first result
+                if not best_match:
+                    best_match = scroll_results[0]
+
+                point = best_match
+                payload = point.payload if point.payload is not None else {}
+
+                # Create recipe data with very high text score for exact match
+                recipe_data = {
+                    "id": point.id,
+                    "text_score": 0.95,  # Very high score for exact match
+                    "feature_search_score": 0.0,
+                    "recipe_name": payload.get("recipe_name", ""),
+                    "description": payload.get("description", ""),
+                    "features": payload.get("features", []),
+                    "values": payload.get("values", []),
+                    "num_features": payload.get("num_features", 0),
+                    "metadata": {
+                        "recipe_name": payload.get("recipe_name", "")
+                    },
+                    "search_source": "text",
+                    "_exact_match": True  # Flag to indicate this is an exact match
+                }
+
+                logger.info(
+                    f"Exact recipe name match found: '{query_clean}' → "
+                    f"{recipe_data.get('recipe_name', 'Unknown')}"
+                )
+                return recipe_data
+
+            return None
+
+        except Exception as e:
+            # Don't fail the whole search if exact match check fails
+            logger.debug(f"Exact recipe name match check failed: {e}")
+            return None
+
     def search_two_step(self,
                         text_description: str,
                         query_df: Optional[pd.DataFrame] = None,
                         text_top_k: int = 50,
                         final_top_k: int = 10,
-                        country_filter: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                        country_filter: Optional[str] = None,
+                        original_query: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Two-step hybrid search: 
         - Step 1: Get candidates from both text search AND feature search (50/50 split)
@@ -862,6 +981,13 @@ class QdrantRecipeManager:
                 query_features = query_df.iloc[:, 0].tolist()
                 query_values = query_df.iloc[:, 1].tolist()
 
+        # Step 0: Check for exact recipe name match (before semantic search)
+        # This handles cases where user searches with just a recipe name
+        # Use original_query if available (before AI extraction/translation), otherwise use text_description
+        query_for_exact_match = original_query if original_query else text_description
+        exact_match = self._check_exact_recipe_name_match(
+            query_for_exact_match, country_filter)
+
         # Step 1a: Text-based search using Qdrant
         # OPTIMIZATION: Get query embedding to reuse later (avoids re-encoding)
         logger.info(
@@ -875,6 +1001,20 @@ class QdrantRecipeManager:
         else:
             text_candidates = text_search_result
             cached_query_embedding = None
+
+        # Merge exact match with text candidates (exact match goes first)
+        if exact_match:
+            # Remove exact match from text_candidates if it's already there (to avoid duplicates)
+            text_candidates = [
+                c for c in text_candidates
+                if c.get("id") != exact_match.get("id")
+            ]
+            # Insert exact match at the beginning with highest priority
+            text_candidates.insert(0, exact_match)
+            logger.info(
+                f"✓ Exact recipe name match found: {exact_match.get('recipe_name', 'Unknown')} "
+                f"(Text Score: {exact_match.get('text_score', 0.0):.4f})"
+            )
 
         search_metadata["text_results_found"] = len(text_candidates)
 
@@ -1182,7 +1322,11 @@ class QdrantRecipeManager:
             search_metadata["refinement_completed"] = True
 
         else:
-            logger.info("Step 2: Skipped (no feature data provided)")
+            logger.info(
+                "Step 2: Skipped (no feature data provided) - using text-only search")
+            # Sort by text_score when no features are provided
+            all_candidates.sort(key=lambda x: x.get(
+                "text_score", 0.0), reverse=True)
             final_results = all_candidates[:final_top_k]
             search_metadata["refinement_completed"] = False
 
@@ -1281,6 +1425,35 @@ class QdrantRecipeManager:
                 logger.info(
                     f"Flavor boost enabled. Query flavors: {query_flavor[:100]}...")
 
+            # Determine scoring weights based on number of features
+            num_features = len(query_features)
+            if num_features == 0:
+                text_weight = 1.0
+                feature_search_weight = 0.0
+                feature_refinement_weight = 0.0
+                weight_scheme = "text-only"
+            elif num_features <= 3:
+                text_weight = 0.60
+                feature_search_weight = 0.25
+                feature_refinement_weight = 0.15
+                weight_scheme = "text-heavy"
+            elif num_features <= 8:
+                text_weight = 0.30
+                feature_search_weight = 0.50
+                feature_refinement_weight = 0.20
+                weight_scheme = "balanced"
+            else:
+                text_weight = 0.15
+                feature_search_weight = 0.65
+                feature_refinement_weight = 0.20
+                weight_scheme = "feature-heavy"
+
+            logger.info(
+                f"Scoring weights ({weight_scheme}, {num_features} features): "
+                f"Text={text_weight:.0%}, FeatureSearch={feature_search_weight:.0%}, "
+                f"FeatureMatch={feature_refinement_weight:.0%}"
+            )
+
             # Calculate feature similarity for each candidate
             for candidate in candidates:
                 candidate_features = candidate.get("features", [])
@@ -1368,14 +1541,7 @@ class QdrantRecipeManager:
                 feature_search_score = candidate.get(
                     "feature_search_score", 0.0)
 
-                # Combined score weighting:
-                # - Text (15%): Minimal influence, language-dependent
-                # - Feature Search (65%): Vector similarity with categorical encoding (multilingual embeddings)
-                # - Feature Refinement (20%): Exact feature matching
-                text_weight = 0.15
-                feature_search_weight = 0.65
-                feature_refinement_weight = 0.20
-
+                # Use weights determined at the start of the method
                 combined_score = (
                     text_weight * text_score +
                     feature_search_weight * feature_search_score +
@@ -1433,7 +1599,7 @@ class QdrantRecipeManager:
 
                 logger.info(
                     f"  {i}. {recipe_name}{flavor_info} | Combined: {combined_score:.4f} "
-                    f"(Text: {text_score:.4f}×0.15 + FeatSearch: {feature_search_score:.4f}×0.65 + FeatMatch: {feature_score:.4f}×0.20)"
+                    f"(Text: {text_score:.4f}×{text_weight:.2f} + FeatSearch: {feature_search_score:.4f}×{feature_search_weight:.2f} + FeatMatch: {feature_score:.4f}×{feature_refinement_weight:.2f})"
                 )
 
             return refined_results[:top_k]

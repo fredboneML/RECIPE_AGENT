@@ -365,7 +365,8 @@ class RecipeSearchAgent:
                 query_df=query_df,
                 text_top_k=text_top_k,
                 final_top_k=final_top_k,
-                country_filter=country_filter
+                country_filter=country_filter,
+                original_query=original_query
             )
 
             # Format response in the detected language using AI
