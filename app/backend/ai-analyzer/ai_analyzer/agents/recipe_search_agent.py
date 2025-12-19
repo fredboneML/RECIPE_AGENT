@@ -297,7 +297,8 @@ class RecipeSearchAgent:
                        text_top_k: int = 20,
                        final_top_k: int = 3,
                        original_query: Optional[str] = None,
-                       country_filter: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
+                       country_filter: Optional[str] = None,
+                       version_filter: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
         Search for similar recipes based on description and optional features
 
@@ -308,6 +309,7 @@ class RecipeSearchAgent:
             final_top_k: Final number of results to return
             original_query: Original user query (used for language detection if provided)
             country_filter: Optional country name to filter results (None or "All" means no filter)
+            version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
 
         Returns:
             Tuple of (results, metadata, formatted_response, detected_language, comparison_table)
@@ -366,6 +368,7 @@ class RecipeSearchAgent:
                 text_top_k=text_top_k,
                 final_top_k=final_top_k,
                 country_filter=country_filter,
+                version_filter=version_filter,
                 original_query=original_query
             )
 

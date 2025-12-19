@@ -397,7 +397,8 @@ class QdrantRecipeManager:
                            query_features: List[str],
                            query_values: List[Any],
                            top_k: int = 20,
-                           country_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+                           country_filter: Optional[str] = None,
+                           version_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Search recipes by features using the feature vector in Qdrant.
 
@@ -413,6 +414,7 @@ class QdrantRecipeManager:
             query_values: List of feature values
             top_k: Number of results to return
             country_filter: Optional country name to filter results (None or "All" means no filter)
+            version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
 
         Returns:
             List of matching recipes with scores
@@ -461,19 +463,32 @@ class QdrantRecipeManager:
                     f"combined={feature_vector.shape}"
                 )
 
-            # Build filter if country is specified
+            # Build filter if country or version is specified
             query_filter = None
+            filter_conditions = []
+
             if country_filter and country_filter != "All":
-                query_filter = Filter(
-                    must=[
-                        FieldCondition(
-                            key="country",
-                            match=MatchValue(value=country_filter)
-                        )
-                    ]
+                filter_conditions.append(
+                    FieldCondition(
+                        key="country",
+                        match=MatchValue(value=country_filter)
+                    )
                 )
                 logger.info(
                     f"Applying country filter in feature search: {country_filter}")
+
+            if version_filter and version_filter != "All":
+                filter_conditions.append(
+                    FieldCondition(
+                        key="version",
+                        match=MatchValue(value=version_filter)
+                    )
+                )
+                logger.info(
+                    f"Applying version filter in feature search: {version_filter}")
+
+            if filter_conditions:
+                query_filter = Filter(must=filter_conditions)
 
             # Search using the "features" named vector
             try:
@@ -521,6 +536,7 @@ class QdrantRecipeManager:
                                    text_description: str,
                                    top_k: int = 20,
                                    country_filter: Optional[str] = None,
+                                   version_filter: Optional[str] = None,
                                    return_embedding: bool = False):
         """
         Search recipes by text description using Qdrant vector search
@@ -529,6 +545,7 @@ class QdrantRecipeManager:
             text_description: Text description for search
             top_k: Number of results to return
             country_filter: Optional country name to filter results (None or "All" means no filter)
+            version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             return_embedding: If True, also return the query embedding for reuse
 
         Returns:
@@ -539,18 +556,30 @@ class QdrantRecipeManager:
             # Create embedding for query using SentenceTransformer
             query_vector = self.embedding_model.encode(text_description)
 
-            # Build filter if country is specified
+            # Build filter if country or version is specified
             query_filter = None
+            filter_conditions = []
+
             if country_filter and country_filter != "All":
-                query_filter = Filter(
-                    must=[
-                        FieldCondition(
-                            key="country",
-                            match=MatchValue(value=country_filter)
-                        )
-                    ]
+                filter_conditions.append(
+                    FieldCondition(
+                        key="country",
+                        match=MatchValue(value=country_filter)
+                    )
                 )
                 logger.info(f"Applying country filter: {country_filter}")
+
+            if version_filter and version_filter != "All":
+                filter_conditions.append(
+                    FieldCondition(
+                        key="version",
+                        match=MatchValue(value=version_filter)
+                    )
+                )
+                logger.info(f"Applying version filter: {version_filter}")
+
+            if filter_conditions:
+                query_filter = Filter(must=filter_conditions)
 
             # Try searching with named vector first (new format)
             # If that fails, fallback to unnamed vector (old format)
@@ -819,7 +848,8 @@ class QdrantRecipeManager:
 
     def _check_exact_recipe_name_match(self,
                                        query: str,
-                                       country_filter: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                                       country_filter: Optional[str] = None,
+                                       version_filter: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Check if the query is an exact recipe name match.
 
@@ -829,6 +859,7 @@ class QdrantRecipeManager:
         Args:
             query: The search query (potentially a recipe name)
             country_filter: Optional country filter
+            version_filter: Optional version filter
 
         Returns:
             Recipe dict with high text_score (0.95) if exact match found, None otherwise
@@ -865,6 +896,15 @@ class QdrantRecipeManager:
                     FieldCondition(
                         key="country",
                         match=MatchValue(value=country_filter)
+                    )
+                )
+
+            # Add version filter if specified
+            if version_filter and version_filter != "All":
+                filter_conditions.append(
+                    FieldCondition(
+                        key="version",
+                        match=MatchValue(value=version_filter)
                     )
                 )
 
@@ -941,6 +981,7 @@ class QdrantRecipeManager:
                         text_top_k: int = 50,
                         final_top_k: int = 10,
                         country_filter: Optional[str] = None,
+                        version_filter: Optional[str] = None,
                         original_query: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Two-step hybrid search: 
@@ -953,6 +994,7 @@ class QdrantRecipeManager:
             text_top_k: Total number of candidates (split between text and feature search)
             final_top_k: Final number of results
             country_filter: Optional country name to filter results (None or "All" means no filter)
+            version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
 
         Returns:
             Tuple of (results, metadata)
@@ -963,7 +1005,8 @@ class QdrantRecipeManager:
             "has_feature_refinement": query_df is not None,
             "total_candidates_requested": text_top_k,
             "final_results": final_top_k,
-            "country_filter": country_filter
+            "country_filter": country_filter,
+            "version_filter": version_filter
         }
 
         # Calculate split for hybrid search (both searches return 15 candidates)
@@ -986,14 +1029,14 @@ class QdrantRecipeManager:
         # Use original_query if available (before AI extraction/translation), otherwise use text_description
         query_for_exact_match = original_query if original_query else text_description
         exact_match = self._check_exact_recipe_name_match(
-            query_for_exact_match, country_filter)
+            query_for_exact_match, country_filter, version_filter)
 
         # Step 1a: Text-based search using Qdrant
         # OPTIMIZATION: Get query embedding to reuse later (avoids re-encoding)
         logger.info(
             f"Step 1a: Text-based search in Qdrant (top {text_search_k})")
         text_search_result = self.search_by_text_description(
-            text_description, text_search_k, country_filter, return_embedding=True)
+            text_description, text_search_k, country_filter, version_filter, return_embedding=True)
 
         # Handle return value (may be tuple if return_embedding=True)
         if isinstance(text_search_result, tuple):
@@ -1036,7 +1079,7 @@ class QdrantRecipeManager:
             logger.info(
                 f"Step 1b: Feature-based search in Qdrant (top {feature_search_k})")
             feature_candidates = self.search_by_features(
-                query_features, query_values, feature_search_k, country_filter)
+                query_features, query_values, feature_search_k, country_filter, version_filter)
 
             search_metadata["feature_search_results_found"] = len(
                 feature_candidates)
@@ -1110,7 +1153,7 @@ class QdrantRecipeManager:
 
                 # Method 1: Vector search for semantic matches (top 50)
                 vector_flavor_results = self.search_by_text_description(
-                    query_flavor, top_k=100, country_filter=country_filter)
+                    query_flavor, top_k=100, country_filter=country_filter, version_filter=version_filter)
 
                 logger.info(
                     f"Flavor safeguard (vector search): Found {len(vector_flavor_results)} candidates for '{query_flavor}'. "
@@ -1165,6 +1208,15 @@ class QdrantRecipeManager:
                                     FieldCondition(
                                         key="country",
                                         match=MatchValue(value=country_filter)
+                                    )
+                                )
+
+                            # Add version filter if specified
+                            if version_filter and version_filter != "All":
+                                filter_conditions.append(
+                                    FieldCondition(
+                                        key="version",
+                                        match=MatchValue(value=version_filter)
                                     )
                                 )
 

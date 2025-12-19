@@ -23,7 +23,7 @@ import json
 import pandas as pd
 import uuid
 import re
-from typing import List, Optional
+from typing import List, Optional, Union, Literal
 import numpy as np
 import sys
 
@@ -96,6 +96,73 @@ def get_country_name(filename: str) -> str:
     """Extracts the country name from the filename using the country code."""
     country_code = get_country_code(filename)
     return COUNTRY_CODE_MAP.get(country_code, "Other")
+
+
+def extract_stlan(recipe_data: Union[dict, str]) -> Literal['L', 'P', 'Missing']:
+    """
+    Extract stlan value from a recipe JSON.
+
+    The stlan field indicates the recipe version:
+    - 'P': Production version (has all maintained data, prioritized when both P and L exist)
+    - 'L': Lab/development version
+    - 'Missing': stlan field not found (BillOfMaterialSTB may be missing)
+
+    Business Logic:
+    - When both P and L versions exist, P is returned (P has all data maintained)
+    - When only L exists, L is returned
+    - When stlan is missing or BillOfMaterialSTB is missing, 'Missing' is returned
+
+    Args:
+        recipe_data: Either a dictionary (parsed JSON) or a file path to a JSON file
+
+    Returns:
+        'P' if stlan field exists with value 'P' (prioritized even if L also exists)
+        'L' if stlan field exists with value 'L' (and no P found)
+        'Missing' if stlan doesn't exist or BillOfMaterialSTB is missing
+    """
+    # Load JSON if file path is provided
+    if isinstance(recipe_data, str):
+        try:
+            with open(recipe_data, 'r', encoding='utf-8') as f:
+                recipe_data = json.load(f)
+        except Exception as e:
+            logger.warning(
+                f"Error loading file for stlan extraction {recipe_data}: {e}")
+            return 'Missing'
+
+    # Recursively search for stlan field
+    # We'll collect all stlan values and prioritize: P > L > Missing
+    # P is prioritized because it contains all maintained data
+    found_values = set()
+
+    def find_stlan(obj):
+        """Recursively search for stlan field in nested structures."""
+        if isinstance(obj, dict):
+            # Check if stlan key exists
+            if 'stlan' in obj:
+                value = obj['stlan']
+                if value == 'L' or value == 'P':
+                    found_values.add(value)
+
+            # Recursively search in all values
+            for value in obj.values():
+                find_stlan(value)
+
+        elif isinstance(obj, list):
+            # Recursively search in all list items
+            for item in obj:
+                find_stlan(item)
+
+    find_stlan(recipe_data)
+
+    # Return priority: P > L > Missing
+    # P is prioritized because production versions have all data maintained
+    if 'P' in found_values:
+        return 'P'
+    elif 'L' in found_values:
+        return 'L'
+    else:
+        return 'Missing'
 
 
 def wait_for_qdrant(qdrant_host="qdrant", qdrant_port=6333, max_retries=30, delay=2):
@@ -596,6 +663,11 @@ def index_recipes_to_qdrant_batched(
                     country_name = get_country_name(filename)
                     recipe_id = filename.split('.')[0]
 
+                    # Extract version (stlan) from recipe JSON
+                    version = extract_stlan(recipe_path)
+                    logger.debug(
+                        f"Recipe {recipe_id}: extracted version={version}")
+
                     if recipe_data is not None and isinstance(recipe_data, pd.DataFrame):
                         if 'charactDescr' in recipe_data.columns and 'valueCharLong' in recipe_data.columns:
                             features = recipe_data['charactDescr'].tolist()
@@ -619,7 +691,8 @@ def index_recipes_to_qdrant_batched(
                                 'original_features': features,  # Keep originals for payload
                                 'original_values': values,
                                 'description': enhanced_description,
-                                'country': country_name
+                                'country': country_name,
+                                'version': version
                             })
                 except Exception as e:
                     logger.warning(f"Error reading {recipe_path}: {e}")
@@ -630,6 +703,13 @@ def index_recipes_to_qdrant_batched(
                 continue
 
             logger.info(f"  Loaded {len(batch_data)} valid recipes from batch")
+
+            # Log version distribution for this batch
+            version_counts = {}
+            for recipe in batch_data:
+                version = recipe.get('version', 'Missing')
+                version_counts[version] = version_counts.get(version, 0) + 1
+            logger.info(f"  Version distribution in batch: {version_counts}")
 
             # Step 2: Create embeddings using EnhancedTwoStepRecipeManager
             logger.info(
@@ -704,7 +784,8 @@ def index_recipes_to_qdrant_batched(
                             "num_features": len(original_features),
                             # Store NORMALIZED feature text for debugging/analysis
                             "feature_text": feature_text[:1000],
-                            "country": recipe['country']
+                            "country": recipe['country'],
+                            "version": recipe['version']
                         }
                     )
                     points.append(point)
@@ -760,6 +841,38 @@ def index_recipes_to_qdrant_batched(
 
         # Log feature analysis from manager
         stats = manager.get_stats()
+
+        # Calculate final version distribution (sample from collection)
+        logger.info("\n" + "=" * 60)
+        logger.info("CALCULATING VERSION DISTRIBUTION")
+        logger.info("=" * 60)
+        try:
+            # Sample points to get version distribution
+            sample_size = min(10000, collection_info.points_count)
+            sample_results = qdrant_client.scroll(
+                collection_name=collection_name,
+                limit=sample_size,
+                with_payload=True,
+                with_vectors=False
+            )
+
+            version_distribution = {'P': 0, 'L': 0, 'Missing': 0}
+            for point in sample_results[0]:
+                version = point.payload.get('version', 'Missing')
+                if version in version_distribution:
+                    version_distribution[version] += 1
+
+            if sample_size > 0:
+                logger.info(
+                    f"Version distribution (sample of {sample_size:,} recipes):")
+                logger.info(
+                    f"  P: {version_distribution['P']:,} ({version_distribution['P']/sample_size*100:.1f}%)")
+                logger.info(
+                    f"  L: {version_distribution['L']:,} ({version_distribution['L']/sample_size*100:.1f}%)")
+                logger.info(
+                    f"  Missing: {version_distribution['Missing']:,} ({version_distribution['Missing']/sample_size*100:.1f}%)")
+        except Exception as e:
+            logger.warning(f"Could not calculate version distribution: {e}")
 
         logger.info("\n" + "=" * 60)
         logger.info("INDEXING COMPLETE!")

@@ -142,6 +142,53 @@
   padding: 8px;
 }
 
+.version-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.version-filter label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.version-dropdown {
+  padding: 8px 12px;
+  background-color: #9f1a15;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  min-width: 120px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='white' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+}
+
+.version-dropdown:hover {
+  background-color: #851612;
+}
+
+.version-dropdown:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(159, 26, 21, 0.3);
+}
+
+.version-dropdown option {
+  background-color: white;
+  color: #333;
+  padding: 8px;
+}
+
 .user-initial button {
   background-color: #9f1a15;
   color: white;
@@ -574,6 +621,20 @@
 
   .country-dropdown {
     min-width: 120px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+
+  .version-filter {
+    gap: 5px;
+  }
+
+  .version-filter label {
+    font-size: 0.8rem;
+  }
+
+  .version-dropdown {
+    min-width: 100px;
     padding: 6px 10px;
     font-size: 0.85rem;
   }

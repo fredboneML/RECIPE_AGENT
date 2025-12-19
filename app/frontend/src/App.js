@@ -18,6 +18,7 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [countries, setCountries] = useState([]);
   const [selectedCountry, setSelectedCountry] = useState('All');
+  const [selectedVersion, setSelectedVersion] = useState('P');
   
   const navigate = useNavigate();
   const textareaRef = useRef(null);
@@ -168,7 +169,8 @@ function App() {
       const response = await tokenManager.post('/query', {
         query: finalQuery,
         conversation_id: currentConversation?.id,
-        country_filter: selectedCountry === 'All' ? null : selectedCountry
+        country_filter: selectedCountry === 'All' ? null : selectedCountry,
+        version_filter: selectedVersion === 'All' ? null : selectedVersion
       }, {
         signal: abortControllerRef.current.signal
       });
@@ -408,6 +410,20 @@ function App() {
                   {country.name}
                 </option>
               ))}
+            </select>
+          </div>
+          <div className="version-filter">
+            <label htmlFor="version-select">Version:</label>
+            <select
+              id="version-select"
+              value={selectedVersion}
+              onChange={(e) => setSelectedVersion(e.target.value)}
+              className="version-dropdown"
+            >
+              <option value="All">All</option>
+              <option value="P">P</option>
+              <option value="L">L</option>
+              <option value="Missing">Missing</option>
             </select>
           </div>
           <div className="user-initial" onClick={() => setShowPopup(!showPopup)}>
