@@ -6,8 +6,8 @@ import logging
 import json
 import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple, Union
-from pathlib import Path
 import sys
+from sqlalchemy import create_engine, text
 
 # Add the src directory to the path to import recipe search modules
 sys.path.append(os.path.join(os.path.dirname(
@@ -16,6 +16,264 @@ sys.path.append(os.path.join(os.path.dirname(
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# Database connection for translation cache
+def get_db_engine():
+    """Get database engine for translation cache operations"""
+    try:
+        db_url = f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('DB_HOST', 'database')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('POSTGRES_DB')}"
+        return create_engine(db_url)
+    except Exception as e:
+        logger.error(f"Error creating database engine: {e}")
+        return None
+
+
+def get_cached_translation(recipe_name: str, target_language: str) -> Optional[Dict[str, Any]]:
+    """
+    Check if a translation exists in the cache for a specific recipe and language.
+
+    Args:
+        recipe_name: The recipe identifier (e.g., "000000000000442937_AT10_01_L")
+        target_language: The target language code (e.g., "fr", "de", "en")
+
+    Returns:
+        Cached translation dictionary or None if not found
+    """
+    try:
+        engine = get_db_engine()
+        if not engine:
+            return None
+
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT translated_characteristics 
+                FROM recipe_translation_cache 
+                WHERE recipe_name = :recipe_name 
+                AND target_language = :target_language
+            """), {"recipe_name": recipe_name, "target_language": target_language})
+
+            row = result.fetchone()
+            if row:
+                logger.info(
+                    f"Found cached translation for {recipe_name} in {target_language}")
+                return row[0]  # JSONB is automatically parsed
+
+        return None
+
+    except Exception as e:
+        logger.error(f"Error retrieving cached translation: {e}")
+        return None
+
+
+def save_translation_to_cache(recipe_name: str, target_language: str, translated_data: Dict[str, Any]) -> bool:
+    """
+    Save a translation to the cache.
+
+    Args:
+        recipe_name: The recipe identifier
+        target_language: The target language code
+        translated_data: Dictionary containing translated characteristics
+
+    Returns:
+        True if saved successfully, False otherwise
+    """
+    try:
+        engine = get_db_engine()
+        if not engine:
+            return False
+
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO recipe_translation_cache (recipe_name, target_language, translated_characteristics)
+                VALUES (:recipe_name, :target_language, CAST(:translated_characteristics AS jsonb))
+                ON CONFLICT (recipe_name, target_language) 
+                DO UPDATE SET 
+                    translated_characteristics = EXCLUDED.translated_characteristics,
+                    updated_at = CURRENT_TIMESTAMP
+            """), {
+                "recipe_name": recipe_name,
+                "target_language": target_language,
+                "translated_characteristics": json.dumps(translated_data)
+            })
+
+        logger.info(
+            f"Saved translation for {recipe_name} in {target_language} to cache")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error saving translation to cache: {e}")
+        return False
+
+
+def detect_text_language(text: str) -> str:
+    """
+    Detect the language of a given text using AI.
+    Returns language code (en, fr, de, it, es, pt, nl, da)
+    """
+    if not text or not text.strip():
+        return "en"
+
+    try:
+        prompt = f"""Detect the language of this text and respond with ONLY the language code.
+
+Text: "{text[:500]}"
+
+Valid codes: en, fr, de, it, es, pt, nl, da
+Default to "en" if unclear.
+
+Respond with only the language code."""
+
+        response = query_llm(prompt, provider="openai")
+        if response:
+            lang_code = response.strip().lower()
+            valid_codes = ["en", "it", "fr", "de", "es", "pt", "nl", "da"]
+            if lang_code in valid_codes:
+                return lang_code
+        return "en"
+
+    except Exception as e:
+        logger.error(f"Error detecting text language: {e}")
+        return "en"
+
+
+def translate_characteristics_with_llm(features: List[str], values: List[str], target_language: str) -> Tuple[List[str], List[str]]:
+    """
+    Translate recipe characteristics and values to the target language using LLM.
+
+    Args:
+        features: List of characteristic names (e.g., ["Color", "Flavour", "Industry"])
+        values: List of corresponding values
+        target_language: Target language code (e.g., "fr", "de")
+
+    Returns:
+        Tuple of (translated_features, translated_values)
+    """
+    if not features or not values:
+        return features, values
+
+    # Language mapping for prompt
+    language_names = {
+        "en": "English",
+        "fr": "French",
+        "de": "German",
+        "it": "Italian",
+        "es": "Spanish",
+        "pt": "Portuguese",
+        "nl": "Dutch",
+        "da": "Danish"
+    }
+
+    target_lang_name = language_names.get(target_language, "English")
+
+    try:
+        # Create a structured prompt for translation
+        characteristics_json = json.dumps([
+            {"characteristic": f, "value": v}
+            for f, v in zip(features, values)
+        ], ensure_ascii=False)
+
+        prompt = f"""Translate the following recipe characteristics and their values to {target_lang_name}.
+These are food/recipe industry terms that should be translated appropriately.
+
+Input (JSON array):
+{characteristics_json}
+
+Rules:
+1. Translate both the "characteristic" name and the "value" to {target_lang_name}
+2. Keep technical terms that are internationally used unchanged (e.g., "Halal", "Kosher", brand names)
+3. Maintain the same JSON structure in your response
+4. If a term is already in {target_lang_name}, keep it unchanged
+
+Respond with ONLY the translated JSON array, no explanations:"""
+
+        response = query_llm(prompt, provider="openai")
+
+        if response:
+            # Clean the response and parse JSON
+            response_clean = response.strip()
+            # Remove markdown code blocks if present
+            if response_clean.startswith("```"):
+                lines = response_clean.split("\n")
+                response_clean = "\n".join(
+                    lines[1:-1] if lines[-1] == "```" else lines[1:])
+
+            translated = json.loads(response_clean)
+
+            translated_features = [
+                item.get("characteristic", f) for item, f in zip(translated, features)]
+            translated_values = [item.get("value", v)
+                                 for item, v in zip(translated, values)]
+
+            logger.info(
+                f"Successfully translated {len(features)} characteristics to {target_lang_name}")
+            return translated_features, translated_values
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing translation response: {e}")
+    except Exception as e:
+        logger.error(f"Error translating characteristics: {e}")
+
+    return features, values  # Return original on error
+
+
+def translate_recipe_characteristics(
+    recipe_name: str,
+    features: List[str],
+    values: List[str],
+    target_language: str
+) -> Tuple[List[str], List[str]]:
+    """
+    Translate recipe characteristics to target language, using cache when available.
+
+    Args:
+        recipe_name: The recipe identifier for caching
+        features: List of characteristic names
+        values: List of corresponding values
+        target_language: Target language code
+
+    Returns:
+        Tuple of (translated_features, translated_values)
+    """
+    if not features or not values:
+        return features, values
+
+    # Check if we need translation by detecting the predominant language of the values
+    # Sample a few values to detect their language
+    sample_text = " ".join(values[:10])
+    detected_lang = detect_text_language(sample_text)
+
+    logger.info(
+        f"Recipe {recipe_name}: detected language={detected_lang}, target={target_language}")
+
+    # If already in target language, no translation needed
+    if detected_lang == target_language:
+        logger.info(
+            f"Recipe {recipe_name} is already in {target_language}, skipping translation")
+        return features, values
+
+    # Check cache first
+    cached = get_cached_translation(recipe_name, target_language)
+    if cached:
+        cached_features = cached.get("features", features)
+        cached_values = cached.get("values", values)
+        logger.info(
+            f"Using cached translation for {recipe_name} in {target_language}")
+        return cached_features, cached_values
+
+    # Translate using LLM
+    translated_features, translated_values = translate_characteristics_with_llm(
+        features, values, target_language
+    )
+
+    # Save to cache for future use
+    if translated_features != features or translated_values != values:
+        save_translation_to_cache(recipe_name, target_language, {
+            "features": translated_features,
+            "values": translated_values
+        })
+
+    return translated_features, translated_values
 
 
 def detect_language_with_ai(text: str) -> str:
@@ -78,12 +336,14 @@ Respond with only the language code, nothing else."""
         return "en"
 
 
-def create_comparison_table(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def create_comparison_table(results: List[Dict[str, Any]], detected_language: str = "en") -> Dict[str, Any]:
     """
-    Create a comparison table structure for the top 3 recipes
+    Create a comparison table structure for the top 3 recipes.
+    Translates characteristics to match the detected language of the user's query.
 
     Args:
         results: List of recipe search results
+        detected_language: The language detected from the user's query (e.g., "fr", "de", "en")
 
     Returns:
         Dictionary with table structure containing recipe names and their characteristics
@@ -101,20 +361,42 @@ def create_comparison_table(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "has_data": len(top_recipes) > 0
         }
 
-        # Collect all unique characteristics from all recipes
-        all_characteristics = set()
-
+        # First, translate characteristics for each recipe if needed
+        # Store translated features/values per recipe
+        translated_recipes = []
         for recipe in top_recipes:
             features = recipe.get("features", [])
-            all_characteristics.update(features)
+            values = recipe.get("values", [])
+            recipe_name = recipe.get(
+                "recipe_name", recipe.get("id", "Unknown"))
+
+            # Translate characteristics to detected language
+            translated_features, translated_values = translate_recipe_characteristics(
+                recipe_name=recipe_name,
+                features=features,
+                values=values,
+                target_language=detected_language
+            )
+
+            translated_recipes.append({
+                "recipe": recipe,
+                "features": translated_features,
+                "values": translated_values
+            })
+
+        # Collect all unique characteristics from all translated recipes
+        all_characteristics = set()
+        for tr in translated_recipes:
+            all_characteristics.update(tr["features"])
 
         # Sort characteristics for consistent display
         sorted_characteristics = sorted(list(all_characteristics))
 
-        # Build table data for each recipe
-        for recipe in top_recipes:
-            features = recipe.get("features", [])
-            values = recipe.get("values", [])
+        # Build table data for each recipe with translated values
+        for tr in translated_recipes:
+            recipe = tr["recipe"]
+            features = tr["features"]
+            values = tr["values"]
 
             # Create feature-value mapping
             feature_map = {}
@@ -137,6 +419,8 @@ def create_comparison_table(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
             table_data["recipes"].append(recipe_table_data)
 
+        logger.info(
+            f"Created comparison table for {len(top_recipes)} recipes in {detected_language}")
         return table_data
 
     except Exception as e:
@@ -376,8 +660,9 @@ class RecipeSearchAgent:
             formatted_response = format_response_in_language_with_ai(
                 results, detected_language, description)
 
-            # Create comparison table for top 3 recipes
-            comparison_table = create_comparison_table(results)
+            # Create comparison table for top 3 recipes with translation to detected language
+            comparison_table = create_comparison_table(
+                results, detected_language)
 
             logger.info(f"Found {len(results)} recipes")
             return results, metadata, formatted_response, detected_language, comparison_table
