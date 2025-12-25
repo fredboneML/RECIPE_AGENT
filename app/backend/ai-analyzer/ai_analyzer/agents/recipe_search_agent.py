@@ -137,6 +137,93 @@ Respond with only the language code."""
         return "en"
 
 
+def detect_recipe_language(features: List[str], values: List[str], num_samples: int = 10) -> str:
+    """
+    Detect the dominant language of recipe characteristics by sampling both features and values.
+
+    Args:
+        features: List of characteristic names (e.g., ["Allergene", "Color", "Flavour"])
+        values: List of corresponding values
+        num_samples: Number of samples to take from each list (default 10)
+
+    Returns:
+        Detected language code (en, fr, de, it, es, pt, nl, da)
+    """
+    if not features and not values:
+        return "en"
+
+    # Sample up to num_samples from features and values
+    # Spread samples across the list to get better coverage
+    sample_texts = []
+
+    # Sample features (characteristic names)
+    if features:
+        step = max(1, len(features) // num_samples)
+        for i in range(0, len(features), step):
+            if len(sample_texts) < num_samples and features[i]:
+                sample_texts.append(features[i])
+
+    # Sample values
+    if values:
+        step = max(1, len(values) // num_samples)
+        for i in range(0, len(values), step):
+            if len(sample_texts) < num_samples * 2 and values[i]:
+                # Convert to string and skip very short values or numbers
+                val_str = str(values[i]).strip()
+                if len(val_str) > 2 and not val_str.replace('.', '').replace('-', '').replace(',', '').isdigit():
+                    sample_texts.append(val_str)
+
+    if not sample_texts:
+        return "en"
+
+    # Create combined sample text for language detection
+    combined_sample = " | ".join(sample_texts[:20])  # Max 20 samples
+
+    logger.info(
+        f"Language detection sampling {len(sample_texts)} items: {combined_sample[:200]}...")
+
+    try:
+        prompt = f"""Analyze the following text samples from a recipe database and determine the DOMINANT language.
+These are characteristic names and values from a food product recipe.
+
+Text samples: "{combined_sample}"
+
+The text may contain:
+- Characteristic names (e.g., "Allergene", "Color", "Flavour", "Farbe")
+- Values (e.g., "Mit Allergenen", "Allergen-free", "keine künstl. Farbe")
+- Technical terms that may be in any language
+
+Identify the dominant language by counting which language appears most frequently.
+Respond with ONLY the language code from this list:
+- "en" for English
+- "de" for German
+- "fr" for French
+- "it" for Italian
+- "es" for Spanish
+- "pt" for Portuguese
+- "nl" for Dutch
+- "da" for Danish
+
+If the text is mixed or unclear, determine which language is MORE prevalent.
+Respond with only the language code, nothing else."""
+
+        response = query_llm(prompt, provider="openai")
+        if response:
+            lang_code = response.strip().lower()
+            valid_codes = ["en", "it", "fr", "de", "es", "pt", "nl", "da"]
+            if lang_code in valid_codes:
+                logger.info(f"Detected dominant language: {lang_code}")
+                return lang_code
+            else:
+                logger.warning(
+                    f"Invalid language code returned: {lang_code}, defaulting to en")
+        return "en"
+
+    except Exception as e:
+        logger.error(f"Error detecting recipe language: {e}")
+        return "en"
+
+
 def translate_characteristics_with_llm(features: List[str], values: List[str], target_language: str) -> Tuple[List[str], List[str]]:
     """
     Translate recipe characteristics and values to the target language using LLM.
@@ -238,10 +325,9 @@ def translate_recipe_characteristics(
     if not features or not values:
         return features, values
 
-    # Check if we need translation by detecting the predominant language of the values
-    # Sample a few values to detect their language
-    sample_text = " ".join(values[:10])
-    detected_lang = detect_text_language(sample_text)
+    # Check if we need translation by detecting the predominant language
+    # Sample both features (characteristic names) AND values for better accuracy
+    detected_lang = detect_recipe_language(features, values, num_samples=10)
 
     logger.info(
         f"Recipe {recipe_name}: detected language={detected_lang}, target={target_language}")
