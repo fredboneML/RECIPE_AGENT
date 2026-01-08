@@ -16,6 +16,7 @@ import pandas as pd
 from typing import Dict, Any, Optional, List, Tuple
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
+from openai import OpenAI
 from ai_analyzer.config import config
 
 # Configure logging
@@ -26,8 +27,15 @@ logger = logging.getLogger(__name__)
 class DataExtractorRouterAgent:
     """Agent for extracting data from supplier briefs for two-step feature-based search"""
 
-    def __init__(self, model_provider: str = "openai", model_name: str = "gpt-4", api_key: Optional[str] = None):
-        """Initialize the Data Extractor & Router Agent"""
+    def __init__(self, model_provider: str = "openai", model_name: str = "gpt-4o-mini", api_key: Optional[str] = None):
+        """Initialize the Data Extractor & Router Agent
+        
+        Default model is gpt-4o-mini which:
+        - Supports temperature=0.0 for deterministic output
+        - Has strong JSON instruction following
+        - Is fast and cost-effective
+        - Supports structured outputs (though we don't use it for compatibility)
+        """
         self.model_provider = model_provider
         self.model_name = model_name
         self.api_key = api_key or config.get('AI_ANALYZER_OPENAI_API_KEY')
@@ -36,22 +44,18 @@ class DataExtractorRouterAgent:
         self.feature_mappings = self._load_feature_mappings()
 
         # Generate dynamic instructions with mappings
-        instructions = self._generate_instructions()
+        self.instructions = self._generate_instructions()
 
-        # Create the agent with low temperature for consistent extraction
-        # Temperature 0.0 = deterministic output (same input → same output)
-        self.agent = Agent(
-            name="Data Extractor & Search Router",
-            role="Extract recipe information from supplier briefs for feature-based search",
-            model=OpenAIChat(
-                api_key=self.api_key,
-                temperature=0.0  # Deterministic extraction for consistent results
-            ),
-            instructions=instructions
-        )
+        # Create OpenAI client directly for deterministic extraction
+        # Using direct API to ensure temperature=0.0 is properly respected
+        self.client = OpenAI(api_key=self.api_key)
+        
+        # Store system prompt from instructions
+        self.system_prompt = "\n".join(self.instructions)
 
         logger.info(
             f"DataExtractorRouterAgent initialized with {len(self.feature_mappings.get('feature_name_mappings', {}))} feature name mappings")
+        logger.info(f"Using OpenAI API directly with temperature=0.0 for deterministic extraction")
 
     def _load_feature_mappings(self) -> Dict[str, Any]:
         """Load feature mappings for intelligent extraction"""
@@ -78,6 +82,14 @@ class DataExtractorRouterAgent:
         base_instructions = [
             "You are an expert recipe analyzer for a fruit preparation/ingredient database.",
             "Your task is to extract structured information from supplier project briefs to search 600K+ recipes.",
+            "",
+            "=" * 80,
+            "CRITICAL: OUTPUT MUST BE VALID JSON",
+            "=" * 80,
+            "Your ENTIRE response must be a single, valid JSON object with double quotes.",
+            "Do NOT include any text before or after the JSON object.",
+            "Do NOT use single quotes - use double quotes only.",
+            "Do NOT include explanatory text outside the JSON structure.",
             "",
             "=" * 80,
             "TEXT DESCRIPTION (CRITICAL FOR SEARCH):",
@@ -145,25 +157,27 @@ class DataExtractorRouterAgent:
             "- Viskositaet 30S 20°C: Viscosity measurement",
             "",
             "=" * 80,
-            "OUTPUT FORMAT:",
+            "OUTPUT FORMAT (VALID JSON - USE DOUBLE QUOTES, NOT SINGLE QUOTES):",
             "=" * 80,
             "{",
-            "  'search_type': 'two_step',",
-            "  'text_description': 'Rich searchable description with product type, flavor, application, texture, key attributes',",
-            "  'features': [",
-            "    {'feature_name': 'Flavour', 'feature_value': 'Matcha'},",
-            "    {'feature_name': 'Produktsegment (SD Reporting)', 'feature_value': 'Quark/Topfen'},",
-            "    {'feature_name': 'Stärke', 'feature_value': 'Stärke enthalten'},",
-            "    {'feature_name': 'Künstliche Farben', 'feature_value': 'keine künstl. Farbe'},",
-            "    {'feature_name': 'Natürliche Aromen', 'feature_value': 'Natürliches Aroma'},",
-            "    {'feature_name': 'HALAL', 'feature_value': 'suitable HALAL'},",
-            "    {'feature_name': 'KOSHER', 'feature_value': 'suitable KOSHER'},",
-            "    {'feature_name': 'VEGAN', 'feature_value': 'suitable VEGAN'},",
-            "    {'feature_name': 'Flüssig/Stückig', 'feature_value': 'Stückig'},",
-            "    {'feature_name': 'Allergene', 'feature_value': 'Allergenfrei'}",
+            '  "search_type": "two_step",',
+            '  "text_description": "Rich searchable description with product type, flavor, application, texture, key attributes",',
+            '  "features": [',
+            '    {"feature_name": "Flavour", "feature_value": "Matcha"},',
+            '    {"feature_name": "Produktsegment (SD Reporting)", "feature_value": "Quark/Topfen"},',
+            '    {"feature_name": "Stärke", "feature_value": "Stärke enthalten"},',
+            '    {"feature_name": "Künstliche Farben", "feature_value": "keine künstl. Farbe"},',
+            '    {"feature_name": "Natürliche Aromen", "feature_value": "Natürliches Aroma"},',
+            '    {"feature_name": "HALAL", "feature_value": "suitable HALAL"},',
+            '    {"feature_name": "KOSHER", "feature_value": "suitable KOSHER"},',
+            '    {"feature_name": "VEGAN", "feature_value": "suitable VEGAN"},',
+            '    {"feature_name": "Flüssig/Stückig", "feature_value": "Stückig"},',
+            '    {"feature_name": "Allergene", "feature_value": "Allergenfrei"}',
             "  ],",
-            "  'reasoning': 'Brief explanation of extraction choices'",
+            '  "reasoning": "Brief explanation of extraction choices"',
             "}",
+            "",
+            "CRITICAL: Your response MUST be valid JSON with double quotes, not Python dict syntax with single quotes.",
             "",
             "=" * 80,
             "EXTRACTION RULES:",
@@ -173,15 +187,15 @@ class DataExtractorRouterAgent:
             "   - This is CRITICAL for matching against the 600K recipe database.",
             "   - Example: Brief mentions 'Gyros, BBQ, Pumpkin Spice' → Flavour: 'Gyros, Honey BBQ, Pumpkin Spice'",
             "2. STABILIZERS: Use database format values, NOT 'Yes'/'No':",
-            "   - Starch allowed → {'feature_name': 'Stärke', 'feature_value': 'Stärke enthalten'}",
-            "   - No starch → {'feature_name': 'Stärke', 'feature_value': 'Keine Stärke'}",
+            '   - Starch allowed → {"feature_name": "Stärke", "feature_value": "Stärke enthalten"}',
+            '   - No starch → {"feature_name": "Stärke", "feature_value": "Keine Stärke"}',
             "3. CERTIFICATIONS: Use database format values:",
-            "   - Halal required → {'feature_name': 'HALAL', 'feature_value': 'suitable HALAL'}",
-            "   - Kosher certified → {'feature_name': 'KOSHER', 'feature_value': 'certified KOSHER'}",
-            "   - Vegan → {'feature_name': 'VEGAN', 'feature_value': 'suitable VEGAN'}",
+            '   - Halal required → {"feature_name": "HALAL", "feature_value": "suitable HALAL"}',
+            '   - Kosher certified → {"feature_name": "KOSHER", "feature_value": "certified KOSHER"}',
+            '   - Vegan → {"feature_name": "VEGAN", "feature_value": "suitable VEGAN"}',
             "4. COLORS: Use German format:",
-            "   - No artificial colors → {'feature_name': 'Künstliche Farben', 'feature_value': 'keine künstl. Farbe'}",
-            "   - No coloring agent → {'feature_name': 'Farbe', 'feature_value': 'Keine Farbe enthalten'}",
+            '   - No artificial colors → {"feature_name": "Künstliche Farben", "feature_value": "keine künstl. Farbe"}',
+            '   - No coloring agent → {"feature_name": "Farbe", "feature_value": "Keine Farbe enthalten"}',
             "5. pH/BRIX: Always use MIN-MAX format with dash (e.g., '3.0-4.1', '25-35')",
             "   - If '<4.1' given, use '3.0-4.1'",
             "   - If '30±5' given, convert to '25-35'",
@@ -353,13 +367,23 @@ Extract the key information and decide on the appropriate search strategy.
 Provide your response as a JSON object following the specified format.
 """
 
-            # Get response from agent
+            # Get response from OpenAI API directly with temperature=0.0
             logger.info("Extracting information from supplier brief...")
-            response = self.agent.run(prompt)
+            logger.info(f"Using model: {self.model_name} with temperature=0.0 for deterministic extraction")
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0,  # Deterministic extraction
+                max_tokens=4000
+                # Note: response_format json_object only works with gpt-4o, gpt-4-turbo, gpt-3.5-turbo-0125+
+                # We rely on explicit prompt instructions for JSON format instead
+            )
 
             # Parse the response
-            response_content = str(response.content) if hasattr(
-                response, 'content') else str(response)
+            response_content = response.choices[0].message.content
             result = self._parse_agent_response(response_content)
 
             # If two-step search, convert features to DataFrame
