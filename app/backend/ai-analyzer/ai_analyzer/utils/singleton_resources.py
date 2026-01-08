@@ -78,7 +78,7 @@ class ResourceManager:
                     self.qdrant_client = QdrantClient(
                         host="qdrant",
                         port=6333,
-                        timeout=10.0,
+                        timeout=60.0,  # Increased from 10s to 60s for large databases (600K recipes)
                         prefer_grpc=False  # Force HTTP for better stability
                     )
                     logger.info(

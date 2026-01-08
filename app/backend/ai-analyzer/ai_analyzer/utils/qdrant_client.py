@@ -25,7 +25,7 @@ def get_qdrant_client() -> QdrantClient:
                 _qdrant_client = QdrantClient(
                     host="qdrant",
                     port=6333,
-                    timeout=10.0  # Add explicit timeout
+                    timeout=60.0  # Increased to 60s for large databases (600K recipes)
                 )
                 # Test the connection
                 try:
@@ -70,7 +70,7 @@ def search_qdrant_with_retry(client: QdrantClient, collection_name: str, query_v
             query_vector=(
                 "fast-paraphrase-multilingual-minilm-l12-v2", query_vector),
             limit=limit,
-            timeout=5
+            timeout=30  # Increased from 5s to 30s for large databases
         )
     except Exception as e:
         logger.error(f"Qdrant search error: {e}")

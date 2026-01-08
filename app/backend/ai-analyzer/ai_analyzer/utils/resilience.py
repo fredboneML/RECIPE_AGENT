@@ -92,7 +92,7 @@ def search_qdrant_safely(client, collection_name, query_vector, **kwargs):
     """Execute Qdrant search with circuit breaker and retry logic"""
     # Ensure timeout is set and is an integer
     if 'timeout' not in kwargs:
-        kwargs['timeout'] = 5
+        kwargs['timeout'] = 30  # Increased from 5s to 30s for large databases (600K recipes)
     else:
         kwargs['timeout'] = int(kwargs['timeout'])
 

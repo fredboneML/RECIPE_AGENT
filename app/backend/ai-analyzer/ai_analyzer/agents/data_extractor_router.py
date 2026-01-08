@@ -367,9 +367,9 @@ Extract the key information and decide on the appropriate search strategy.
 Provide your response as a JSON object following the specified format.
 """
 
-            # Get response from OpenAI API directly with temperature=0.0
+            # Get response from OpenAI API directly with temperature=0.0 + seed for full determinism
             logger.info("Extracting information from supplier brief...")
-            logger.info(f"Using model: {self.model_name} with temperature=0.0 for deterministic extraction")
+            logger.info(f"Using model: {self.model_name} with temperature=0.0 and seed=42 for fully deterministic extraction")
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
@@ -377,6 +377,7 @@ Provide your response as a JSON object following the specified format.
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.0,  # Deterministic extraction
+                seed=42,  # Fixed seed for reproducible results (required for full determinism)
                 max_tokens=4000
                 # Note: response_format json_object only works with gpt-4o, gpt-4-turbo, gpt-3.5-turbo-0125+
                 # We rely on explicit prompt instructions for JSON format instead
