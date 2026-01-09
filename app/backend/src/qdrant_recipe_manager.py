@@ -74,12 +74,15 @@ class QdrantRecipeManager:
         self.qdrant_host = qdrant_host
         self.qdrant_port = qdrant_port
 
-        # Initialize Qdrant client
+        # Initialize Qdrant client with increased timeout for large databases
         try:
             self.qdrant_client = QdrantClient(
-                host=qdrant_host, port=qdrant_port)
+                host=qdrant_host, 
+                port=qdrant_port,
+                timeout=120.0  # 2 minutes timeout for 600K+ recipe database
+            )
             logger.info(
-                f"Connected to Qdrant at {qdrant_host}:{qdrant_port}")
+                f"Connected to Qdrant at {qdrant_host}:{qdrant_port} with 120s timeout")
         except Exception as e:
             logger.error(f"Failed to connect to Qdrant: {e}")
             raise
@@ -498,7 +501,8 @@ class QdrantRecipeManager:
                     query_filter=query_filter,
                     limit=top_k,
                     with_payload=True,
-                    with_vectors=False
+                    with_vectors=False,
+                    timeout=60  # Increased timeout for large databases with filters
                 )
             except Exception as e:
                 logger.warning(f"Feature vector search failed: {e}")
@@ -591,7 +595,8 @@ class QdrantRecipeManager:
                     query_filter=query_filter,
                     limit=top_k,
                     with_payload=True,
-                    with_vectors=False
+                    with_vectors=False,
+                    timeout=60  # Increased timeout for large databases with filters
                 )
             except Exception as e:
                 logger.warning(
@@ -603,7 +608,8 @@ class QdrantRecipeManager:
                     query_filter=query_filter,
                     limit=top_k,
                     with_payload=True,
-                    with_vectors=False
+                    with_vectors=False,
+                    timeout=60  # Increased timeout for large databases with filters
                 )
 
             # Format results
@@ -916,7 +922,8 @@ class QdrantRecipeManager:
                 scroll_filter=exact_filter,
                 limit=10,  # Get a few results to find the best match
                 with_payload=True,
-                with_vectors=False
+                with_vectors=False,
+                timeout=60  # Increased timeout for large databases with filters
             )
 
             if scroll_results and len(scroll_results) > 0:
@@ -1229,7 +1236,8 @@ class QdrantRecipeManager:
                                 scroll_filter=keyword_filter,
                                 limit=100,  # Get up to 100 matches per keyword per field
                                 with_payload=True,
-                                with_vectors=False
+                                with_vectors=False,
+                                timeout=60  # Increased timeout for large databases
                             )
 
                             if scroll_results:
@@ -1709,7 +1717,8 @@ class QdrantRecipeManager:
                 collection_name=self.collection_name,
                 limit=100,
                 with_payload=True,
-                with_vectors=False
+                with_vectors=False,
+                timeout=30  # Timeout for sample retrieval
             )[0]
 
             recipes_list = []
