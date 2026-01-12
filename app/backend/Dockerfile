@@ -4,6 +4,7 @@ FROM python:3.12-slim
 # Add curl for health checks and system dependencies
 # Install libmagic1 and tesseract-ocr for document processing and OCR
 # Install OpenGL and OpenCV dependencies for unstructured library
+# Install LibreOffice for .doc/.docx file processing
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     curl \
@@ -13,6 +14,8 @@ RUN apt-get update && \
     python3-dev \
     libmagic1 \
     tesseract-ocr \
+    libreoffice \
+    libreoffice-writer \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
