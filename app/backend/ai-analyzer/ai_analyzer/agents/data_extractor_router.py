@@ -94,17 +94,25 @@ class DataExtractorRouterAgent:
             "=" * 80,
             "TEXT DESCRIPTION (CRITICAL FOR SEARCH):",
             "=" * 80,
-            "Create a RICH, SEARCHABLE description (3-5 sentences) that includes:",
-            "- Product type: fruit preparation, fruit filling, compound, puree, etc.",
-            "- Application: yogurt, ice cream, bakery, beverage, dairy, quark/skyr",
-            "- Main flavor(s): Matcha, Peach, Strawberry, Vanilla, etc.",
-            "- Texture: with pieces, smooth, chunky, liquid (Flüssig/Stückig)",
-            "- Key attributes: organic, natural, no artificial colors, low sugar, etc.",
+            "⚠️  CRITICAL: DO NOT HALLUCINATE OR ADD INFORMATION NOT PRESENT IN THE BRIEF!",
+            "⚠️  ONLY include details that are EXPLICITLY mentioned or clearly implied in the input.",
+            "⚠️  For short queries (just a recipe name), keep description SHORT and factual.",
+            "",
+            "Guidelines for creating text_description:",
+            "- If brief is DETAILED (multiple paragraphs): Create a rich 3-5 sentence description",
+            "- If brief is SHORT (just a name/flavor): Create a SHORT 1-sentence description using ONLY what's given",
+            "- NEVER invent details like 'rich in flavor', 'smooth texture', 'no artificial colors' unless EXPLICITLY stated",
+            "- Include ONLY information from the brief:",
+            "  * Product type: ONLY if mentioned (fruit preparation, fruit filling, compound, puree, etc.)",
+            "  * Application: ONLY if mentioned (yogurt, ice cream, bakery, beverage, dairy, quark/skyr, cheese)",
+            "  * Main flavor(s): ALWAYS extract (this is usually present)",
+            "  * Texture: ONLY if explicitly stated (with pieces, smooth, chunky, liquid)",
+            "  * Key attributes: ONLY if explicitly stated (organic, natural, no artificial colors, low sugar, etc.)",
             "",
             "EXAMPLE TEXT DESCRIPTIONS:",
-            "- 'Matcha tea fruit preparation for skyr and quark application, natural flavor, starch stabilized, no artificial colors, with pieces'",
-            "- 'Peach apricot fruit filling for yogurt, contains pectin stabilizer, halal and kosher certified, smooth texture'",
-            "- 'Strawberry fruit preparation for ice cream application, organic certified, no added sugar, with fruit pieces'",
+            "- DETAILED BRIEF → 'Matcha tea fruit preparation for skyr and quark application, natural flavor, starch stabilized, no artificial colors, with pieces'",
+            "- SHORT QUERY ('Mango Chutney für Ofenkäse') → 'Mango chutney for baked cheese'  ← KEEP IT SHORT!",
+            "- SHORT QUERY ('Strawberry organic') → 'Strawberry, organic certified'  ← DO NOT ADD texture, colors, etc.",
             "",
             "=" * 80,
             "FEATURE EXTRACTION - DATABASE FIELD NAMES (charactDescr):",
@@ -182,6 +190,14 @@ class DataExtractorRouterAgent:
             "=" * 80,
             "EXTRACTION RULES:",
             "=" * 80,
+            "0. ⚠️  ANTI-HALLUCINATION RULE (MOST IMPORTANT!):",
+            "   - DO NOT invent, assume, or infer ANY information not explicitly in the brief",
+            "   - DO NOT add common-sense defaults ('smooth texture', 'no artificial colors', etc.)",
+            "   - ONLY extract features that are CLEARLY STATED in the input text",
+            "   - For short queries (< 20 words), extract MINIMAL features and keep description SHORT",
+            "   - If a feature is not mentioned, DO NOT extract it - leave it out entirely",
+            "   - Example: 'Mango Chutney für Ofenkäse' → ONLY extract Flavour and Produktsegment, nothing else!",
+            "",
             "1. FLAVOR: Extract ALL distinct flavors mentioned in the brief, separated by commas.",
             "   - If multiple flavor options are listed, include ALL of them (e.g., 'Gyros, Honey BBQ, Lime-Mint').",
             "   - This is CRITICAL for matching against the 600K recipe database.",
@@ -356,13 +372,30 @@ EXTRACTED DOCUMENT CONTENT:
                 logger.info("Processing supplier brief from text input only")
                 combined_brief = supplier_brief
 
+            # Detect if this is a short query (likely just a recipe name)
+            is_short_query = len(combined_brief.strip()) < 50 and len(combined_brief.split()) < 10
+            
+            if is_short_query:
+                logger.info(f"Detected SHORT QUERY (length={len(combined_brief)}, words={len(combined_brief.split())})")
+                short_query_instruction = """
+⚠️  SPECIAL MODE: SHORT QUERY DETECTED
+This is likely just a recipe name or simple search term.
+DO NOT elaborate or add details!
+- text_description: Keep it SHORT - just translate/normalize the input (1 sentence maximum)
+- features: Extract ONLY what's obvious from the name (usually just Flavour and maybe Produktsegment)
+- DO NOT infer texture, colors, stabilizers, or other attributes
+Example: "Mango Chutney für Ofenkäse" → text_description: "Mango chutney for baked cheese"
+"""
+            else:
+                short_query_instruction = ""
+
             # Prepare the prompt
             prompt = f"""
 Analyze the following supplier project brief and extract relevant recipe information:
 
 SUPPLIER BRIEF:
 {combined_brief}
-
+{short_query_instruction}
 Extract the key information and decide on the appropriate search strategy.
 Provide your response as a JSON object following the specified format.
 """
