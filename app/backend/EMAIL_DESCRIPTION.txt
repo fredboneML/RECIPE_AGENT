@@ -1,0 +1,29 @@
+EXCEL OUTPUT - SHEET DESCRIPTIONS
+==================================
+
+This Excel file contains extracted recipe data organized into 5 sheets:
+
+1. SPECIFIC_FIELDS
+   Contains the three requested fields: Z_FRUCHTG, Z_INH02, and Z_INH19 with their values, descriptions, and types.
+
+2. CLASSIFICATION_CHAR
+   All character-based classification fields (text values) from the recipe, such as "Süßstoff", "Aspartam", "Industrie", etc.
+
+3. CLASSIFICATION_NUM
+   All numeric classification fields from the recipe, such as Brix, Fruchtgehalt, temperatures, etc.
+
+4. SUMMARY
+   Overview metadata showing which fields were found, total counts, and recipe information.
+
+5. CONSOLIDATED
+   Unified view combining all fields in one table with 5 columns:
+   - Field_Type: 'Z_FRUCHTG', 'Z_INH02', 'Z_INH19', or 'Classification'
+   - Characteristic_Code: The Z_... field identifier
+   - Description: Human-readable description
+   - Value: The corresponding value
+   - Sort: Empty column for user-defined sorting
+
+SORT COLUMN PURPOSE:
+The Sort column in the Consolidated sheet is intentionally left empty for you to define your own sorting logic. You can add numeric values, category labels, or any sorting scheme to organize the data according to your business needs. This allows custom ordering without modifying the source data.
+
+All sheets are filterable and sortable in Excel for easy analysis.
