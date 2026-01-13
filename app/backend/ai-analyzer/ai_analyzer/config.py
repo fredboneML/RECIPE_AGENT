@@ -64,7 +64,12 @@ def load_env_once():
             'MODEL_NAME': os.getenv('MODEL_NAME', 'gpt-4o-mini-2024-07-18'),
             'JWT_SECRET_KEY': os.getenv('JWT_SECRET_KEY'),
             'JWT_ALGORITHM': os.getenv('JWT_ALGORITHM', "HS256"),
-            'ACCESS_TOKEN_EXPIRE_MINUTES': int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 60 * 24))
+            'ACCESS_TOKEN_EXPIRE_MINUTES': int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 60 * 24)),
+            # Azure AD SSO Configuration
+            'AZURE_AD_TENANT_ID': os.getenv('AZURE_AD_TENANT_ID'),
+            'AZURE_AD_CLIENT_ID': os.getenv('AZURE_AD_CLIENT_ID'),
+            'SSO_ENABLED': os.getenv('SSO_ENABLED', 'true').lower() == 'true',
+            'LOCAL_AUTH_ENABLED': os.getenv('LOCAL_AUTH_ENABLED', 'true').lower() == 'true',
         }
 
         # Validate required configuration
@@ -101,6 +106,12 @@ try:
     JWT_SECRET_KEY = config['JWT_SECRET_KEY']
     JWT_ALGORITHM = config['JWT_ALGORITHM']
     ACCESS_TOKEN_EXPIRE_MINUTES = config['ACCESS_TOKEN_EXPIRE_MINUTES']
+
+    # Export Azure AD SSO configuration
+    AZURE_AD_TENANT_ID = config['AZURE_AD_TENANT_ID']
+    AZURE_AD_CLIENT_ID = config['AZURE_AD_CLIENT_ID']
+    SSO_ENABLED = config['SSO_ENABLED']
+    LOCAL_AUTH_ENABLED = config['LOCAL_AUTH_ENABLED']
 
 except Exception as e:
     logger.error(f"Failed to initialize configuration: {e}")

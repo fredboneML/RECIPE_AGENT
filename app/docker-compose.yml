@@ -60,6 +60,11 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - JWT_ALGORITHM=${JWT_ALGORITHM}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      # Azure AD SSO Configuration
+      - AZURE_AD_TENANT_ID=${AZURE_AD_TENANT_ID}
+      - AZURE_AD_CLIENT_ID=${AZURE_AD_CLIENT_ID}
+      - SSO_ENABLED=${SSO_ENABLED:-true}
+      - LOCAL_AUTH_ENABLED=${LOCAL_AUTH_ENABLED:-true}
       # Add CORS allowed origins
       - ALLOWED_ORIGINS=http://localhost:3000,http://108.143.207.17:3000,http://127.0.0.1:3000,https://recipe-agent-agrana.westeurope.cloudapp.azure.com
       # Add host environment variable

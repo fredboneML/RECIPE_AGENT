@@ -7,7 +7,10 @@ from ai_analyzer.data_import_postgresql import (
     UserMemory,
     store_conversation
 )
-from ai_analyzer.config import config, DATABASE_URL, JWT_SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from ai_analyzer.config import (
+    config, DATABASE_URL, JWT_SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES,
+    AZURE_AD_TENANT_ID, AZURE_AD_CLIENT_ID, SSO_ENABLED, LOCAL_AUTH_ENABLED
+)
 from fastapi import FastAPI, Request, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text, func
@@ -26,6 +29,10 @@ from pydantic import BaseModel
 from jose import JWTError, jwt
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from unstructured.partition.auto import partition
+
+# Azure AD SSO imports
+from ai_analyzer.auth import azure_ad_validator, role_mapper
+from ai_analyzer.auth.models import AzureADUser, AzureADGroupMapping, CREATE_TABLES_SQL
 
 
 # JWT Configuration
@@ -353,6 +360,13 @@ async def health_check(current_user: User = Depends(get_current_user)):
 # API to handle login
 @app.post("/api/login")
 async def login(request: Request, db: Session = Depends(get_db)):
+    # Check if local authentication is enabled
+    if not LOCAL_AUTH_ENABLED:
+        raise HTTPException(
+            status_code=400,
+            detail="Local authentication is disabled. Please use SSO."
+        )
+
     try:
         data = await request.json()
         username = data['username']
@@ -406,6 +420,233 @@ async def login(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Login error: {e}")
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+# ============================================================================
+# Azure AD SSO Endpoints
+# ============================================================================
+
+class AzureAuthRequest(BaseModel):
+    """Request model for Azure AD authentication"""
+    id_token: str
+
+
+class AzureAuthResponse(BaseModel):
+    """Response model for Azure AD authentication"""
+    success: bool
+    access_token: str
+    token_type: str = "bearer"
+    username: str
+    email: str
+    role: str
+    permissions: dict
+    auth_method: str = "azure_ad"
+
+
+@app.get("/api/auth/config")
+async def get_auth_config(request: Request):
+    """Return authentication configuration for frontend"""
+    base_url = str(request.base_url).rstrip('/')
+
+    return {
+        "sso_enabled": SSO_ENABLED,
+        "local_auth_enabled": LOCAL_AUTH_ENABLED,
+        "azure_ad": {
+            "client_id": AZURE_AD_CLIENT_ID,
+            "authority": f"https://login.microsoftonline.com/{AZURE_AD_TENANT_ID}" if AZURE_AD_TENANT_ID else None,
+            "redirect_uri": f"{base_url}/auth/callback",
+            "scopes": ["openid", "profile", "email", "User.Read"]
+        } if SSO_ENABLED and AZURE_AD_TENANT_ID and AZURE_AD_CLIENT_ID else None
+    }
+
+
+@app.post("/api/auth/azure-callback", response_model=AzureAuthResponse)
+async def azure_ad_callback(
+    auth_request: AzureAuthRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Handle Azure AD authentication callback.
+    Validates Azure AD token and issues internal JWT.
+    """
+    if not SSO_ENABLED:
+        raise HTTPException(status_code=400, detail="SSO is not enabled")
+
+    if not azure_ad_validator.is_configured():
+        raise HTTPException(
+            status_code=500,
+            detail="Azure AD is not properly configured"
+        )
+
+    logger.info("Processing Azure AD authentication callback")
+
+    # Validate Azure AD token
+    claims = await azure_ad_validator.validate_token(auth_request.id_token)
+
+    if not claims:
+        logger.warning("Azure AD token validation failed")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired Azure AD token"
+        )
+
+    # Extract user info
+    user_info = azure_ad_validator.extract_user_info(claims)
+    azure_oid = user_info['oid']
+    email = user_info['email']
+    display_name = user_info.get('name') or email
+    groups = user_info['groups']
+
+    if not azure_oid or not email:
+        raise HTTPException(
+            status_code=401,
+            detail="Required claims missing from token"
+        )
+
+    logger.info(f"Azure AD user authenticated: {email}, groups: {len(groups)}")
+
+    # Map groups to application role
+    app_role = role_mapper.map_groups_to_role(db, groups)
+
+    # Find or create Azure AD user record
+    azure_user = db.query(AzureADUser).filter_by(azure_oid=azure_oid).first()
+
+    if not azure_user:
+        # Create new Azure AD user
+        azure_user = AzureADUser(
+            azure_oid=azure_oid,
+            email=email,
+            display_name=display_name,
+            is_active=True
+        )
+        db.add(azure_user)
+        logger.info(f"Created new Azure AD user record for: {email}")
+    else:
+        # Update last login
+        azure_user.last_login = datetime.utcnow()
+        azure_user.display_name = display_name
+
+    # Find or create linked local user
+    local_user = db.query(User).filter_by(username=email).first()
+
+    if not local_user:
+        # Create local user linked to Azure AD
+        local_user = User(
+            username=email,
+            password_hash="AZURE_AD_SSO_USER",  # Marker for SSO users
+            role=app_role
+        )
+        db.add(local_user)
+        db.flush()  # Get the ID
+        azure_user.local_user_id = local_user.id
+        logger.info(f"Created local user for Azure AD user: {email}")
+    else:
+        # Update role if changed based on group membership
+        if local_user.role != app_role:
+            logger.info(f"Updating role for {email}: {local_user.role} -> {app_role}")
+            local_user.role = app_role
+        azure_user.local_user_id = local_user.id
+
+    db.commit()
+
+    # Create internal JWT
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={
+            "sub": email,
+            "role": app_role,
+            "auth_method": "azure_ad",
+            "azure_oid": azure_oid
+        },
+        expires_delta=access_token_expires
+    )
+
+    logger.info(f"Issued internal JWT for Azure AD user: {email}")
+
+    return AzureAuthResponse(
+        success=True,
+        access_token=access_token,
+        username=display_name,
+        email=email,
+        role=app_role,
+        permissions={
+            "canWrite": app_role in ['admin', 'write']
+        }
+    )
+
+
+@app.get("/api/admin/group-mappings")
+async def get_group_mappings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all Azure AD group mappings (admin only)"""
+    if current_user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return role_mapper.get_all_mappings(db)
+
+
+@app.post("/api/admin/group-mappings")
+async def create_group_mapping(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create or update a group mapping (admin only)"""
+    if current_user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    data = await request.json()
+
+    # Validate required fields
+    required_fields = ['group_id', 'group_name', 'app_role']
+    for field in required_fields:
+        if field not in data:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required field: {field}"
+            )
+
+    try:
+        mapping = role_mapper.add_group_mapping(
+            db,
+            group_id=data['group_id'],
+            group_name=data['group_name'],
+            app_role=data['app_role']
+        )
+        return {
+            "success": True,
+            "mapping": {
+                "group_id": mapping.group_id,
+                "group_name": mapping.group_name,
+                "app_role": mapping.app_role
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/admin/group-mappings/{group_id}")
+async def delete_group_mapping(
+    group_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a group mapping (admin only)"""
+    if current_user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    success = role_mapper.delete_group_mapping(db, group_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Group mapping not found")
+
+    return {"success": True}
+
+
+# ============================================================================
+# End Azure AD SSO Endpoints
+# ============================================================================
 
 
 # Update the QueryRequest model to handle both 'query' and 'question'
