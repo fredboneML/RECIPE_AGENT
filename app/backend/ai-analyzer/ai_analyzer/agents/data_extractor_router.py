@@ -7,6 +7,7 @@ This agent is responsible for:
 2. Preparing data for two-step feature-based search
 3. Structuring the search query with features and text description
 4. Using intelligent feature mappings for multilingual/synonym support
+5. Extracting numerical constraints (Brix >40, pH <4.1, etc.) for range filtering
 """
 import logging
 import re
@@ -18,6 +19,18 @@ from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from openai import OpenAI
 from ai_analyzer.config import config
+
+# Import numerical constraint parser for range queries
+try:
+    from ai_analyzer.utils.numerical_constraint_parser import (
+        parse_numerical_constraints_from_brief,
+        constraints_to_qdrant_filters,
+        NumericalConstraint,
+        FIELD_CODE_INFO
+    )
+    NUMERICAL_PARSER_AVAILABLE = True
+except ImportError:
+    NUMERICAL_PARSER_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -182,6 +195,13 @@ class DataExtractorRouterAgent:
             '    {"feature_name": "Flüssig/Stückig", "feature_value": "Stückig"},',
             '    {"feature_name": "Allergene", "feature_value": "Allergenfrei"}',
             "  ],",
+            '  "numerical_constraints": [',
+            '    {"field": "Brix", "constraint": ">40"},',
+            '    {"field": "pH", "constraint": "<4.1"},',
+            '    {"field": "Fruit content", "constraint": ">30%"},',
+            '    {"field": "Viscosity", "constraint": "6-9"},',
+            '    {"field": "Fat content", "constraint": "58±2%"}',
+            "  ],",
             '  "reasoning": "Brief explanation of extraction choices"',
             "}",
             "",
@@ -212,9 +232,14 @@ class DataExtractorRouterAgent:
             "4. COLORS: Use German format:",
             '   - No artificial colors → {"feature_name": "Künstliche Farben", "feature_value": "keine künstl. Farbe"}',
             '   - No coloring agent → {"feature_name": "Farbe", "feature_value": "Keine Farbe enthalten"}',
-            "5. pH/BRIX: Always use MIN-MAX format with dash (e.g., '3.0-4.1', '25-35')",
-            "   - If '<4.1' given, use '3.0-4.1'",
-            "   - If '30±5' given, convert to '25-35'",
+            "5. pH/BRIX/NUMERICAL VALUES: Report EXACT constraints found in brief - DO NOT normalize to ranges!",
+            "   - For '<4.1', report as '<4.1' (we will parse this separately)",
+            "   - For '>30%', report as '>30%'",
+            "   - For '30±5' or '30+/-5', report as '30±5'",
+            "   - For '6-9', report as '6-9'",
+            "   - For 'max 12mm', report as 'max 12'",
+            "   - For 'min 3 months', report as 'min 3'",
+            "   - CRITICAL: We need the ORIGINAL constraint format for Qdrant range filtering!",
             "6. PRODUKTSEGMENT (SD Reporting): Extract the EXACT value from the brief:",
             "   - Look for 'Produktsegment (SD Reporting): [VALUE]' in the brief",
             "   - Use the EXACT value shown (e.g., 'Käse', 'Quark/Topfen', 'Joghurt', 'Eiscreme', 'Backwaren', 'Molkerei')",
@@ -431,6 +456,33 @@ Provide your response as a JSON object following the specified format.
                 result['features_df'] = features_df
             else:
                 result['features_df'] = None
+            
+            # ============================================================
+            # NUMERICAL CONSTRAINTS: Parse and convert to Qdrant filters
+            # ============================================================
+            numerical_filters = {}
+            
+            if NUMERICAL_PARSER_AVAILABLE:
+                # Method 1: Parse from raw brief text (catches structured tables)
+                try:
+                    text_constraints = parse_numerical_constraints_from_brief(combined_brief)
+                    if text_constraints:
+                        numerical_filters.update(constraints_to_qdrant_filters(text_constraints))
+                        logger.info(f"Extracted {len(text_constraints)} numerical constraints from brief text")
+                except Exception as e:
+                    logger.warning(f"Error parsing numerical constraints from text: {e}")
+                
+                # Method 2: Parse from LLM-extracted numerical_constraints
+                llm_constraints = result.get('numerical_constraints', [])
+                if llm_constraints:
+                    try:
+                        parsed_llm = self._parse_llm_numerical_constraints(llm_constraints)
+                        numerical_filters.update(parsed_llm)
+                        logger.info(f"Parsed {len(parsed_llm)} numerical constraints from LLM output")
+                    except Exception as e:
+                        logger.warning(f"Error parsing LLM numerical constraints: {e}")
+            
+            result['numerical_filters'] = numerical_filters
 
             logger.info(
                 f"Extraction completed. Search type: {result['search_type']}")
@@ -469,6 +521,16 @@ Provide your response as a JSON object following the specified format.
                 logger.info("  No features extracted")
             logger.info("-" * 40)
 
+            # Log numerical constraints
+            logger.info("NUMERICAL CONSTRAINTS (for Qdrant range filtering):")
+            logger.info("-" * 40)
+            if result.get('numerical_filters'):
+                for field_code, qdrant_filter in result['numerical_filters'].items():
+                    logger.info(f"  {field_code}: {qdrant_filter}")
+            else:
+                logger.info("  No numerical constraints extracted")
+            logger.info("-" * 40)
+            
             # Log reasoning
             logger.info("EXTRACTION REASONING:")
             logger.info("-" * 40)
@@ -485,8 +547,79 @@ Provide your response as a JSON object following the specified format.
                 'search_type': 'two_step',
                 'text_description': document_text if document_text else supplier_brief,
                 'features_df': None,
+                'numerical_filters': {},
                 'reasoning': f'Error in extraction: {str(e)}. Falling back to two-step search with text only.'
             }
+
+    def _parse_llm_numerical_constraints(self, llm_constraints: List[Dict[str, str]]) -> Dict[str, Dict[str, Any]]:
+        """
+        Parse numerical constraints from LLM output format to Qdrant filter format.
+        
+        LLM output format:
+            [{"field": "Brix", "constraint": ">40"}, ...]
+        
+        Returns:
+            Dict mapping field_code to Qdrant range filter
+            {"Z_BRIX": {"gt": 40}, ...}
+        """
+        if not NUMERICAL_PARSER_AVAILABLE:
+            return {}
+        
+        from ai_analyzer.utils.numerical_constraint_parser import (
+            parse_constraint_text,
+            BRIEF_FIELD_TO_CODE,
+            NumericalConstraint,
+            FIELD_CODE_INFO
+        )
+        
+        filters = {}
+        
+        for item in llm_constraints:
+            field_name = item.get('field', '').lower().strip()
+            constraint_text = item.get('constraint', '')
+            
+            if not field_name or not constraint_text:
+                continue
+            
+            # Map field name to Z_* code
+            field_code = BRIEF_FIELD_TO_CODE.get(field_name)
+            
+            # Try partial matching if exact match not found
+            if not field_code:
+                for brief_name, code in BRIEF_FIELD_TO_CODE.items():
+                    if brief_name in field_name or field_name in brief_name:
+                        field_code = code
+                        break
+            
+            if not field_code:
+                logger.warning(f"Could not map field '{field_name}' to Z_* code")
+                continue
+            
+            # Parse the constraint
+            operator, val1, val2 = parse_constraint_text(constraint_text)
+            
+            if operator == 'unknown':
+                logger.warning(f"Could not parse constraint '{constraint_text}' for field '{field_name}'")
+                continue
+            
+            # Build Qdrant filter
+            if operator == 'gt':
+                filters[field_code] = {"gt": val1}
+            elif operator == 'gte':
+                filters[field_code] = {"gte": val1}
+            elif operator == 'lt':
+                filters[field_code] = {"lt": val1}
+            elif operator == 'lte':
+                filters[field_code] = {"lte": val1}
+            elif operator == 'range':
+                filters[field_code] = {"gte": val1, "lte": val2}
+            elif operator == 'eq':
+                # For exact match, use small range
+                filters[field_code] = {"gte": val1 - 0.01, "lte": val1 + 0.01}
+            
+            logger.info(f"Parsed constraint: {field_name} ({field_code}) {constraint_text} → {filters[field_code]}")
+        
+        return filters
 
     def _parse_agent_response(self, response_text: str) -> Dict[str, Any]:
         """Parse the agent's JSON response"""
@@ -516,6 +649,8 @@ Provide your response as a JSON object following the specified format.
                 result['text_description'] = response_text
             if 'features' not in result:
                 result['features'] = []
+            if 'numerical_constraints' not in result:
+                result['numerical_constraints'] = []
             if 'reasoning' not in result:
                 result['reasoning'] = 'No reasoning provided'
 
@@ -528,6 +663,7 @@ Provide your response as a JSON object following the specified format.
                 'search_type': 'two_step',
                 'text_description': response_text,
                 'features': [],
+                'numerical_constraints': [],
                 'reasoning': 'Failed to parse structured response. Using two-step search with text only.'
             }
 

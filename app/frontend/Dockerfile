@@ -34,18 +34,18 @@ RUN \
     mkdir -p /home/${existing_user}/.npm /home/${existing_user}/.npm-global && \
     chown -R ${USER_ID}:${GROUP_ID} /home/${existing_user}
 
-# Set npm configuration
-ENV NPM_CONFIG_PREFIX=/home/appuser/.npm-global
-ENV PATH="/home/appuser/.npm-global/bin:$PATH"
-ENV NPM_CONFIG_CACHE=/home/appuser/.npm
+# Set npm configuration - use node user's home since that's the default user with ID 1000
+ENV NPM_CONFIG_PREFIX=/home/node/.npm-global
+ENV PATH="/home/node/.npm-global/bin:$PATH"
+ENV NPM_CONFIG_CACHE=/home/node/.npm
 
 # Copy package files
 COPY package*.json ./
 
 # Set permissions and install dependencies as root, then fix permissions
-RUN chown -R ${USER_ID}:${GROUP_ID} /usr/src/app && \
-    mkdir -p /home/appuser/.npm && \
-    chown -R ${USER_ID}:${GROUP_ID} /home/appuser/.npm && \
+RUN mkdir -p /home/node/.npm /home/node/.npm-global && \
+    chown -R ${USER_ID}:${GROUP_ID} /home/node/.npm /home/node/.npm-global && \
+    chown -R ${USER_ID}:${GROUP_ID} /usr/src/app && \
     npm install && \
     mkdir -p node_modules/.cache && \
     chmod -R 777 node_modules/.cache && \

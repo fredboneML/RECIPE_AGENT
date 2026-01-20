@@ -775,3 +775,126 @@
         padding: 8px 6px;
     }
 }
+
+/* ============================================
+   NEW STRUCTURED TABLE FORMAT - 60 Fields
+   ============================================ */
+
+.comparison-table.structured {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.comparison-table.structured thead {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+}
+
+.comparison-table.structured th,
+.comparison-table.structured td {
+    padding: 10px 12px;
+    text-align: left;
+    border: 1px solid #dee2e6;
+    white-space: nowrap;
+}
+
+/* Sticky Code column */
+.comparison-table.structured .sticky-col {
+    position: sticky;
+    left: 0;
+    z-index: 10;
+    background-color: #f1f3f5;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 0.85em;
+    color: #6c757d;
+    min-width: 120px;
+}
+
+.comparison-table.structured thead .sticky-col {
+    z-index: 25;
+    background-color: #2c3e50;
+    color: white;
+}
+
+/* Sticky Field Name column */
+.comparison-table.structured .sticky-col-2 {
+    position: sticky;
+    left: 120px;
+    z-index: 10;
+    background-color: #e9ecef;
+    font-weight: 500;
+    min-width: 180px;
+    max-width: 250px;
+    white-space: normal;
+}
+
+.comparison-table.structured thead .sticky-col-2 {
+    z-index: 25;
+    background-color: #34495e;
+    color: white;
+}
+
+/* Recipe value columns */
+.comparison-table.structured .recipe-value-header {
+    background-color: #2c3e50;
+    color: white;
+    text-align: center;
+    font-weight: 600;
+    min-width: 150px;
+}
+
+.comparison-table.structured .recipe-value {
+    text-align: center;
+    min-width: 150px;
+}
+
+/* Row highlighting */
+.comparison-table.structured tbody tr.has-value {
+    background-color: #fff;
+}
+
+.comparison-table.structured tbody tr.has-value:hover {
+    background-color: #e3f2fd;
+}
+
+.comparison-table.structured tbody tr.no-value {
+    background-color: #f8f9fa;
+    color: #adb5bd;
+}
+
+.comparison-table.structured tbody tr.no-value:hover {
+    background-color: #f1f3f5;
+}
+
+.comparison-table.structured tbody tr.no-value .sticky-col,
+.comparison-table.structured tbody tr.no-value .sticky-col-2 {
+    background-color: #f1f3f5;
+}
+
+/* Table legend */
+.table-legend {
+    margin-top: 15px;
+    padding: 10px 15px;
+    background-color: #f8f9fa;
+    border-radius: 6px;
+    font-size: 0.85em;
+    display: flex;
+    gap: 20px;
+}
+
+.table-legend .legend-has-value {
+    color: #212529;
+}
+
+.table-legend .legend-no-value {
+    color: #adb5bd;
+}
+
+/* Table wrapper adjustments for structured table */
+.comparison-table-container .table-wrapper {
+    max-height: 600px;
+    overflow: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+}

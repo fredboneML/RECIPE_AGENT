@@ -1,12 +1,13 @@
 // auth/msalConfig.js
 // MSAL configuration for Azure AD SSO integration
-
-import { LogLevel } from "@azure/msal-browser";
+// NOTE: This file is dynamically imported only when SSO is enabled
 
 /**
  * Create MSAL configuration from auth config fetched from backend
+ * @param {Object} authConfig - Auth configuration from backend
+ * @param {Object} LogLevel - MSAL LogLevel enum (passed from dynamic import)
  */
-export const getMsalConfig = (authConfig) => ({
+export const getMsalConfig = (authConfig, LogLevel) => ({
   auth: {
     clientId: authConfig.azure_ad.client_id,
     authority: authConfig.azure_ad.authority,
@@ -22,21 +23,26 @@ export const getMsalConfig = (authConfig) => ({
     loggerOptions: {
       loggerCallback: (level, message, containsPii) => {
         if (containsPii) return;
-        switch (level) {
-          case LogLevel.Error:
-            console.error(message);
-            break;
-          case LogLevel.Warning:
-            console.warn(message);
-            break;
-          case LogLevel.Info:
-            console.info(message);
-            break;
-          default:
-            console.debug(message);
+        if (LogLevel) {
+          switch (level) {
+            case LogLevel.Error:
+              console.error(message);
+              break;
+            case LogLevel.Warning:
+              console.warn(message);
+              break;
+            case LogLevel.Info:
+              console.info(message);
+              break;
+            default:
+              console.debug(message);
+          }
+        } else {
+          // Fallback if LogLevel not provided
+          console.log(`[MSAL ${level}]`, message);
         }
       },
-      logLevel: LogLevel.Warning,
+      logLevel: LogLevel?.Warning ?? 2, // 2 = Warning level
     },
   },
 });

@@ -18,7 +18,7 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Filter, FieldCondition, MatchValue, MatchText
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue, MatchText, Range
 
 # Import EnhancedTwoStepRecipeManager for consistent encoding with indexing
 from src.two_step_recipe_search import EnhancedTwoStepRecipeManager
@@ -401,7 +401,8 @@ class QdrantRecipeManager:
                            query_values: List[Any],
                            top_k: int = 20,
                            country_filter: Optional[str] = None,
-                           version_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+                           version_filter: Optional[str] = None,
+                           numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """
         Search recipes by features using the feature vector in Qdrant.
 
@@ -418,6 +419,8 @@ class QdrantRecipeManager:
             top_k: Number of results to return
             country_filter: Optional country name to filter results (None or "All" means no filter)
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
+            numerical_filters: Optional dict mapping field codes to Qdrant range filters
+                Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
 
         Returns:
             List of matching recipes with scores
@@ -490,6 +493,28 @@ class QdrantRecipeManager:
                 logger.info(
                     f"Applying version filter in feature search: {version_filter}")
 
+            # Add numerical range filters (e.g., Brix > 40, pH < 4.1)
+            if numerical_filters:
+                for field_code, range_spec in numerical_filters.items():
+                    # Build Qdrant Range object from filter spec
+                    # range_spec can be: {"gt": 40}, {"lt": 4.1}, {"gte": 30, "lte": 50}, etc.
+                    range_obj = Range(
+                        gt=range_spec.get('gt'),
+                        gte=range_spec.get('gte'),
+                        lt=range_spec.get('lt'),
+                        lte=range_spec.get('lte')
+                    )
+                    
+                    # Filter on the numerical payload field (e.g., "numerical.Z_BRIX")
+                    filter_conditions.append(
+                        FieldCondition(
+                            key=f"numerical.{field_code}",
+                            range=range_obj
+                        )
+                    )
+                    logger.info(
+                        f"Applying numerical range filter: {field_code} → {range_spec}")
+
             if filter_conditions:
                 query_filter = Filter(must=filter_conditions)
 
@@ -541,6 +566,7 @@ class QdrantRecipeManager:
                                    top_k: int = 20,
                                    country_filter: Optional[str] = None,
                                    version_filter: Optional[str] = None,
+                                   numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
                                    return_embedding: bool = False):
         """
         Search recipes by text description using Qdrant vector search
@@ -550,6 +576,8 @@ class QdrantRecipeManager:
             top_k: Number of results to return
             country_filter: Optional country name to filter results (None or "All" means no filter)
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
+            numerical_filters: Optional dict mapping field codes to Qdrant range filters
+                Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
             return_embedding: If True, also return the query embedding for reuse
 
         Returns:
@@ -581,6 +609,24 @@ class QdrantRecipeManager:
                     )
                 )
                 logger.info(f"Applying version filter: {version_filter}")
+
+            # Add numerical range filters (e.g., Brix > 40, pH < 4.1)
+            if numerical_filters:
+                for field_code, range_spec in numerical_filters.items():
+                    range_obj = Range(
+                        gt=range_spec.get('gt'),
+                        gte=range_spec.get('gte'),
+                        lt=range_spec.get('lt'),
+                        lte=range_spec.get('lte')
+                    )
+                    filter_conditions.append(
+                        FieldCondition(
+                            key=f"numerical.{field_code}",
+                            range=range_obj
+                        )
+                    )
+                    logger.info(
+                        f"Applying numerical range filter in text search: {field_code} → {range_spec}")
 
             if filter_conditions:
                 query_filter = Filter(must=filter_conditions)
@@ -989,7 +1035,8 @@ class QdrantRecipeManager:
                         final_top_k: int = 10,
                         country_filter: Optional[str] = None,
                         version_filter: Optional[str] = None,
-                        original_query: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                        original_query: Optional[str] = None,
+                        numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Two-step hybrid search: 
         - Step 1: Get candidates from both text search AND feature search (50/50 split)
@@ -1002,6 +1049,8 @@ class QdrantRecipeManager:
             final_top_k: Final number of results
             country_filter: Optional country name to filter results (None or "All" means no filter)
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
+            numerical_filters: Optional dict mapping field codes to Qdrant range filters
+                Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
 
         Returns:
             Tuple of (results, metadata)
@@ -1013,8 +1062,15 @@ class QdrantRecipeManager:
             "total_candidates_requested": text_top_k,
             "final_results": final_top_k,
             "country_filter": country_filter,
-            "version_filter": version_filter
+            "version_filter": version_filter,
+            "numerical_filters": numerical_filters if numerical_filters else {}
         }
+        
+        # Log numerical filters if present
+        if numerical_filters:
+            logger.info(f"Applying {len(numerical_filters)} numerical range filter(s):")
+            for field_code, range_spec in numerical_filters.items():
+                logger.info(f"  - {field_code}: {range_spec}")
 
         # Calculate split for hybrid search (both searches return 15 candidates)
         text_search_k = 15
@@ -1043,7 +1099,8 @@ class QdrantRecipeManager:
         logger.info(
             f"Step 1a: Text-based search in Qdrant (top {text_search_k})")
         text_search_result = self.search_by_text_description(
-            text_description, text_search_k, country_filter, version_filter, return_embedding=True)
+            text_description, text_search_k, country_filter, version_filter, 
+            numerical_filters=numerical_filters, return_embedding=True)
 
         # Handle return value (may be tuple if return_embedding=True)
         if isinstance(text_search_result, tuple):
@@ -1086,7 +1143,8 @@ class QdrantRecipeManager:
             logger.info(
                 f"Step 1b: Feature-based search in Qdrant (top {feature_search_k})")
             feature_candidates = self.search_by_features(
-                query_features, query_values, feature_search_k, country_filter, version_filter)
+                query_features, query_values, feature_search_k, country_filter, version_filter,
+                numerical_filters=numerical_filters)
 
             search_metadata["feature_search_results_found"] = len(
                 feature_candidates)

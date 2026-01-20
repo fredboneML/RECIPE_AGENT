@@ -422,17 +422,346 @@ Respond with only the language code, nothing else."""
         return "en"
 
 
+# =============================================================================
+# FIELD NAME TRANSLATION CACHE (for the 60 specified fields)
+# =============================================================================
+
+def get_cached_field_translations(target_language: str) -> Optional[Dict[str, str]]:
+    """
+    Get cached field name translations for the 60 specified fields.
+    
+    Args:
+        target_language: The target language code (e.g., "fr", "it", "es")
+    
+    Returns:
+        Dictionary mapping field codes to translated names, or None if not cached
+    """
+    try:
+        engine = get_db_engine()
+        if not engine:
+            return None
+        
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT translated_fields 
+                FROM field_name_translation_cache 
+                WHERE target_language = :target_language
+            """), {"target_language": target_language})
+            
+            row = result.fetchone()
+            if row:
+                logger.info(f"Found cached field translations for {target_language}")
+                return row[0]  # JSONB is automatically parsed
+        
+        return None
+    
+    except Exception as e:
+        logger.error(f"Error retrieving cached field translations: {e}")
+        return None
+
+
+def save_field_translations_to_cache(target_language: str, translations: Dict[str, str]) -> bool:
+    """
+    Save field name translations to cache.
+    
+    Args:
+        target_language: The target language code
+        translations: Dictionary mapping field codes to translated names
+    
+    Returns:
+        True if saved successfully, False otherwise
+    """
+    try:
+        engine = get_db_engine()
+        if not engine:
+            return False
+        
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO field_name_translation_cache (target_language, translated_fields)
+                VALUES (:target_language, CAST(:translated_fields AS jsonb))
+                ON CONFLICT (target_language) 
+                DO UPDATE SET 
+                    translated_fields = EXCLUDED.translated_fields,
+                    updated_at = CURRENT_TIMESTAMP
+            """), {
+                "target_language": target_language,
+                "translated_fields": json.dumps(translations)
+            })
+        
+        logger.info(f"Saved field translations for {target_language} to cache")
+        return True
+    
+    except Exception as e:
+        logger.error(f"Error saving field translations to cache: {e}")
+        return False
+
+
+def translate_field_names_with_llm(field_names: List[Tuple[str, str, str]], target_language: str) -> Dict[str, str]:
+    """
+    Translate the 60 field names to the target language using LLM.
+    
+    Args:
+        field_names: List of tuples (code, english_name, german_name)
+        target_language: Target language code (e.g., "fr", "it", "es")
+    
+    Returns:
+        Dictionary mapping field codes to translated names
+    """
+    language_names = {
+        "en": "English",
+        "de": "German",
+        "fr": "French",
+        "it": "Italian",
+        "es": "Spanish",
+        "pt": "Portuguese",
+        "nl": "Dutch",
+        "da": "Danish"
+    }
+    
+    target_lang_name = language_names.get(target_language, "English")
+    
+    # Build a list of fields to translate
+    fields_to_translate = [
+        {"code": code, "english": en, "german": de}
+        for code, en, de in field_names
+    ]
+    
+    try:
+        prompt = f"""Translate the following food/recipe industry field names to {target_lang_name}.
+
+These are technical terms used in food product databases for characteristics like:
+- Product properties (Standard product, Product segment, etc.)
+- Ingredients (Sweetener, Preservatives, Colors, Flavors, etc.)
+- Technical parameters (Brix, pH, Viscosity, etc.)
+- Certifications (Kosher, Halal, etc.)
+
+Input fields (JSON array with code, English name, German name):
+{json.dumps(fields_to_translate, ensure_ascii=False, indent=2)}
+
+Rules:
+1. Translate to {target_lang_name}
+2. Keep technical terms that are internationally recognized unchanged (e.g., "Brix", "pH", "Halal", "Kosher")
+3. Use industry-standard terminology in {target_lang_name}
+4. Maintain consistency with food industry standards
+
+Respond with ONLY a JSON object mapping the code to the translated name. Example format:
+{{"Z_MAKTX": "Translated name", "Z_INH01": "Another translation", ...}}
+
+No explanations, just the JSON object:"""
+
+        response = query_llm(prompt, provider="openai")
+        
+        if response:
+            # Clean response
+            response_clean = response.strip()
+            if response_clean.startswith("```"):
+                lines = response_clean.split("\n")
+                response_clean = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+            
+            translations = json.loads(response_clean)
+            logger.info(f"Successfully translated {len(translations)} field names to {target_lang_name}")
+            return translations
+    
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing field name translation response: {e}")
+    except Exception as e:
+        logger.error(f"Error translating field names: {e}")
+    
+    # Return English names as fallback
+    return {code: en for code, en, de in field_names}
+
+
+def get_translated_field_names(field_definitions: List[Tuple[str, str, str]], target_language: str) -> Dict[str, str]:
+    """
+    Get translated field names for the target language, using cache when available.
+    
+    Args:
+        field_definitions: List of (code, english_name, german_name) tuples
+        target_language: Target language code
+    
+    Returns:
+        Dictionary mapping field codes to display names in target language
+    """
+    # For English and German, we have predefined translations
+    if target_language == "en":
+        return {code: en for code, en, de in field_definitions}
+    elif target_language == "de":
+        return {code: de for code, en, de in field_definitions}
+    
+    # For other languages, check cache first
+    cached = get_cached_field_translations(target_language)
+    if cached:
+        logger.info(f"Using cached field translations for {target_language}")
+        return cached
+    
+    # Translate using LLM
+    translations = translate_field_names_with_llm(field_definitions, target_language)
+    
+    # Save to cache for future use
+    if translations:
+        save_field_translations_to_cache(target_language, translations)
+    
+    return translations
+
+
+def translate_comparison_values(values: List[str], target_language: str) -> List[str]:
+    """
+    Translate recipe values to the target language if needed.
+    
+    Args:
+        values: List of recipe field values
+        target_language: Target language code
+    
+    Returns:
+        List of translated values
+    """
+    # Skip translation for English (most values are already in English)
+    if target_language == "en":
+        return values
+    
+    # Filter non-empty, non-numeric values that might need translation
+    values_to_translate = []
+    indices_to_translate = []
+    
+    for i, val in enumerate(values):
+        if val and not val.replace('.', '').replace(',', '').replace('%', '').replace(' ', '').isdigit():
+            # Check if it's a common Yes/No or technical term
+            lower_val = val.lower().strip()
+            # Skip values that don't need translation
+            skip_values = ['yes', 'no', 'ja', 'nein', 'oui', 'non', '-', '', 
+                          'halal', 'kosher', 'pur', 'puree', 'pieces']
+            if lower_val not in skip_values and not any(c.isdigit() for c in val[:3]):
+                values_to_translate.append(val)
+                indices_to_translate.append(i)
+    
+    # If nothing to translate, return original
+    if not values_to_translate:
+        return values
+    
+    try:
+        language_names = {
+            "de": "German", "fr": "French", "it": "Italian",
+            "es": "Spanish", "pt": "Portuguese", "nl": "Dutch", "da": "Danish"
+        }
+        target_lang_name = language_names.get(target_language, "English")
+        
+        prompt = f"""Translate these food/recipe product values to {target_lang_name}:
+
+Values: {json.dumps(values_to_translate, ensure_ascii=False)}
+
+Rules:
+1. Keep technical terms unchanged (Brix, pH, brand names)
+2. Translate common food industry terms
+3. Return a JSON array with translations in the same order
+
+Respond with ONLY a JSON array:"""
+
+        response = query_llm(prompt, provider="openai")
+        
+        if response:
+            response_clean = response.strip()
+            if response_clean.startswith("```"):
+                lines = response_clean.split("\n")
+                response_clean = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+            
+            translated = json.loads(response_clean)
+            
+            # Merge translations back into original list
+            result = values.copy()
+            for idx, trans_idx in enumerate(indices_to_translate):
+                if idx < len(translated):
+                    result[trans_idx] = translated[idx]
+            
+            return result
+    
+    except Exception as e:
+        logger.error(f"Error translating values: {e}")
+    
+    return values
+
+
+# The 60 specified fields in the exact order for display
+SPECIFIED_FIELDS_60 = [
+    ('Z_MAKTX',       'Material short text',             'Materialkurztext'),
+    ('Z_INH01',       'Standard product',                'Standardprodukt'),
+    ('Z_WEIM',        'Product segment',                 'Produktsegment'),
+    ('Z_KUNPROGRU',   'Customer product group',          'Kundenproduktgruppe'),
+    ('Z_PRODK',       'Market segments',                 'Produktkategorien'),
+    ('Z_INH07',       'Extreme recipe',                  'Extremrezeptur'),
+    ('Z_KOCHART',     'Pasteurization type',             'Kochart'),
+    ('Z_KNOGM',       'GMO presence',                    'GMO enthalten'),
+    ('Z_INH08',       'Contains GMO',                    'Nicht Genfrei'),
+    ('Z_INH12',       'Allergens',                       'Allergene'),
+    ('ZMX_TIPOALERG', 'Allergenic type',                 'Allergentyp'),
+    ('Z_INH02',       'Sweetener',                       'Süßstoff'),
+    ('Z_INH03',       'Saccharose',                      'Saccharose'),
+    ('Z_INH19',       'Aspartame',                       'Aspartam'),
+    ('Z_INH04',       'Preserved',                       'Konservierung'),
+    ('Z_INH18',       'Color',                           'Farbe'),
+    ('Z_INH05',       'Artificial colors',               'Künstliche Farben'),
+    ('Z_INH09',       'Flavour',                         'Aroma'),
+    ('Z_INH06',       'Nature identical flavor',         'naturident/künstliches Aroma'),
+    ('Z_INH06Z',      'Natural flavor',                  'Natürliche Aromen'),
+    ('Z_FSTAT',       'Flavor status',                   'Flavor status'),
+    ('Z_INH21',       'Vitamins',                        'Vitamine'),
+    ('Z_INH13',       'Starch',                          'Stärke'),
+    ('Z_INH14',       'Pectin',                          'Pektin'),
+    ('Z_INH15',       'LBG',                             'IBKM'),
+    ('Z_INH16',       'Blend',                           'Mischung'),
+    ('Z_INH20',       'Xanthan',                         'Xanthan'),
+    ('Z_STABGU',      'Stabilizing System - Guar',       'Stabilizing System - Guar'),
+    ('Z_STABCAR',     'Stabilizing System - Carrageen', 'Stabilizing System - Carrageen'),
+    ('Z_STAGEL',      'Stabilizing System - Gellan',    'Stabilizing System - Gellan'),
+    ('Z_STANO',       'Stabilizing System - No stabil', 'Stabilizing System - No stabil'),
+    ('Z_INH17',       'Other stabilizer',               'Andere Stabilisatoren'),
+    ('Z_BRIX',        'Brix',                            'Brix'),
+    ('Z_PH',          'pH',                              'PH'),
+    ('ZM_PH',         'PH AFM',                          'PH AFM'),
+    ('Z_VISK20S',     'Viscosity 20s (20°C)',           'Viskosität 20s (20°C)'),
+    ('Z_VISK20S_7C',  'Viscosity 20s (7°C)',            'Viskosität 20s (7°C)'),
+    ('Z_VISK30S',     'Viscosity 30s',                   'Viskosität 30s'),
+    ('Z_VISK60S',     'Viscosity 60s',                   'Viskosität 60s'),
+    ('Z_VISKHAAKE',   'Viscosity HAAKE',                'Viskosität HAAKE'),
+    ('ZMX_DD103',     'Haake Viscosity',                'Haake Viskosität'),
+    ('ZMX_DD102',     'Brookfield Viscosity',           'Brookfield Viskosität'),
+    ('ZM_AW',         'Water Activity AFM',              'Wasseraktivität AFM'),
+    ('Z_FGAW',        'Water activity (FruitPrep)',     'Water activity (FruitPrep)'),
+    ('Z_FRUCHTG',     'Fruit content',                   'Fruchtgehalt'),
+    ('ZMX_DD108',     'Fruit Content',                   'Fruchtgehalt'),
+    ('Z_AW',          'Fruit retention %',               'Auswaschung %'),
+    ('Z_FLST',        'Puree/with pieces',               'Flüssig/Stückig'),
+    ('Z_PP',          'Puree/Pieces',                    'Puree/Pieces'),
+    ('ZMX_DD109',     '% Fruit Identity',                '% Dosierung'),
+    ('Z_DOSIER',      'Dosage',                          'Dosierung'),
+    ('Z_ZUCKER',      'Sugar',                           'Zucker'),
+    ('Z_FETTST',      'Fat level',                       'Fettstufe'),
+    ('ZMX_DD104',     'White Mass type',                 'Weisse Masse typ'),
+    ('Z_PROT',        'Protein content',                 'Protein content'),
+    ('Z_SALZ',        'Salt',                            'Salz'),
+    ('Z_INH01K',      'Kosher',                          'Kosher'),
+    ('Z_INH01H',      'Halal',                           'Halal'),
+    ('Z_DAIRY',       'Non-Dairy Product',               'Non-Dairy Product'),
+    ('Z_BFS',         'Bake/Freeze Stability',           'Bake/Freeze Stability'),
+]
+
+
 def create_comparison_table(results: List[Dict[str, Any]], detected_language: str = "en") -> Dict[str, Any]:
     """
     Create a comparison table structure for the top 3 recipes.
-    Translates characteristics to match the detected language of the user's query.
+    Uses the 60 specified fields in the correct order.
+    Translates field names and values to match the detected language of the user's query.
+    Translations are cached in the database for performance.
 
     Args:
         results: List of recipe search results
         detected_language: The language detected from the user's query (e.g., "fr", "de", "en")
 
     Returns:
-        Dictionary with table structure containing recipe names and their characteristics
+        Dictionary with table structure containing:
+        - field_definitions: List of {code, name_en, name_de, display_name} for the 60 fields in order
+        - recipes: List of recipe data with values for each field
+        - has_data: Boolean
     """
     try:
         # Take only top 3 recipes
@@ -441,72 +770,114 @@ def create_comparison_table(results: List[Dict[str, Any]], detected_language: st
         if not top_recipes:
             return None
 
-        # Initialize table structure
+        # Get translated field names (uses cache for non-en/de languages)
+        translated_field_names = get_translated_field_names(SPECIFIED_FIELDS_60, detected_language)
+        
+        # Build field definitions list (60 fields in order) with translations
+        field_definitions = []
+        for code, name_en, name_de in SPECIFIED_FIELDS_60:
+            # Use translated name from cache/LLM, or fallback to en/de
+            if detected_language in ("en", "de"):
+                display_name = name_de if detected_language == "de" else name_en
+            else:
+                display_name = translated_field_names.get(code, name_en)
+            
+            field_definitions.append({
+                "code": code,
+                "name_en": name_en,
+                "name_de": name_de,
+                "display_name": display_name
+            })
+
+        # Initialize table structure with new format
         table_data = {
+            "field_definitions": field_definitions,
             "recipes": [],
-            "has_data": len(top_recipes) > 0
+            "has_data": len(top_recipes) > 0,
+            "detected_language": detected_language
         }
 
-        # First, translate characteristics for each recipe if needed
-        # Store translated features/values per recipe
-        translated_recipes = []
+        # Process each recipe
         for recipe in top_recipes:
             features = recipe.get("features", [])
             values = recipe.get("values", [])
-            recipe_name = recipe.get(
-                "recipe_name", recipe.get("id", "Unknown"))
+            recipe_name = recipe.get("recipe_name", recipe.get("id", "Unknown"))
+            recipe_id = recipe.get("id", "")
 
-            # Translate characteristics to detected language
-            translated_features, translated_values = translate_recipe_characteristics(
-                recipe_name=recipe_name,
-                features=features,
-                values=values,
-                target_language=detected_language
-            )
-
-            translated_recipes.append({
-                "recipe": recipe,
-                "features": translated_features,
-                "values": translated_values
-            })
-
-        # Collect all unique characteristics from all translated recipes
-        all_characteristics = set()
-        for tr in translated_recipes:
-            all_characteristics.update(tr["features"])
-
-        # Sort characteristics for consistent display
-        sorted_characteristics = sorted(list(all_characteristics))
-
-        # Build table data for each recipe with translated values
-        for tr in translated_recipes:
-            recipe = tr["recipe"]
-            features = tr["features"]
-            values = tr["values"]
-
-            # Create feature-value mapping
+            # Create feature-value mapping from recipe data
             feature_map = {}
             for i, feature in enumerate(features):
                 if i < len(values):
                     feature_map[feature] = values[i]
 
-            recipe_table_data = {
-                "recipe_name": recipe.get("recipe_name", recipe.get("id", "Unknown")),
-                "recipe_id": recipe.get("id", ""),
-                "characteristics": []
-            }
+            # Also check spec_fields from payload if available
+            payload = recipe.get("payload", {})
+            spec_fields = payload.get("spec_fields", {})
+            numerical = payload.get("numerical", {})
 
-            # Add all characteristics (with empty values if not present in this recipe)
-            for char in sorted_characteristics:
-                recipe_table_data["characteristics"].append({
-                    "charactDescr": char,
-                    "valueCharLong": feature_map.get(char, "")
-                })
+            # Build values list for this recipe following the 60-field order
+            recipe_values = []
+            for code, name_en, name_de in SPECIFIED_FIELDS_60:
+                value = ""
+                
+                # Try to get value from various sources
+                # 1. From spec_fields in payload
+                if code in spec_fields and spec_fields[code]:
+                    value = str(spec_fields[code])
+                # 2. From numerical fields in payload
+                elif code in numerical and numerical[code] is not None:
+                    value = str(numerical[code])
+                # 3. From feature map using English name
+                elif name_en in feature_map:
+                    value = str(feature_map[name_en])
+                # 4. From feature map using German name
+                elif name_de in feature_map:
+                    value = str(feature_map[name_de])
+                # 5. From feature map using code directly
+                elif code in feature_map:
+                    value = str(feature_map[code])
+
+                recipe_values.append(value)
+
+            # Translate values if target language is not English or German
+            # (Values in DB are typically in EN or DE)
+            if detected_language not in ("en", "de"):
+                # Check if we have cached translation for this recipe's values
+                cached_values = get_cached_translation(recipe_name, detected_language)
+                if cached_values and "values_60" in cached_values:
+                    recipe_values = cached_values["values_60"]
+                    logger.info(f"Using cached value translations for {recipe_name} in {detected_language}")
+                else:
+                    # Translate values and cache them
+                    translated_values = translate_comparison_values(recipe_values, detected_language)
+                    if translated_values != recipe_values:
+                        # Save to cache with the 60-field values
+                        save_translation_to_cache(recipe_name, detected_language, {
+                            "values_60": translated_values,
+                            "features": [],  # Not used in new format
+                            "values": []  # Not used in new format
+                        })
+                        recipe_values = translated_values
+
+            recipe_table_data = {
+                "recipe_name": recipe_name,
+                "recipe_id": recipe_id,
+                "values": recipe_values,  # Values in same order as field_definitions (translated if needed)
+                # Keep characteristics for backward compatibility
+                "characteristics": [
+                    {
+                        "charactDescr": fd["display_name"],
+                        "code": fd["code"],
+                        "valueCharLong": recipe_values[i]
+                    }
+                    for i, fd in enumerate(field_definitions)
+                ]
+            }
 
             table_data["recipes"].append(recipe_table_data)
 
         logger.info(
-            f"Created comparison table for {len(top_recipes)} recipes in {detected_language}")
+            f"Created comparison table for {len(top_recipes)} recipes in {detected_language} with 60 specified fields")
         return table_data
 
     except Exception as e:
@@ -668,7 +1039,8 @@ class RecipeSearchAgent:
                        final_top_k: int = 3,
                        original_query: Optional[str] = None,
                        country_filter: Optional[str] = None,
-                       version_filter: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
+                       version_filter: Optional[str] = None,
+                       numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
         Search for similar recipes based on description and optional features
 
@@ -680,6 +1052,8 @@ class RecipeSearchAgent:
             original_query: Original user query (used for language detection if provided)
             country_filter: Optional country name to filter results (None or "All" means no filter)
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
+            numerical_filters: Optional dict mapping field codes to Qdrant range filters
+                Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
 
         Returns:
             Tuple of (results, metadata, formatted_response, detected_language, comparison_table)
@@ -731,6 +1105,12 @@ class RecipeSearchAgent:
                     logger.warning(f"Error processing features: {e}")
                     query_df = None
 
+            # Log numerical filters if present
+            if numerical_filters:
+                logger.info(f"Applying {len(numerical_filters)} numerical range filter(s) to search:")
+                for field_code, range_spec in numerical_filters.items():
+                    logger.info(f"  - {field_code}: {range_spec}")
+            
             # Run two-step search using Qdrant
             results, metadata = self.recipe_manager.search_two_step(
                 text_description=description,
@@ -739,7 +1119,8 @@ class RecipeSearchAgent:
                 final_top_k=final_top_k,
                 country_filter=country_filter,
                 version_filter=version_filter,
-                original_query=original_query
+                original_query=original_query,
+                numerical_filters=numerical_filters
             )
 
             # Format response in the detected language using AI

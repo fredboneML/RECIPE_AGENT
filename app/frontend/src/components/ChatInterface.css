@@ -1,4 +1,4 @@
-/* Comparison Table Styles */
+/* Comparison Table Styles - Updated for 60 Specified Fields */
 .comparison-table-container {
     margin: 20px 0;
     padding: 20px;
@@ -17,6 +17,8 @@
 
 .table-wrapper {
     overflow-x: auto;
+    overflow-y: auto;
+    max-height: 600px;
     border-radius: 6px;
     background-color: white;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -25,112 +27,316 @@
 .comparison-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.9em;
+    font-size: 0.85em;
     min-width: 600px;
 }
 
-.comparison-table thead {
-    background-color: #2c3e50;
+/* Structured table (60 fields format) */
+.comparison-table.structured thead {
+    background-color: #1e3a5f;
     color: white;
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
-.comparison-table thead tr.recipe-names th {
-    padding: 15px 10px;
-    text-align: center;
+.comparison-table.structured thead th {
+    padding: 12px 10px;
+    text-align: left;
     font-weight: 600;
-    font-size: 1.05em;
-    border-right: 2px solid #34495e;
-    border-bottom: 1px solid #34495e;
+    font-size: 0.95em;
+    border-right: 1px solid #2c4a6e;
+    white-space: nowrap;
 }
 
-.comparison-table thead tr.recipe-names th:last-child {
+.comparison-table.structured thead th:last-child {
     border-right: none;
 }
 
-.comparison-table thead tr.column-headers th {
-    padding: 10px 8px;
+.comparison-table.structured thead th.field-code-header {
+    width: 100px;
+    min-width: 100px;
+    background-color: #152a45;
+}
+
+.comparison-table.structured thead th.field-name-header {
+    width: 180px;
+    min-width: 180px;
+    background-color: #1a3250;
+}
+
+.comparison-table.structured thead th.recipe-value-header {
+    min-width: 200px;
     text-align: center;
+    background-color: #1e3a5f;
+}
+
+/* Table body styles */
+.comparison-table.structured tbody tr {
+    border-bottom: 1px solid #e0e0e0;
+    transition: background-color 0.15s ease;
+}
+
+.comparison-table.structured tbody tr:nth-child(even) {
+    background-color: #fafbfc;
+}
+
+.comparison-table.structured tbody tr:hover {
+    background-color: #e8f4fd;
+}
+
+/* Highlight rows with values */
+.comparison-table.structured tbody tr.has-value {
+    background-color: #ffffff;
+}
+
+.comparison-table.structured tbody tr.has-value:nth-child(even) {
+    background-color: #f5f9fc;
+}
+
+.comparison-table.structured tbody tr.has-value:hover {
+    background-color: #dbeeff;
+}
+
+/* Dim rows without values */
+.comparison-table.structured tbody tr.no-value {
+    background-color: #f5f5f5;
+    color: #999;
+}
+
+.comparison-table.structured tbody tr.no-value:nth-child(even) {
+    background-color: #f0f0f0;
+}
+
+.comparison-table.structured tbody tr.no-value:hover {
+    background-color: #e8e8e8;
+}
+
+/* Cell styles */
+.comparison-table.structured td {
+    padding: 10px;
+    border-right: 1px solid #e0e0e0;
+    vertical-align: middle;
+}
+
+.comparison-table.structured td:last-child {
+    border-right: none;
+}
+
+.comparison-table.structured td.field-code {
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 0.85em;
+    color: #5a6a7a;
+    background-color: #f8f9fa;
     font-weight: 500;
-    font-size: 0.9em;
-    background-color: #34495e;
-    border-right: 1px solid #4a5f7f;
+    position: sticky;
+    left: 0;
+    z-index: 5;
 }
 
-.comparison-table thead tr.column-headers th:nth-child(odd) {
-    border-left: 2px solid #2c3e50;
+.comparison-table.structured td.field-name {
+    font-weight: 500;
+    color: #2c3e50;
+    background-color: #fff;
+    position: sticky;
+    left: 100px;
+    z-index: 5;
+    border-right: 2px solid #d0d5dc;
 }
 
-.comparison-table tbody tr {
+.comparison-table.structured tbody tr.no-value td.field-code,
+.comparison-table.structured tbody tr.no-value td.field-name {
+    color: #aaa;
+}
+
+.comparison-table.structured td.recipe-value {
+    text-align: center;
+    color: #333;
+    max-width: 250px;
+    word-wrap: break-word;
+}
+
+.comparison-table.structured tbody tr.no-value td.recipe-value {
+    color: #ccc;
+}
+
+/* Table legend */
+.table-legend {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background-color: #f0f4f8;
+    border-radius: 4px;
+    font-size: 0.8em;
+    color: #666;
+    display: flex;
+    gap: 20px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-item.has-value-legend::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background-color: #dbeeff;
+    border: 1px solid #4a90d9;
+    border-radius: 2px;
+}
+
+.legend-item.no-value-legend::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 2px;
+}
+
+/* Legacy table styles (backward compatibility) */
+.comparison-table.legacy thead {
+    background-color: #2c3e50;
+    color: white;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.comparison-table.legacy thead th {
+    padding: 14px 12px;
+    text-align: left;
+    font-weight: 600;
+    border-right: 1px solid #34495e;
+}
+
+.comparison-table.legacy thead th:last-child {
+    border-right: none;
+}
+
+.comparison-table.legacy thead th.field-name-header {
+    min-width: 200px;
+    background-color: #243342;
+}
+
+.comparison-table.legacy thead th.recipe-value-header {
+    min-width: 180px;
+    text-align: center;
+}
+
+.comparison-table.legacy tbody tr {
     border-bottom: 1px solid #dee2e6;
 }
 
-.comparison-table tbody tr:nth-child(even) {
+.comparison-table.legacy tbody tr:nth-child(even) {
     background-color: #f8f9fa;
 }
 
-.comparison-table tbody tr:hover {
+.comparison-table.legacy tbody tr:hover {
     background-color: #e9ecef;
 }
 
-.comparison-table td {
+.comparison-table.legacy td {
     padding: 12px 10px;
     border-right: 1px solid #dee2e6;
 }
 
-.comparison-table td.characteristic-cell {
+.comparison-table.legacy td:last-child {
+    border-right: none;
+}
+
+.comparison-table.legacy td.field-name {
     font-weight: 500;
     color: #495057;
     background-color: rgba(52, 73, 94, 0.05);
-    border-left: 2px solid #dee2e6;
     max-width: 200px;
     word-wrap: break-word;
 }
 
-.comparison-table td.value-cell {
+.comparison-table.legacy td.recipe-value {
     color: #212529;
+    text-align: center;
     max-width: 200px;
     word-wrap: break-word;
-}
-
-.comparison-table tbody tr:nth-child(odd) td.characteristic-cell {
-    background-color: rgba(52, 73, 94, 0.08);
 }
 
 /* Responsive adjustments */
+@media (max-width: 1024px) {
+    .table-wrapper {
+        max-height: 500px;
+    }
+    
+    .comparison-table {
+        font-size: 0.8em;
+    }
+    
+    .comparison-table.structured thead th,
+    .comparison-table.structured td {
+        padding: 8px;
+    }
+    
+    .comparison-table.structured thead th.field-code-header {
+        width: 80px;
+        min-width: 80px;
+    }
+    
+    .comparison-table.structured thead th.field-name-header {
+        width: 150px;
+        min-width: 150px;
+    }
+    
+    .comparison-table.structured td.field-name {
+        left: 80px;
+    }
+}
+
 @media (max-width: 768px) {
     .comparison-table-container {
         padding: 15px;
         margin: 15px 0;
     }
     
+    .table-wrapper {
+        max-height: 400px;
+    }
+    
     .comparison-table {
-        font-size: 0.85em;
+        font-size: 0.75em;
         min-width: 500px;
     }
     
-    .comparison-table thead tr.recipe-names th {
-        padding: 12px 8px;
-        font-size: 1em;
+    .comparison-table.structured thead th.field-code-header {
+        width: 70px;
+        min-width: 70px;
     }
     
-    .comparison-table td {
-        padding: 10px 8px;
+    .comparison-table.structured thead th.field-name-header {
+        width: 120px;
+        min-width: 120px;
+    }
+    
+    .comparison-table.structured td.field-name {
+        left: 70px;
+    }
+    
+    .table-legend {
+        flex-direction: column;
+        gap: 8px;
     }
 }
 
 @media (max-width: 480px) {
     .comparison-table {
-        font-size: 0.8em;
-        min-width: 450px;
+        font-size: 0.7em;
+        min-width: 400px;
     }
     
-    .comparison-table thead tr.recipe-names th {
-        padding: 10px 6px;
-        font-size: 0.95em;
-    }
-    
-    .comparison-table td {
-        padding: 8px 6px;
+    .comparison-table.structured thead th,
+    .comparison-table.structured td {
+        padding: 6px;
     }
 }
-

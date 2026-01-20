@@ -17,14 +17,31 @@ Create security groups to control access levels in the application.
 1. Navigate to **Azure Portal** > **Microsoft Entra ID** > **Groups**
 2. Click **New group** and create the following groups:
 
-| Group Name | Group Type | Description |
-|------------|------------|-------------|
-| `Recipe-Agent-Admins` | Security | Full administrative access |
-| `Recipe-Agent-Writers` | Security | Can create and edit recipes |
-| `Recipe-Agent-Users` | Security | Read-only access |
+| Group Name               | Group Type                  | Description                 |
+| ------------------------ | --------------------------- | --------------------------- |
+| `Recipe-Agent-Admins`  | Security (or Microsoft 365) | Full administrative access  |
+| `Recipe-Agent-Writers` | Security (or Microsoft 365) | Can create and edit recipes |
+| `Recipe-Agent-Users`   | Security (or Microsoft 365) | Read-only access            |
 
-3. Add users to appropriate groups based on their required access level
-4. **Record the Object ID** of each group (you'll need these later)
+**Note on Group Type:**
+
+- **Security groups** are preferred for access control, but **Microsoft 365 groups** will also work for SSO group claims
+- If you only see "Microsoft 365" as an option (which is common in some Azure AD configurations), that's fine - it will work for SSO authentication
+- Both group types can be used for group-based role mapping in the application
+- The important part is that the groups appear in the ID token's group claims (configured in Step 2.5)
+
+3. Fill in the form:
+
+   - **Group name**: Enter the group name (e.g., `Recipe-Agent-Admins`)
+   - **Group description**: Enter a description (e.g., "Full administrative access")
+   - **Membership type**: Select **Assigned** (manual membership)
+   - **Group type**: Use **Security** if available, otherwise **Microsoft 365** is acceptable
+4. Click **Create** to create the group
+5. After creation, add users to appropriate groups based on their required access level
+6. **Record the Object ID** of each group (you'll need these later):
+
+   - Go to the group's **Overview** page
+   - Copy the **Object ID** value
 
 ---
 
@@ -35,19 +52,20 @@ Create security groups to control access levels in the application.
 1. Navigate to **Azure Portal** > **Microsoft Entra ID** > **App registrations**
 2. Click **New registration**
 3. Fill in the details:
+
    - **Name**: `Recipe Agent - Production` (or environment-specific name)
    - **Supported account types**: "Accounts in this organizational directory only (Single tenant)"
    - **Redirect URI**:
      - Platform: `Single-page application (SPA)`
      - URI: `https://recipe-agent-agrana.westeurope.cloudapp.azure.com/auth/callback`
-
 4. Click **Register**
 
 ### 2.2 Record Important Values
 
 From the app registration **Overview** page, record:
+
 - **Application (client) ID**: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
-- **Directory (tenant) ID**: `yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy`
+- & Directory (tenant) ID: `yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy`
 
 ### 2.3 Configure Authentication
 
@@ -64,12 +82,12 @@ From the app registration **Overview** page, record:
 1. Go to **API permissions** in the left menu
 2. Click **Add a permission** > **Microsoft Graph** > **Delegated permissions**
 3. Add the following permissions:
+
    - `openid` (Sign users in)
    - `profile` (View users' basic profile)
    - `email` (View users' email address)
    - `User.Read` (Sign in and read user profile)
    - `GroupMember.Read.All` (Read group memberships)
-
 4. Click **Grant admin consent for [Your Organization]**
 5. Verify all permissions show "Granted for [Your Organization]"
 
@@ -79,11 +97,11 @@ From the app registration **Overview** page, record:
 2. Click **Add optional claim**
 3. Select **ID** token type
 4. Add the following claims:
+
    - `email`
    - `preferred_username`
    - `upn` (User Principal Name)
 5. Click **Add**
-
 6. Click **Add groups claim**
 7. Select **Security groups**
 8. Under **Customize token properties by type**, for ID token select **Group ID**
@@ -211,12 +229,14 @@ npm install
 Use the admin endpoints to manage group mappings:
 
 **Get all mappings:**
+
 ```bash
 curl -H "Authorization: Bearer <admin-token>" \
   https://recipe-agent-agrana.westeurope.cloudapp.azure.com/api/admin/group-mappings
 ```
 
 **Add/Update a mapping:**
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <admin-token>" \
@@ -226,6 +246,7 @@ curl -X POST \
 ```
 
 **Delete a mapping:**
+
 ```bash
 curl -X DELETE \
   -H "Authorization: Bearer <admin-token>" \
@@ -297,11 +318,12 @@ WHERE group_id = 'group-to-disable';
 Once SSO is fully tested and all users have Azure AD accounts:
 
 1. Update `.env`:
+
    ```bash
    LOCAL_AUTH_ENABLED=false
    ```
-
 2. Restart the backend:
+
    ```bash
    docker-compose restart backend_app
    ```

@@ -14,16 +14,16 @@ services:
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
       - DISABLE_ESLINT_PLUGIN=true
-      - NPM_CONFIG_CACHE=/home/appuser/.npm
-      - NPM_CONFIG_PREFIX=/home/appuser/.npm-global
+      - NPM_CONFIG_CACHE=/home/node/.npm
+      - NPM_CONFIG_PREFIX=/home/node/.npm-global
       - DANGEROUSLY_DISABLE_HOST_CHECK=true
       - REACT_APP_BACKEND_URL=/api
       - REACT_APP_WS_URL=/ws
     volumes:
       - ./frontend:/usr/src/app:cached
       - frontend_node_modules:/usr/src/app/node_modules
-      - frontend_npm_cache:/home/appuser/.npm
-      - frontend_npm_global:/home/appuser/.npm-global
+      - frontend_npm_cache:/home/node/.npm
+      - frontend_npm_global:/home/node/.npm-global
     user: "${USER_ID:-1000}:${GROUP_ID:-1000}"
     stdin_open: true
     tty: true

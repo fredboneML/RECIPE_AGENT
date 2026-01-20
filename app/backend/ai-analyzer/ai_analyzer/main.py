@@ -825,6 +825,13 @@ async def process_query(
 
         logger.info(f"/api/query: Extracted description: {text_description}")
 
+        # Extract numerical filters for range queries (e.g., Brix > 40, pH < 4.1)
+        numerical_filters = extraction_result.get('numerical_filters', {})
+        if numerical_filters:
+            logger.info(f"/api/query: Extracted {len(numerical_filters)} numerical constraint(s):")
+            for field_code, range_spec in numerical_filters.items():
+                logger.info(f"/api/query:   - {field_code}: {range_spec}")
+
         # Search for recipes with extracted features
         # Pass original query for language detection (the extracted description may be in English)
         logger.info(f"/api/query: Country filter: {country_filter}")
@@ -836,7 +843,8 @@ async def process_query(
             final_top_k=final_top_k,
             original_query=query,
             country_filter=country_filter,
-            version_filter=version_filter
+            version_filter=version_filter,
+            numerical_filters=numerical_filters
         )
 
         # Use the formatted response from the agent
@@ -870,6 +878,15 @@ async def process_query(
         # Return a response with the exact fields the frontend expects
         logger.info(
             f"/api/query: Returning response for conversation_id: {conversation_id}")
+        
+        # Debug: Log comparison table structure
+        if comparison_table:
+            logger.info(f"/api/query: comparison_table has_data: {comparison_table.get('has_data')}")
+            logger.info(f"/api/query: comparison_table has field_definitions: {'field_definitions' in comparison_table}")
+            if 'field_definitions' in comparison_table:
+                logger.info(f"/api/query: field_definitions count: {len(comparison_table.get('field_definitions', []))}")
+            logger.info(f"/api/query: comparison_table recipes count: {len(comparison_table.get('recipes', []))}")
+        
         return {
             "response": response,
             "conversation_id": conversation_id,

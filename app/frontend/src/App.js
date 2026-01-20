@@ -466,46 +466,80 @@ function App() {
                         .replace(/\n/g, '<br/>')
                     }} />
                     
-                    {/* Comparison Table */}
+                    {/* Comparison Table - 60 Specified Fields Format */}
                     {message.comparison_table && message.comparison_table.has_data && (
                       <div className="comparison-table-container">
-                        <h4>Recipe Comparison</h4>
+                        <h4>Recipe Comparison - 60 Specified Fields</h4>
                         <div className="table-wrapper">
-                          <table className="comparison-table">
-                            <thead>
-                              <tr className="recipe-names">
-                                {message.comparison_table.recipes.map((recipe, idx) => (
-                                  <th key={idx} colSpan="2" className="recipe-header">
-                                    {idx + 1}. {recipe.recipe_name || recipe.recipe_id}
-                                  </th>
-                                ))}
-                              </tr>
-                              <tr className="column-headers">
-                                {message.comparison_table.recipes.map((recipe, idx) => (
-                                  <React.Fragment key={idx}>
-                                    <th className="characteristic-header">Characteristic</th>
-                                    <th className="value-header">Value</th>
-                                  </React.Fragment>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {message.comparison_table.recipes[0]?.characteristics.map((_, charIndex) => (
-                                <tr key={charIndex}>
-                                  {message.comparison_table.recipes.map((recipe, recipeIndex) => (
-                                    <React.Fragment key={recipeIndex}>
-                                      <td className="characteristic-cell">
-                                        {recipe.characteristics[charIndex]?.charactDescr || ''}
-                                      </td>
-                                      <td className="value-cell">
-                                        {recipe.characteristics[charIndex]?.valueCharLong || ''}
-                                      </td>
-                                    </React.Fragment>
+                          {message.comparison_table.field_definitions && message.comparison_table.field_definitions.length > 0 ? (
+                            /* New format: Code | Field Name | Recipe1 | Recipe2 | Recipe3 */
+                            <table className="comparison-table structured">
+                              <thead>
+                                <tr>
+                                  <th className="field-code-header sticky-col">Code</th>
+                                  <th className="field-name-header sticky-col-2">Field Name</th>
+                                  {message.comparison_table.recipes.map((recipe, idx) => (
+                                    <th key={idx} className="recipe-value-header">
+                                      {recipe.recipe_name || recipe.recipe_id}
+                                    </th>
                                   ))}
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {message.comparison_table.field_definitions.map((field, fieldIdx) => {
+                                  const hasAnyValue = message.comparison_table.recipes.some(r => 
+                                    r.values && r.values[fieldIdx] && String(r.values[fieldIdx]).trim() !== ''
+                                  );
+                                  return (
+                                    <tr key={fieldIdx} className={hasAnyValue ? 'has-value' : 'no-value'}>
+                                      <td className="field-code sticky-col">{field.code}</td>
+                                      <td className="field-name sticky-col-2">{field.display_name}</td>
+                                      {message.comparison_table.recipes.map((recipe, recipeIdx) => (
+                                        <td key={recipeIdx} className="recipe-value">
+                                          {recipe.values && recipe.values[fieldIdx] 
+                                            ? String(recipe.values[fieldIdx])
+                                            : '-'}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          ) : (
+                            /* Legacy fallback */
+                            <table className="comparison-table legacy">
+                              <thead>
+                                <tr className="recipe-names">
+                                  {message.comparison_table.recipes.map((recipe, idx) => (
+                                    <th key={idx} colSpan="2" className="recipe-header">
+                                      {idx + 1}. {recipe.recipe_name || recipe.recipe_id}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {message.comparison_table.recipes[0]?.characteristics.map((_, charIndex) => (
+                                  <tr key={charIndex}>
+                                    {message.comparison_table.recipes.map((recipe, recipeIndex) => (
+                                      <React.Fragment key={recipeIndex}>
+                                        <td className="characteristic-cell">
+                                          {recipe.characteristics[charIndex]?.charactDescr || ''}
+                                        </td>
+                                        <td className="value-cell">
+                                          {recipe.characteristics[charIndex]?.valueCharLong || ''}
+                                        </td>
+                                      </React.Fragment>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                        <div className="table-legend">
+                          <span className="legend-has-value">● Fields with values</span>
+                          <span className="legend-no-value">○ Fields without values</span>
                         </div>
                       </div>
                     )}

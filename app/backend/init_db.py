@@ -138,6 +138,25 @@ def create_tables(engine):
             ON recipe_translation_cache(recipe_name, target_language);
         """))
 
+        # Create field_name_translation_cache table for caching translated field names
+        # This table stores translations of the 60 specified field names
+        # to avoid repeated LLM calls for the same language
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS field_name_translation_cache (
+                id SERIAL PRIMARY KEY,
+                target_language VARCHAR(10) NOT NULL UNIQUE,
+                translated_fields JSONB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        # Create index for fast lookup by target_language
+        connection.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_field_translation_lookup 
+            ON field_name_translation_cache(target_language);
+        """))
+
 
 def populate_restricted_tables(session):
     """Populate restricted tables"""
@@ -148,7 +167,9 @@ def populate_restricted_tables(session):
         ("user_memory", "Contains user conversation history and personal data"),
         ("get_generated_password", "Temporally User passwords"),
         ("generated_passwords", "User passwords"),
-        ("recipe_translation_cache", "Internal system table for translation caching")
+        ("recipe_translation_cache", "Internal system table for translation caching"),
+        ("field_name_translation_cache",
+         "Internal system table for field name translation caching")
     ]
 
     for table, reason in restricted_tables:

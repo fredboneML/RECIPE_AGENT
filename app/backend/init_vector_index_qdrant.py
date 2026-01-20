@@ -64,6 +64,136 @@ COUNTRY_CODE_MAP = {
     "US": "United States"
 }
 
+# =============================================================================
+# 60 SPECIFIED FIELDS FOR INDEXING
+# =============================================================================
+# These 60 fields are the standardized fields for recipe indexing.
+# Field names are always consistent (Z_xxx), but values can be in multiple languages.
+# Each field has: code, sort_order, description_en, description_de, field_type
+SPECIFIED_FIELDS = {
+    'Z_MAKTX':       {'order': 1,  'en': 'Material short text',           'de': 'Materialkurztext',               'type': 'text'},
+    'Z_INH01':       {'order': 2,  'en': 'Standard product',              'de': 'Standardprodukt',                'type': 'binary'},
+    'Z_WEIM':        {'order': 3,  'en': 'Produktsegment (SD Reporting)', 'de': 'Produktsegment (SD Reporting)',  'type': 'categorical'},
+    'Z_KUNPROGRU':   {'order': 4,  'en': 'Customer product group',        'de': 'Kundenproduktgruppe',            'type': 'categorical'},
+    'Z_PRODK':       {'order': 5,  'en': 'Market segments',               'de': 'Produktkategorien',              'type': 'categorical'},
+    'Z_INH07':       {'order': 6,  'en': 'Extreme recipe',                'de': 'Extremrezeptur',                 'type': 'binary'},
+    'Z_KOCHART':     {'order': 7,  'en': 'Pasteurization type',           'de': 'Kochart',                        'type': 'categorical'},
+    'Z_KNOGM':       {'order': 8,  'en': 'GMO presence',                  'de': 'GMO enthalten',                  'type': 'binary'},
+    'Z_INH08':       {'order': 9,  'en': 'Contains GMO',                  'de': 'Nicht Genfrei',                  'type': 'binary'},
+    'Z_INH12':       {'order': 10, 'en': 'Allergens',                     'de': 'Allergene',                      'type': 'binary'},
+    'ZMX_TIPOALERG': {'order': 11, 'en': 'Alergenic type',                'de': 'Allergentyp',                    'type': 'categorical'},
+    'Z_INH02':       {'order': 12, 'en': 'Sweetener',                     'de': 'Süßstoff',                       'type': 'binary'},
+    'Z_INH03':       {'order': 13, 'en': 'Saccharose',                    'de': 'Saccharose',                     'type': 'binary'},
+    'Z_INH19':       {'order': 14, 'en': 'Aspartame',                     'de': 'Aspartam',                       'type': 'binary'},
+    'Z_INH04':       {'order': 15, 'en': 'Preserved',                     'de': 'Konservierung',                  'type': 'binary'},
+    'Z_INH18':       {'order': 16, 'en': 'Color',                         'de': 'Farbe',                          'type': 'binary'},
+    'Z_INH05':       {'order': 17, 'en': 'Artificial colors',             'de': 'Künstliche Farben',              'type': 'binary'},
+    'Z_INH09':       {'order': 18, 'en': 'Flavour',                       'de': 'Aroma',                          'type': 'binary'},
+    'Z_INH06':       {'order': 19, 'en': 'Nature identical flavor',       'de': 'naturident/künstliches Aroma',   'type': 'binary'},
+    'Z_INH06Z':      {'order': 20, 'en': 'Natural flavor',                'de': 'Natürliche Aromen',              'type': 'binary'},
+    'Z_FSTAT':       {'order': 21, 'en': 'Flavor status',                 'de': 'Flavor status',                  'type': 'categorical'},
+    'Z_INH21':       {'order': 22, 'en': 'Vitamins',                      'de': 'Vitamine',                       'type': 'binary'},
+    'Z_INH13':       {'order': 23, 'en': 'Starch',                        'de': 'Stärke',                         'type': 'binary'},
+    'Z_INH14':       {'order': 24, 'en': 'Pectin',                        'de': 'Pektin',                         'type': 'binary'},
+    'Z_INH15':       {'order': 25, 'en': 'LBG',                           'de': 'IBKM',                           'type': 'binary'},
+    'Z_INH16':       {'order': 26, 'en': 'Blend',                         'de': 'Mischung',                       'type': 'binary'},
+    'Z_INH20':       {'order': 27, 'en': 'Xanthan',                       'de': 'Xanthan',                        'type': 'binary'},
+    'Z_STABGU':      {'order': 28, 'en': 'Stabilizing System - Guar',     'de': 'Stabilizing System - Guar',      'type': 'binary'},
+    'Z_STABCAR':     {'order': 29, 'en': 'Stabilizing System - Carrageen','de': 'Stabilizing System - Carrageen', 'type': 'binary'},
+    'Z_STAGEL':      {'order': 30, 'en': 'Stabilizing System - Gellan',   'de': 'Stabilizing System - Gellan',    'type': 'binary'},
+    'Z_STANO':       {'order': 31, 'en': 'Stabilizing System - No stabil','de': 'Stabilizing System - No stabil', 'type': 'binary'},
+    'Z_INH17':       {'order': 32, 'en': 'Other stabilizer',              'de': 'Andere Stabilisatoren',          'type': 'binary'},
+    'Z_BRIX':        {'order': 33, 'en': 'Brix',                          'de': 'Brix',                           'type': 'numerical'},
+    'Z_PH':          {'order': 34, 'en': 'pH',                            'de': 'PH',                             'type': 'numerical'},
+    'ZM_PH':         {'order': 35, 'en': 'PH AFM',                        'de': 'PH AFM',                         'type': 'numerical'},
+    'Z_VISK20S':     {'order': 36, 'en': 'Viscosity 20s (20°C)',          'de': 'Viskosität 20s (20°C)',          'type': 'numerical'},
+    'Z_VISK20S_7C':  {'order': 37, 'en': 'Viscosity 20s (7°C)',           'de': 'Viskosität 20s (7°C)',           'type': 'numerical'},
+    'Z_VISK30S':     {'order': 38, 'en': 'Viscosity 30s',                 'de': 'Viskosität 30s',                 'type': 'numerical'},
+    'Z_VISK60S':     {'order': 39, 'en': 'Viscosity 60s',                 'de': 'Viskosität 60s',                 'type': 'numerical'},
+    'Z_VISKHAAKE':   {'order': 40, 'en': 'Viscosity HAAKE',               'de': 'Viskosität HAAKE',               'type': 'numerical'},
+    'ZMX_DD103':     {'order': 41, 'en': 'Haake Viscosity',               'de': 'Haake Viskositaet',              'type': 'numerical'},
+    'ZMX_DD102':     {'order': 42, 'en': 'Brookfield Viscosity',          'de': 'Brookfield Viskositaet',         'type': 'numerical'},
+    'ZM_AW':         {'order': 43, 'en': 'Water Activity AFM',            'de': 'Wasseraktivität AFM',            'type': 'numerical'},
+    'Z_FGAW':        {'order': 44, 'en': 'Water activity (FruitPrep)[aW]','de': 'Water activity (FruitPrep)[aW]', 'type': 'numerical'},
+    'Z_FRUCHTG':     {'order': 45, 'en': 'Fruit content',                 'de': 'Fruchtgehalt',                   'type': 'numerical'},
+    'ZMX_DD108':     {'order': 46, 'en': 'Fruit Content',                 'de': 'Fruchtgehalt',                   'type': 'numerical'},
+    'Z_AW':          {'order': 47, 'en': 'Fruit retention in %',          'de': 'Auswaschung %',                  'type': 'numerical'},
+    'Z_FLST':        {'order': 48, 'en': 'Puree/with pieces',             'de': 'Flüssig/Stückig',                'type': 'categorical'},
+    'Z_PP':          {'order': 49, 'en': 'Puree/Pieces',                  'de': 'Puree/Pieces',                   'type': 'categorical'},
+    'ZMX_DD109':     {'order': 50, 'en': '% Fruit Identity',              'de': '% Dosierung',                    'type': 'numerical'},
+    'Z_DOSIER':      {'order': 51, 'en': 'Dosage',                        'de': 'Dosierung',                      'type': 'numerical'},
+    'Z_ZUCKER':      {'order': 52, 'en': 'Sugar',                         'de': 'Zucker',                         'type': 'numerical'},
+    'Z_FETTST':      {'order': 53, 'en': 'Fat level',                     'de': 'Fettstufe',                      'type': 'numerical'},
+    'ZMX_DD104':     {'order': 54, 'en': 'White Mass type',               'de': 'Weisse Masse typ',               'type': 'categorical'},
+    'Z_PROT':        {'order': 55, 'en': 'Protein content(white mass)[%]','de': 'Protein content(white mass)[%]', 'type': 'numerical'},
+    'Z_SALZ':        {'order': 56, 'en': 'Salt',                          'de': 'Salz',                           'type': 'numerical'},
+    'Z_INH01K':      {'order': 57, 'en': 'Kosher',                        'de': 'Kosher',                         'type': 'binary'},
+    'Z_INH01H':      {'order': 58, 'en': 'Halal',                         'de': 'Halal',                          'type': 'binary'},
+    'Z_DAIRY':       {'order': 59, 'en': 'Non-Dairy Product',             'de': 'Non-Dairy Product',              'type': 'binary'},
+    'Z_BFS':         {'order': 60, 'en': 'Bake/Freeze Stability',         'de': 'Bake/Freeze Stability',          'type': 'binary'},
+}
+
+# Ordered list of field codes for consistent processing
+SPECIFIED_FIELDS_ORDERED = [
+    'Z_MAKTX', 'Z_INH01', 'Z_WEIM', 'Z_KUNPROGRU', 'Z_PRODK', 'Z_INH07', 'Z_KOCHART', 'Z_KNOGM',
+    'Z_INH08', 'Z_INH12', 'ZMX_TIPOALERG', 'Z_INH02', 'Z_INH03', 'Z_INH19', 'Z_INH04', 'Z_INH18',
+    'Z_INH05', 'Z_INH09', 'Z_INH06', 'Z_INH06Z', 'Z_FSTAT', 'Z_INH21', 'Z_INH13', 'Z_INH14',
+    'Z_INH15', 'Z_INH16', 'Z_INH20', 'Z_STABGU', 'Z_STABCAR', 'Z_STAGEL', 'Z_STANO', 'Z_INH17',
+    'Z_BRIX', 'Z_PH', 'ZM_PH', 'Z_VISK20S', 'Z_VISK20S_7C', 'Z_VISK30S', 'Z_VISK60S', 'Z_VISKHAAKE',
+    'ZMX_DD103', 'ZMX_DD102', 'ZM_AW', 'Z_FGAW', 'Z_FRUCHTG', 'ZMX_DD108', 'Z_AW', 'Z_FLST',
+    'Z_PP', 'ZMX_DD109', 'Z_DOSIER', 'Z_ZUCKER', 'Z_FETTST', 'ZMX_DD104', 'Z_PROT', 'Z_SALZ',
+    'Z_INH01K', 'Z_INH01H', 'Z_DAIRY', 'Z_BFS'
+]
+
+# Field types for encoding
+BINARY_FIELDS = [f for f, info in SPECIFIED_FIELDS.items() if info['type'] == 'binary']
+NUMERICAL_FIELDS = [f for f, info in SPECIFIED_FIELDS.items() if info['type'] == 'numerical']
+CATEGORICAL_FIELDS = [f for f, info in SPECIFIED_FIELDS.items() if info['type'] == 'categorical']
+TEXT_FIELDS = [f for f, info in SPECIFIED_FIELDS.items() if info['type'] == 'text']
+
+# Binary value normalization patterns (multilingual)
+BINARY_POSITIVE_PATTERNS = [
+    # German positive
+    'enthalten', 'mit ', 'vorhanden', 'ja', 'erlaubt', 'aktiv',
+    # English positive  
+    'yes', 'true', 'with', 'present', 'allowed', 'active', 'contains',
+    # French positive
+    'oui', 'avec', 'présent', 'autorisé',
+    # Italian positive
+    'si', 'con', 'presente',
+    # Specific positive values (from sample data)
+    'standardprodukt', 'standard product',
+    'stärke enthalten', 'starch', 'pectin', 'pektin',
+    'mit aroma', 'natürliches aroma', 'natural flavor', 'natural flavour',
+    'allergenfrei',  # Note: This means "allergen-free" = No allergens = actually indicates YES for allergen-free status
+    'halal', 'kosher', 'koscher',
+]
+
+BINARY_NEGATIVE_PATTERNS = [
+    # German negative
+    'kein', 'keine', 'nicht', 'ohne', 'verboten', 'nein',
+    # English negative
+    'no', 'not', 'without', 'absent', 'forbidden', 'false', 'none',
+    # French negative
+    'non', 'sans', 'pas', 'aucun', 'interdit',
+    # Italian negative
+    'senza', 'nessuno',
+    # Specific negative values (from sample data)
+    'keine süsstoffe', 'no sweetener',
+    'keine künstl. farbe', 'no artificial colors',
+    'kein aspartam', 'no aspartame',
+    'nicht konserviert', 'no preservative',
+    'kein naturidentes aroma', 'no nature identical',
+    'kein pektin', 'no pectin',
+    'kein ibkm', 'no lbg',
+    'kein xanthan', 'no xanthan',
+    'keine mischung', 'no blend',
+    'keine anderen stabil', 'no other stabilizer',
+    'keine farbe enthalten', 'no color',
+    'keine extremrezeptur', 'no extreme recipe',
+    'nicht genfrei',  # Contains GMO (double negative)
+]
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -332,6 +462,345 @@ def load_recipes_from_data_dir(data_dir: str) -> List[str]:
     logger.info(
         f"Found {len(recipe_json_list)} recipe JSON files in {data_dir}")
     return sorted(recipe_json_list)
+
+
+# =============================================================================
+# 60 SPECIFIED FIELDS EXTRACTION
+# =============================================================================
+
+def extract_specified_fields(recipe_json_path: str) -> dict:
+    """
+    Extract the 60 specified fields from a recipe JSON file.
+    
+    Returns a dictionary with:
+    - 'fields': Dict of all 60 fields with their values (None for missing)
+    - 'available': List of field codes that have values
+    - 'missing': List of field codes that are missing or have no value
+    - 'field_types': Dict mapping field codes to their data types
+    - 'features_for_embedding': List of (feature_name, value) tuples for embedding
+    - 'numerical_values': Dict of numerical field values (for range queries)
+    
+    Args:
+        recipe_json_path: Path to the recipe JSON file
+        
+    Returns:
+        Dictionary with extracted field data
+    """
+    result = {
+        'fields': {},           # All 60 fields with values (None for missing)
+        'available': [],        # Field codes with values
+        'missing': [],          # Field codes without values
+        'field_types': {},      # Field code -> type mapping
+        'features_for_embedding': [],  # For text embedding
+        'numerical_values': {}, # Numerical values for range queries
+        'original_values': {},  # Original values before normalization
+    }
+    
+    try:
+        with open(recipe_json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        logger.warning(f"Error loading JSON {recipe_json_path}: {e}")
+        # Return empty result with all fields as missing
+        for field_code in SPECIFIED_FIELDS_ORDERED:
+            result['fields'][field_code] = None
+            result['missing'].append(field_code)
+            result['field_types'][field_code] = SPECIFIED_FIELDS[field_code]['type']
+        return result
+    
+    # Build lookup dictionaries from Classification
+    char_lookup = {}  # charact code -> item
+    num_lookup = {}   # charact code -> item
+    
+    if 'Classification' in data and data['Classification']:
+        classification = data['Classification']
+        
+        # Character fields
+        if 'valueschar' in classification and classification['valueschar']:
+            for item in classification['valueschar']:
+                charact = item.get('charact', '')
+                if charact:
+                    char_lookup[charact] = item
+        
+        # Numeric fields
+        if 'valuesnum' in classification and classification['valuesnum']:
+            for item in classification['valuesnum']:
+                charact = item.get('charact', '')
+                if charact:
+                    num_lookup[charact] = item
+    
+    # Extract Z_MAKTX from MaterialMasterShorttext
+    maktx_value = None
+    if 'MaterialMasterShorttext' in data and data['MaterialMasterShorttext']:
+        # Try English first, then any available
+        mms_list = data['MaterialMasterShorttext']
+        maktx_entry = next((item for item in mms_list if item.get('spras') == 'E'), None)
+        if not maktx_entry and mms_list:
+            maktx_entry = mms_list[0]
+        if maktx_entry:
+            maktx_value = maktx_entry.get('maktx', '')
+    
+    # Process each of the 60 specified fields
+    for field_code in SPECIFIED_FIELDS_ORDERED:
+        field_info = SPECIFIED_FIELDS[field_code]
+        field_type = field_info['type']
+        result['field_types'][field_code] = field_type
+        
+        value = None
+        original_value = None
+        normalized_value = None
+        
+        # Special handling for Z_MAKTX
+        if field_code == 'Z_MAKTX':
+            if maktx_value and str(maktx_value).strip():
+                value = str(maktx_value).strip()
+                original_value = value
+                normalized_value = value
+        
+        # Check character fields
+        elif field_code in char_lookup:
+            item = char_lookup[field_code]
+            raw_value = item.get('valueCharLong', item.get('valueChar', ''))
+            if raw_value and str(raw_value).strip():
+                original_value = str(raw_value).strip()
+                # Normalize for binary fields
+                if field_type == 'binary':
+                    normalized_value = normalize_binary_value(original_value)
+                else:
+                    normalized_value = original_value
+                value = normalized_value
+        
+        # Check numeric fields
+        elif field_code in num_lookup:
+            item = num_lookup[field_code]
+            value_from = item.get('valueFrom')
+            unit = item.get('unitFrom', '')
+            
+            if value_from is not None:
+                try:
+                    numeric_val = float(value_from)
+                    result['numerical_values'][field_code] = numeric_val
+                    
+                    # Format with unit for display
+                    if unit:
+                        value = f"{value_from} {unit}".strip()
+                    else:
+                        value = str(value_from)
+                    original_value = value
+                    normalized_value = value
+                except (ValueError, TypeError):
+                    pass
+        
+        # Store the value
+        result['fields'][field_code] = value
+        result['original_values'][field_code] = original_value
+        
+        if value is not None:
+            result['available'].append(field_code)
+            # Add to features for embedding
+            feature_name_en = field_info['en']
+            result['features_for_embedding'].append((feature_name_en, value))
+        else:
+            result['missing'].append(field_code)
+    
+    return result
+
+
+def normalize_binary_value(value: str) -> str:
+    """
+    Normalize a binary field value to 'Yes' or 'No'.
+    
+    Handles multilingual values (German, English, French, Italian, etc.)
+    
+    Args:
+        value: Original value string
+        
+    Returns:
+        'Yes', 'No', or the original value if uncertain
+    """
+    if not value:
+        return value
+    
+    lower_value = value.lower().strip()
+    
+    # Check negative patterns first (more specific)
+    for pattern in BINARY_NEGATIVE_PATTERNS:
+        if pattern in lower_value:
+            return 'No'
+    
+    # Check positive patterns
+    for pattern in BINARY_POSITIVE_PATTERNS:
+        if pattern in lower_value:
+            return 'Yes'
+    
+    # Return original if no match
+    return value
+
+
+def create_searchable_text_from_fields(fields_data: dict) -> str:
+    """
+    Create searchable text from extracted fields for text embedding.
+    
+    Combines field names (in English) with their values to create
+    a rich text representation for vector search.
+    
+    Args:
+        fields_data: Result from extract_specified_fields()
+        
+    Returns:
+        Searchable text string
+    """
+    parts = []
+    
+    for field_code, value in fields_data['fields'].items():
+        if value is not None:
+            field_info = SPECIFIED_FIELDS[field_code]
+            # Use English description for consistent search
+            feature_name = field_info['en']
+            parts.append(f"{feature_name}: {value}")
+    
+    return ", ".join(parts)
+
+
+def create_normalized_features_values(fields_data: dict) -> tuple:
+    """
+    Create normalized feature names and values lists for vector encoding.
+    
+    Uses English feature names for consistent multilingual search.
+    
+    Args:
+        fields_data: Result from extract_specified_fields()
+        
+    Returns:
+        Tuple of (features_list, values_list)
+    """
+    features = []
+    values = []
+    
+    for field_code in SPECIFIED_FIELDS_ORDERED:
+        value = fields_data['fields'].get(field_code)
+        if value is not None:
+            field_info = SPECIFIED_FIELDS[field_code]
+            # Use English description for consistent encoding
+            features.append(field_info['en'])
+            values.append(value)
+    
+    return features, values
+
+
+def create_payload_indexes_for_60_fields(qdrant_client: QdrantClient, collection_name: str) -> bool:
+    """
+    Create payload indexes for efficient filtering on the 60 specified fields.
+    
+    IMPORTANT: Run this AFTER indexing is complete for 600K+ recipes.
+    Creating indexes during indexing can slow down the process significantly.
+    
+    This creates indexes for:
+    1. All 60 spec_fields (for exact match filtering)
+    2. Numerical fields (for range queries)
+    3. Metadata fields (country, version)
+    
+    Args:
+        qdrant_client: Qdrant client instance
+        collection_name: Name of the collection
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    from qdrant_client.http.models import PayloadSchemaType
+    
+    try:
+        logger.info("=" * 60)
+        logger.info("CREATING PAYLOAD INDEXES FOR 60 SPECIFIED FIELDS")
+        logger.info("=" * 60)
+        
+        # Index each of the 60 specified fields
+        logger.info("Creating indexes for spec_fields (60 fields)...")
+        for field_code in SPECIFIED_FIELDS_ORDERED:
+            field_info = SPECIFIED_FIELDS[field_code]
+            field_type = field_info['type']
+            
+            # Determine the index type based on field type
+            if field_type == 'numerical':
+                # Float index for numerical fields (supports range queries)
+                schema_type = PayloadSchemaType.FLOAT
+            else:
+                # Keyword index for text/binary/categorical fields (supports exact match)
+                schema_type = PayloadSchemaType.KEYWORD
+            
+            try:
+                qdrant_client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=f"spec_fields.{field_code}",
+                    field_schema=schema_type
+                )
+                logger.debug(f"  Created index for spec_fields.{field_code} ({schema_type})")
+            except Exception as e:
+                # Index might already exist
+                logger.debug(f"  Index for spec_fields.{field_code} may already exist: {e}")
+        
+        logger.info("✅ Created indexes for 60 spec_fields")
+        
+        # Create indexes for numerical values (for range queries)
+        logger.info("Creating indexes for numerical values...")
+        for field_code in NUMERICAL_FIELDS:
+            try:
+                qdrant_client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=f"numerical.{field_code}",
+                    field_schema=PayloadSchemaType.FLOAT
+                )
+            except Exception:
+                pass  # May already exist
+        logger.info(f"✅ Created {len(NUMERICAL_FIELDS)} numerical field indexes")
+        
+        # Create indexes for metadata fields
+        logger.info("Creating indexes for metadata fields...")
+        metadata_indexes = [
+            ("country", PayloadSchemaType.KEYWORD),
+            ("version", PayloadSchemaType.KEYWORD),
+            ("num_available", PayloadSchemaType.INTEGER),
+            ("num_missing", PayloadSchemaType.INTEGER),
+        ]
+        
+        for field_name, schema_type in metadata_indexes:
+            try:
+                qdrant_client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field_name,
+                    field_schema=schema_type
+                )
+            except Exception:
+                pass  # May already exist
+        logger.info("✅ Created metadata indexes")
+        
+        # Create text index for feature_text (full-text search)
+        try:
+            from qdrant_client.http.models import TextIndexParams, TokenizerType
+            qdrant_client.create_payload_index(
+                collection_name=collection_name,
+                field_name="feature_text",
+                field_schema=TextIndexParams(
+                    type="text",
+                    tokenizer=TokenizerType.WORD,
+                    min_token_len=2,
+                    max_token_len=20,
+                    lowercase=True
+                )
+            )
+            logger.info("✅ Created full-text index for feature_text")
+        except Exception as e:
+            logger.debug(f"Text index for feature_text may already exist: {e}")
+        
+        logger.info("=" * 60)
+        logger.info("PAYLOAD INDEX CREATION COMPLETE")
+        logger.info("=" * 60)
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error creating payload indexes: {e}")
+        return False
 
 
 def create_qdrant_collection(qdrant_client, collection_name, text_vector_size=384, feature_vector_size=484):
@@ -644,8 +1113,8 @@ def index_recipes_to_qdrant_batched(
                 f"Processing files {batch_start + 1:,} to {batch_end:,}")
             logger.info(f"{'='*60}")
 
-            # Step 1: Read batch of files and extract data
-            logger.info("Step 1: Reading JSON files...")
+            # Step 1: Read batch of files and extract data using 60 SPECIFIED FIELDS
+            logger.info("Step 1: Reading JSON files and extracting 60 specified fields...")
             batch_data = []
 
             for recipe_path in batch_files:
@@ -657,7 +1126,10 @@ def index_recipes_to_qdrant_batched(
                         total_skipped += 1
                         continue
 
-                    recipe_data = read_recipe_json(recipe_path)
+                    # Extract the 60 specified fields
+                    fields_data = extract_specified_fields(recipe_path)
+                    
+                    # Get basic recipe info
                     description = extract_recipe_description(recipe_path)
                     filename = os.path.basename(recipe_path)
                     country_name = get_country_name(filename)
@@ -666,34 +1138,34 @@ def index_recipes_to_qdrant_batched(
                     # Extract version (stlan) from recipe JSON
                     version = extract_stlan(recipe_path)
                     logger.debug(
-                        f"Recipe {recipe_id}: extracted version={version}")
+                        f"Recipe {recipe_id}: extracted version={version}, "
+                        f"available fields: {len(fields_data['available'])}/60")
 
-                    if recipe_data is not None and isinstance(recipe_data, pd.DataFrame):
-                        if 'charactDescr' in recipe_data.columns and 'valueCharLong' in recipe_data.columns:
-                            features = recipe_data['charactDescr'].tolist()
-                            values = recipe_data['valueCharLong'].tolist()
+                    # Create normalized features and values from the 60 fields
+                    # Uses English feature names for consistent multilingual search
+                    normalized_features, normalized_values = create_normalized_features_values(fields_data)
+                    
+                    # Only process if we have at least some fields
+                    if normalized_features:
+                        # Enhance description with key searchable terms from 60 fields
+                        enhanced_description = normalizer.enhance_description(
+                            description, normalized_features, normalized_values
+                        )
 
-                            # MULTILINGUAL NORMALIZATION: Convert German/French/etc to English
-                            # This enables English queries to match non-English recipes
-                            normalized_features, normalized_values = normalizer.normalize_features(
-                                features, values
-                            )
-
-                            # Enhance description with key searchable terms
-                            enhanced_description = normalizer.enhance_description(
-                                description, features, values
-                            )
-
-                            batch_data.append({
-                                'recipe_id': recipe_id,
-                                'features': normalized_features,
-                                'values': normalized_values,
-                                'original_features': features,  # Keep originals for payload
-                                'original_values': values,
-                                'description': enhanced_description,
-                                'country': country_name,
-                                'version': version
-                            })
+                        batch_data.append({
+                            'recipe_id': recipe_id,
+                            'features': normalized_features,  # English feature names
+                            'values': normalized_values,      # Normalized values
+                            'fields_data': fields_data,       # Full 60 fields structure
+                            'description': enhanced_description,
+                            'country': country_name,
+                            'version': version
+                        })
+                    else:
+                        # Recipe has no matching fields, skip but log
+                        logger.debug(f"Recipe {recipe_id} has no matching fields from 60 specified")
+                        total_skipped += 1
+                        
                 except Exception as e:
                     logger.warning(f"Error reading {recipe_path}: {e}")
                     continue
@@ -745,8 +1217,8 @@ def index_recipes_to_qdrant_batched(
 
             feature_vectors = np.array(feature_vector_list)
 
-            # Step 3: Upload to Qdrant
-            logger.info("Step 3: Uploading to Qdrant...")
+            # Step 3: Upload to Qdrant with STRUCTURED 60 FIELDS PAYLOAD
+            logger.info("Step 3: Uploading to Qdrant with 60 specified fields...")
             points = []
 
             for i, recipe in enumerate(batch_data):
@@ -759,15 +1231,21 @@ def index_recipes_to_qdrant_batched(
                     feature_text = manager._create_feature_text(
                         recipe['features'], recipe['values'])
 
-                    # Store original values for display (preserves original language)
-                    original_features = recipe.get(
-                        'original_features', recipe['features'])
-                    original_values = recipe.get(
-                        'original_values', recipe['values'])
-
-                    # Clean original values for payload display
-                    clean_values = [manager._clean_value(
-                        v) for v in original_values[:50]]
+                    # Get the 60 fields data
+                    fields_data = recipe['fields_data']
+                    
+                    # Build the structured payload for 60 specified fields
+                    # Each field is stored individually for efficient filtering
+                    spec_fields_payload = {}
+                    for field_code in SPECIFIED_FIELDS_ORDERED:
+                        value = fields_data['fields'].get(field_code)
+                        # Store as None (null) if missing, otherwise store the value
+                        spec_fields_payload[field_code] = value
+                    
+                    # Build numerical values for range queries
+                    numerical_payload = {}
+                    for field_code, num_val in fields_data.get('numerical_values', {}).items():
+                        numerical_payload[field_code] = num_val
 
                     point = PointStruct(
                         id=point_id,
@@ -776,16 +1254,32 @@ def index_recipes_to_qdrant_batched(
                             "features": feature_vectors[i].tolist()
                         },
                         payload={
+                            # Basic recipe info
                             "recipe_name": recipe_id,
                             "description": recipe['description'],
-                            # Store ORIGINAL features/values for display (preserves source language)
-                            "features": original_features[:50],
-                            "values": clean_values,
-                            "num_features": len(original_features),
-                            # Store NORMALIZED feature text for debugging/analysis
-                            "feature_text": feature_text[:1000],
                             "country": recipe['country'],
-                            "version": recipe['version']
+                            "version": recipe['version'],
+                            
+                            # 60 SPECIFIED FIELDS - structured for filtering
+                            # Each field stored individually: spec_fields.Z_MAKTX, spec_fields.Z_BRIX, etc.
+                            "spec_fields": spec_fields_payload,
+                            
+                            # Numerical values for range queries (e.g., Z_BRIX > 40)
+                            "numerical": numerical_payload,
+                            
+                            # Field availability metadata
+                            "available_fields": fields_data['available'],
+                            "missing_fields": fields_data['missing'],
+                            "num_available": len(fields_data['available']),
+                            "num_missing": len(fields_data['missing']),
+                            
+                            # Legacy format for backward compatibility
+                            "features": recipe['features'][:50],
+                            "values": [manager._clean_value(v) for v in recipe['values'][:50]],
+                            "num_features": len(recipe['features']),
+                            
+                            # Normalized feature text for text-based search
+                            "feature_text": feature_text[:1000],
                         }
                     )
                     points.append(point)
@@ -898,6 +1392,13 @@ def index_recipes_to_qdrant_batched(
             f"  Categorical features: {len(stats['feature_analysis']['categorical_features'])}")
         logger.info("=" * 60)
 
+        # Create payload indexes for efficient filtering (run AFTER indexing)
+        logger.info("\n" + "=" * 60)
+        logger.info("CREATING PAYLOAD INDEXES FOR 60 SPECIFIED FIELDS")
+        logger.info("(This improves query performance for 600K+ recipes)")
+        logger.info("=" * 60)
+        create_payload_indexes_for_60_fields(qdrant_client, collection_name)
+
         return True
 
     except Exception as e:
@@ -927,7 +1428,11 @@ def main():
         logger.info("Starting Qdrant Vector Index Initialization")
         logger.info("TRUE BATCH PROCESSING with EnhancedTwoStepRecipeManager")
         logger.info("+ MULTILINGUAL FEATURE NORMALIZATION (DE/FR/etc → EN)")
+        logger.info("+ 60 SPECIFIED FIELDS STRUCTURED INDEXING")
         logger.info("=" * 60)
+        logger.info(f"60 Specified Fields: {len(SPECIFIED_FIELDS_ORDERED)} fields")
+        logger.info(f"  - Binary: {len(BINARY_FIELDS)}, Numerical: {len(NUMERICAL_FIELDS)}")
+        logger.info(f"  - Categorical: {len(CATEGORICAL_FIELDS)}, Text: {len(TEXT_FIELDS)}")
         logger.info(f"Qdrant Host: {qdrant_host}")
         logger.info(f"Qdrant Port: {qdrant_port}")
         logger.info(f"Collection Name: {collection_name}")

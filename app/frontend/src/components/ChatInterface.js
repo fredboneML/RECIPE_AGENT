@@ -68,6 +68,134 @@ function ChatInterface() {
         handleSendMessage(question);
     };
 
+    // Render the comparison table with 60 specified fields
+    const renderComparisonTable = () => {
+        // DEBUG: Log BEFORE early return
+        console.log('=== renderComparisonTable CALLED ===');
+        console.log('comparisonTable:', comparisonTable);
+        console.log('has_data:', comparisonTable?.has_data);
+        
+        if (!comparisonTable || !comparisonTable.has_data) {
+            console.log('Early return: comparisonTable or has_data is falsy');
+            return null;
+        }
+
+        // DEBUG: Log what we received
+        console.log('=== COMPARISON TABLE DEBUG ===');
+        console.log('comparisonTable:', comparisonTable);
+        console.log('has field_definitions?', 'field_definitions' in comparisonTable);
+        console.log('field_definitions:', comparisonTable.field_definitions);
+        console.log('field_definitions length:', comparisonTable.field_definitions?.length);
+        console.log('==============================');
+
+        // Check if we have the new format with field_definitions
+        const hasFieldDefinitions = comparisonTable.field_definitions && comparisonTable.field_definitions.length > 0;
+        const recipes = comparisonTable.recipes || [];
+        
+        console.log('hasFieldDefinitions evaluated to:', hasFieldDefinitions);
+        
+        if (recipes.length === 0) return null;
+
+        if (hasFieldDefinitions) {
+            // New format: field_definitions + recipes with values array
+            const fieldDefs = comparisonTable.field_definitions;
+            
+            return (
+                <div className="comparison-table-container">
+                    <h4>Recipe Comparison - 60 Specified Fields</h4>
+                    <div className="table-wrapper">
+                        <table className="comparison-table structured">
+                            <thead>
+                                <tr>
+                                    <th className="field-code-header">Code</th>
+                                    <th className="field-name-header">Field Name</th>
+                                    {recipes.map((recipe, idx) => (
+                                        <th key={idx} className="recipe-value-header">
+                                            {recipe.recipe_name || recipe.recipe_id}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {fieldDefs.map((field, fieldIdx) => {
+                                    // Check if any recipe has a value for this field
+                                    const hasAnyValue = recipes.some(r => 
+                                        r.values && r.values[fieldIdx] && r.values[fieldIdx].trim() !== ''
+                                    );
+                                    
+                                    return (
+                                        <tr key={fieldIdx} className={hasAnyValue ? 'has-value' : 'no-value'}>
+                                            <td className="field-code">{field.code}</td>
+                                            <td className="field-name">{field.display_name}</td>
+                                            {recipes.map((recipe, recipeIdx) => (
+                                                <td key={recipeIdx} className="recipe-value">
+                                                    {recipe.values && recipe.values[fieldIdx] 
+                                                        ? recipe.values[fieldIdx] 
+                                                        : '-'}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="table-legend">
+                        <span className="legend-item has-value-legend">● Fields with values</span>
+                        <span className="legend-item no-value-legend">○ Fields without values</span>
+                    </div>
+                </div>
+            );
+        } else {
+            // Legacy format: recipes with characteristics array
+            // Get all unique characteristics across all recipes
+            const allChars = new Set();
+            recipes.forEach(recipe => {
+                (recipe.characteristics || []).forEach(char => {
+                    if (char.charactDescr) allChars.add(char.charactDescr);
+                });
+            });
+            const sortedChars = Array.from(allChars).sort();
+
+            return (
+                <div className="comparison-table-container">
+                    <h4>Recipe Comparison</h4>
+                    <div className="table-wrapper">
+                        <table className="comparison-table legacy">
+                            <thead>
+                                <tr>
+                                    <th className="field-name-header">Characteristic</th>
+                                    {recipes.map((recipe, idx) => (
+                                        <th key={idx} className="recipe-value-header">
+                                            {recipe.recipe_name || recipe.recipe_id}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {sortedChars.map((charName, charIdx) => (
+                                    <tr key={charIdx}>
+                                        <td className="field-name">{charName}</td>
+                                        {recipes.map((recipe, recipeIdx) => {
+                                            const char = (recipe.characteristics || []).find(
+                                                c => c.charactDescr === charName
+                                            );
+                                            return (
+                                                <td key={recipeIdx} className="recipe-value">
+                                                    {char?.valueCharLong || '-'}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        }
+    };
+
     return (
         <div className="chat-interface">
             <div className="messages-container">
@@ -80,48 +208,7 @@ function ChatInterface() {
                 {error && <div className="error">{error}</div>}
             </div>
 
-            {comparisonTable && comparisonTable.has_data && (
-                <div className="comparison-table-container">
-                    <h4>Recipe Comparison</h4>
-                    <div className="table-wrapper">
-                        <table className="comparison-table">
-                            <thead>
-                                <tr className="recipe-names">
-                                    {comparisonTable.recipes.map((recipe, index) => (
-                                        <th key={index} colSpan="2" className="recipe-header">
-                                            {recipe.recipe_name || recipe.recipe_id}
-                                        </th>
-                                    ))}
-                                </tr>
-                                <tr className="column-headers">
-                                    {comparisonTable.recipes.map((recipe, index) => (
-                                        <React.Fragment key={index}>
-                                            <th className="characteristic-header">Characteristic</th>
-                                            <th className="value-header">Value</th>
-                                        </React.Fragment>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {comparisonTable.recipes[0]?.characteristics.map((_, charIndex) => (
-                                    <tr key={charIndex}>
-                                        {comparisonTable.recipes.map((recipe, recipeIndex) => (
-                                            <React.Fragment key={recipeIndex}>
-                                                <td className="characteristic-cell">
-                                                    {recipe.characteristics[charIndex]?.charactDescr || ''}
-                                                </td>
-                                                <td className="value-cell">
-                                                    {recipe.characteristics[charIndex]?.valueCharLong || ''}
-                                                </td>
-                                            </React.Fragment>
-                                        ))}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            )}
+            {renderComparisonTable()}
 
             {followupQuestions && followupQuestions.length > 0 && (
                 <div className="followup-questions">
@@ -166,4 +253,4 @@ function ChatInterface() {
     );
 }
 
-export default ChatInterface; 
+export default ChatInterface;

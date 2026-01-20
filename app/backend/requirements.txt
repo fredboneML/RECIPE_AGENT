@@ -90,6 +90,7 @@ groq
 
 # JWT Authentication
 python-jose[cryptography]==3.3.0
+cachetools>=5.3.0
 
 # Document Processing
 # unstructured[all-docs] includes OCR support for images and screenshots
