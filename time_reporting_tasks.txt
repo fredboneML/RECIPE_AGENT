@@ -1,0 +1,40 @@
+1. Analyzed version filter requirements for recipe search functionality
+2. Designed version filter parameter structure (P, L, Missing, All)
+3. Implemented version filter in QdrantRecipeManager.search_by_features method
+4. Added version filter support to search_by_text_description method
+5. Integrated version filter into two_step_search workflow
+6. Updated API endpoint to accept version_filter parameter
+7. Added version filter validation and logging
+8. Tested version filter with different filter values (P, L, Missing)
+9. Updated frontend to pass version filter to backend API
+10. Added version field indexing in Qdrant collection schema
+11. Created Qdrant named vectors (text and features) for optimized search
+12. Implemented feature vector encoding with 484 dimensions (384 text + 100 categorical)
+13. Added pre-analysis of 349 unique features from feature map
+14. Implemented binary feature detection and encoding logic
+15. Created numerical feature normalization to [-1.0, 1.0] range
+16. Built categorical feature label encoding system
+17. Optimized Qdrant collection configuration for faster vector search
+18. Added timeout handling for large database searches (increased to 60s)
+19. Implemented retry logic with circuit breaker for Qdrant operations
+20. Created feature analyzer module for pre-processing feature types
+21. Added anti-hallucination rules to DataExtractorRouterAgent prompts
+22. Implemented critical DO NOT HALLUCINATE warnings in prompt templates
+23. Enhanced prompt validation to prevent adding information not in brief
+24. Added explicit schema validation rules to prevent hallucinated fields
+25. Created tenant isolation rules in SQL generator to reduce hallucinations
+26. Implemented base_data CTE structure to enforce data boundaries
+27. Added error context handling to retry prompts with hallucination prevention
+28. Updated prompt templates with explicit table and column restrictions
+29. Created Azure AD SSO authentication endpoint (/api/auth/azure-callback)
+30. Implemented Azure AD token validation using JWKS
+31. Built Azure AD user and group mapping database models
+32. Created role mapper to convert Azure AD groups to application roles
+33. Implemented JWT token generation for SSO authenticated users
+34. Added Azure AD configuration management (tenant ID, client ID)
+35. Created SSO enabled/disabled configuration flags
+36. Built Azure AD user record creation and linking to local users
+37. Implemented group mapping admin API endpoints
+38. Added frontend Azure AD authentication flow integration
+39. Created SSO callback handling and token refresh logic
+40. Tested end-to-end SSO authentication flow with Azure AD

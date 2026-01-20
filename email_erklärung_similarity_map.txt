@@ -1,0 +1,40 @@
+Hallo,
+
+gerne erkläre ich die Similarity Map im Detail:
+
+**Die Achsen (Skalen):**
+- **TSNE Component 1** (x-Achse, Bereich ca. -20 bis 18): Diese Dimension repräsentiert eine der Hauptrichtungen, in die die Rezeptähnlichkeit projiziert wurde. Sie zeigt die Ähnlichkeit der Rezepte basierend auf ihren Eigenschaften.
+- **Recipe Index** (y-Achse): Diese Achse zeigt die sequenzielle Position des Rezepts in unserer Datenbank (von 0 bis ca. 140+). Rezepte mit niedrigeren Indizes (frühere Einträge) sind weiter unten, Rezepte mit höheren Indizes (spätere Einträge) weiter oben.
+
+Die x-Achse ist das Ergebnis einer mathematischen Transformation (t-SNE), die die Ähnlichkeit zwischen Rezepten aus einem hochdimensionalen Raum (mit Hunderten von Merkmalen wie Geschmack, Farbe, pH-Wert, Brix, Stabilisatoren, etc.) in eine Dimension überführt. Die y-Achse zeigt dagegen die chronologische oder sequenzielle Reihenfolge der Rezepte in der Datenbank. Die Kombination ermöglicht es, sowohl die Ähnlichkeit (horizontal) als auch die Position in der Datenbank (vertikal) gleichzeitig zu visualisieren.
+
+**Die Farben:**
+- Die Farbskala rechts zeigt ebenfalls den "Recipe Index" – also die sequenzielle Position des Rezepts in unserer Datenbank.
+- **Lila** (unten in der Skala) = niedrige Indizes (0-20), frühe Rezepte in der Datenbank
+- **Blau/Türkis** (Mitte) = mittlere Indizes (40-80)
+- **Grün/Gelb** (oben) = hohe Indizes (120-140+), spätere Rezepte in der Datenbank
+
+Die Farben korrespondieren mit der y-Achsen-Position: Rezepte weiter unten in der Grafik (niedrige y-Werte) sind tendenziell lila/blau, Rezepte weiter oben (hohe y-Werte) sind tendenziell grün/gelb. Dies bestätigt, dass die y-Achse tatsächlich den Recipe Index darstellt.
+
+**Interpretation für die Präsentation:**
+- **Nähe = Ähnlichkeit**: Rezepte, die nahe beieinander liegen, sind sich in ihren Eigenschaften (Geschmack, Zusammensetzung, technische Parameter) sehr ähnlich. Je näher zwei Punkte, desto ähnlicher die Rezepte.
+- **Cluster (Gruppen)**: Die Grafik zeigt mehrere deutlich erkennbare Cluster:
+  - **Großer Cluster links oben**: Eine große Gruppe ähnlicher Rezepte (viele lila/türkise Punkte)
+  - **Cluster rechts**: Zwei weitere Gruppen, die sich von der linken Gruppe unterscheiden (mehr grün/gelbe Punkte)
+  - Diese Cluster repräsentieren Rezeptfamilien mit ähnlichen Eigenschaften (z.B. alle Fruchtzubereitungen mit ähnlichem Geschmacksprofil, oder Rezepte mit ähnlichen technischen Parametern)
+- **Abstand**: Große Abstände zwischen Clustern bedeuten, dass diese Rezeptgruppen sich deutlich unterscheiden (z.B. unterschiedliche Produktkategorien oder Anwendungen).
+- **Dichte**: Bereiche mit vielen überlappenden Punkten (durchscheinende Darstellung) zeigen, dass dort viele sehr ähnliche Rezepte existieren.
+
+**Praktischer Nutzen:**
+Die Grafik zeigt auf einen Blick:
+- Welche Rezepte unserer Datenbank sich ähneln (nahe Punkte)
+- Welche Rezeptfamilien es gibt (Cluster)
+- Wo es Lücken gibt (große leere Bereiche = mögliche neue Produktkategorien)
+- Wie vielfältig unser Portfolio ist (viele Cluster = hohe Vielfalt)
+
+Dies ist eine wertvolle Übersicht für die Produktentwicklung, Rezeptoptimierung und Identifikation von Produktlücken im Portfolio.
+
+Bei weiteren Fragen gerne melden!
+
+Beste Grüße,
+Fred
