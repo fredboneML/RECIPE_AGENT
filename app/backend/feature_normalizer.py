@@ -402,6 +402,12 @@ class FeatureNormalizer:
         if lower_value in self._exact_value_mappings:
             return self._exact_value_mappings[lower_value]
 
+        # Check positive/negative value sets for exact matches
+        if lower_value in self._positive_values:
+            return "Yes"
+        if lower_value in self._negative_values:
+            return "No"
+
         # Check feature-specific value mappings
         normalized_feature = self.normalize_feature_name(feature_name)
         if normalized_feature in self.value_mappings:
@@ -414,13 +420,13 @@ class FeatureNormalizer:
                     return "No"
                 return mapped
 
-        # Check if value contains negative indicators
-        for neg in ["kein", "keine", "nicht", "ohne", "no ", "not "]:
+        # Check if value contains negative indicators (check longer patterns first)
+        for neg in ["without", "kein", "keine", "nicht", "ohne", "no ", "not ", "-free", "free", "none"]:
             if neg in lower_value:
                 return "No"
 
         # Check if value contains positive indicators
-        for pos in ["enthalten", "mit ", "yes", "ja"]:
+        for pos in ["enthalten", "mit ", "yes", "ja", "with ", "contains"]:
             if pos in lower_value:
                 return "Yes"
 

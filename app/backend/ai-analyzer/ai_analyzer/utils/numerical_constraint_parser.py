@@ -232,23 +232,23 @@ def parse_constraint_text(text: str) -> Tuple[str, Optional[float], Optional[flo
     """
     text = normalize_decimal(text.lower().strip())
     
-    # Pattern: ">30%" or "> 30" or ">30"
-    match = re.match(r'^>\s*(\d+\.?\d*)', text)
-    if match:
+    # Pattern: ">30%" or "> 30" or ">30" (can appear anywhere in text)
+    match = re.search(r'>\s*(\d+\.?\d*)', text)
+    if match and not re.search(r'>=', text):  # Make sure it's not >=
         return ('gt', float(match.group(1)), None)
     
     # Pattern: ">=30" or ">= 30"
-    match = re.match(r'^>=\s*(\d+\.?\d*)', text)
+    match = re.search(r'>=\s*(\d+\.?\d*)', text)
     if match:
         return ('gte', float(match.group(1)), None)
     
-    # Pattern: "<4.1" or "< 4.1" or "<4,1"
-    match = re.match(r'^<\s*(\d+\.?\d*)', text)
-    if match:
+    # Pattern: "<4.1" or "< 4.1" or "<4,1" (can appear anywhere in text)
+    match = re.search(r'<\s*(\d+\.?\d*)', text)
+    if match and not re.search(r'<=', text):  # Make sure it's not <=
         return ('lt', float(match.group(1)), None)
     
     # Pattern: "<=4.1" or "<= 4.1"
-    match = re.match(r'^<=\s*(\d+\.?\d*)', text)
+    match = re.search(r'<=\s*(\d+\.?\d*)', text)
     if match:
         return ('lte', float(match.group(1)), None)
     
@@ -289,13 +289,13 @@ def parse_constraint_text(text: str) -> Tuple[str, Optional[float], Optional[flo
         value = float(match.group(1) or match.group(2))
         return ('gte', value, None)
     
-    # Pattern: "more than 30" or "greater than 30" or "above 30"
-    match = re.search(r'(?:more|greater|above|over)\s*(?:than)?\s*(\d+\.?\d*)', text)
+    # Pattern: "more than 30" or "greater than 30" or "above 30" or "über 30" or "plus de 30"
+    match = re.search(r'(?:more|greater|above|over|über|plus\s*de)\s*(?:than)?\s*(\d+\.?\d*)', text)
     if match:
         return ('gt', float(match.group(1)), None)
     
-    # Pattern: "less than 4.1" or "below 4.1" or "under 4.1"
-    match = re.search(r'(?:less|below|under)\s*(?:than)?\s*(\d+\.?\d*)', text)
+    # Pattern: "less than 4.1" or "below 4.1" or "under 4.1" or "unter 4.1" or "moins de 4.1"
+    match = re.search(r'(?:less|below|under|unter|moins\s*de)\s*(?:than)?\s*(\d+\.?\d*)', text)
     if match:
         return ('lt', float(match.group(1)), None)
     
@@ -309,8 +309,8 @@ def parse_constraint_text(text: str) -> Tuple[str, Optional[float], Optional[flo
     if match:
         return ('lte', float(match.group(1)), None)
     
-    # Pattern: "ca. 70" or "~70" or "approximately 70" or "about 70"
-    match = re.search(r'(?:ca\.?|~|approximately|about|circa|ungefähr)\s*(\d+\.?\d*)', text)
+    # Pattern: "ca. 70" or "~70" or "approximately 70" or "about 70" or "roughly 70"
+    match = re.search(r'(?:ca\.?|~|approximately|about|circa|ungefähr|roughly|environ)\s*(\d+\.?\d*)', text)
     if match:
         value = float(match.group(1))
         # Approximate → ±10% range
@@ -441,6 +441,85 @@ Examples:
 
 Return a JSON array of constraints. If no numerical constraints found, return [].
 """
+
+
+# =============================================================================
+# CONVENIENCE FUNCTIONS FOR TESTS
+# =============================================================================
+
+# Alias for tests - maps common brief terms to Z_* codes
+NUMERICAL_FIELD_MAPPINGS: Dict[str, str] = {
+    **{k.lower(): v for k, v in BRIEF_FIELD_TO_CODE.items()},
+    # Add additional mappings with original case
+    'Brix': 'Z_BRIX',
+    'pH': 'Z_PH',
+    'Fruit content': 'Z_FRUCHTG',
+    'Fruchtgehalt': 'Z_FRUCHTG',
+    'Viscosity': 'Z_VISK20S',
+    'Viskosität': 'Z_VISK20S',
+    'Dosage': 'Z_DOSIER',
+    'Dosierung': 'Z_DOSIER',
+    'Sugar': 'Z_ZUCKER',
+    'Zucker': 'Z_ZUCKER',
+    'Fat': 'Z_FETTST',
+    'Protein': 'Z_PROT',
+    'Salt': 'Z_SALZ',
+    'Water activity': 'Z_FGAW',
+}
+
+
+def parse_numerical_constraint(text: str) -> Optional[Dict[str, float]]:
+    """
+    Parse a numerical constraint from text and return Qdrant filter format.
+    
+    This is a convenience function that returns just the filter dict.
+    
+    Args:
+        text: Constraint text like ">30%", "<4.1", "6-9", "30+/-5°", etc.
+        
+    Returns:
+        Dict in Qdrant format: {"gt": 30.0}, {"gte": 25.0, "lte": 35.0}, etc.
+        Returns None if parsing fails or text is a placeholder.
+    """
+    if not text or not text.strip():
+        return None
+    
+    text = text.strip()
+    
+    # Skip placeholder values
+    placeholders = ['n/a', 'n.a.', 'tbd', 'x', '-', 'to be confirmed', 
+                   'to be determined', 'na', 'none', '']
+    if text.lower() in placeholders:
+        return None
+    
+    # Skip non-numeric text (no digits at all)
+    if not any(c.isdigit() for c in text):
+        return None
+    
+    operator, val1, val2 = parse_constraint_text(text)
+    
+    if operator == 'unknown' or val1 is None:
+        return None
+    
+    if operator == 'gt':
+        return {"gt": val1}
+    elif operator == 'gte':
+        return {"gte": val1}
+    elif operator == 'lt':
+        return {"lt": val1}
+    elif operator == 'lte':
+        return {"lte": val1}
+    elif operator == 'range':
+        result = {}
+        if val1 is not None:
+            result["gte"] = val1
+        if val2 is not None:
+            result["lte"] = val2
+        return result if result else None
+    elif operator == 'eq':
+        return {"eq": val1}
+    
+    return None
 
 
 if __name__ == "__main__":
