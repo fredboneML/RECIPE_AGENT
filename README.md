@@ -1,0 +1,742 @@
+# Recipe Search Agent
+
+An intelligent recipe search system that uses AI agents to extract requirements from customer briefs and find matching recipes from a database of 600K+ recipes using semantic search and feature-based filtering.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Core Agents & End-to-End Flow](#core-agents--end-to-end-flow)
+- [Prerequisites](#prerequisites)
+- [Deployment on a New Server](#deployment-on-a-new-server)
+  - [Step 1: Infrastructure Setup](#step-1-infrastructure-setup)
+  - [Step 2: Database Initialization](#step-2-database-initialization)
+  - [Step 3: Qdrant Vector Database Setup](#step-3-qdrant-vector-database-setup)
+  - [Step 4: Recipe Indexing](#step-4-recipe-indexing)
+  - [Step 5: Create Payload Indexes](#step-5-create-payload-indexes)
+  - [Step 6: Application Deployment](#step-6-application-deployment)
+  - [Step 7: User Management](#step-7-user-management)
+- [Environment Variables](#environment-variables)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview
+
+The Recipe Search Agent is a production-ready system that:
+
+- **Extracts structured information** from customer briefs (PDFs, images, text) using LLM-powered agents
+- **Searches 600K+ recipes** using semantic similarity and feature-based matching
+- **Filters by numerical constraints** (Brix >40, pH <4.1, fruit content 30-40%, etc.)
+- **Handles multilingual queries** (English, German, French, Italian, Spanish, Portuguese, Dutch, Danish)
+- **Provides comparison tables** showing 60 specified fields across matching recipes
+- **Supports SSO authentication** via Azure AD (Microsoft Entra ID)
+
+---
+
+## Architecture
+
+### Components
+
+1. **Frontend** (React): User interface for uploading briefs and viewing results
+2. **Backend** (FastAPI): REST API with AI agents for extraction and search
+3. **PostgreSQL**: Stores user data, conversations, and translation caches
+4. **Qdrant**: Vector database for semantic recipe search (600K+ recipes)
+5. **Docker Compose**: Orchestrates all services
+
+### Key Features
+
+- **60 Specified Fields**: Structured extraction of key recipe attributes (Brix, pH, viscosity, allergens, etc.)
+- **Binary Opposition Mapping**: Handles "no sugar" vs "sugar", "preservative-free", etc.
+- **Multilingual Normalization**: Converts German/French/etc. feature names to English for consistent search
+- **Numerical Range Filtering**: Efficient filtering on numerical constraints using Qdrant payload indexes
+- **Two-Step Search**: Combines text similarity with feature matching for precise results
+
+---
+
+## Core Agents & End-to-End Flow
+
+### Flow Diagram
+
+```
+User Uploads Brief → Data Extractor Router Agent → Recipe Search Agent → Qdrant → Results → UI
+```
+
+### 1. **Data Extractor Router Agent** (`data_extractor_router.py`)
+
+**Purpose**: Extracts structured information from customer briefs
+
+**Input**: 
+- Customer brief (PDF, image, or text)
+- Multilingual content (EN, DE, FR, IT, ES, PT, NL, DA)
+
+**Processing**:
+1. Uses LLM (gpt-4o-mini) to extract:
+   - **Text description**: Natural language summary of the brief
+   - **Features**: Structured list of product attributes (flavors, colors, stabilizers, etc.)
+   - **Feature values**: Corresponding values for each feature
+   - **Numerical constraints**: Range queries (e.g., "Brix >40", "pH <4.1", "fruit content 30-40%")
+   - **Binary fields**: Yes/No attributes (preservatives, artificial colors, GMO, etc.)
+
+2. Normalizes multilingual features to English using `feature_normalizer.py`
+
+3. Parses numerical constraints using `numerical_constraint_parser.py`:
+   - `>30%` → `{"gt": 30.0}`
+   - `<4.1` → `{"lt": 4.1}`
+   - `30+/-5°` → `{"gte": 25.0, "lte": 35.0}`
+   - `6-9 +/- 2` → `{"gte": 7.0, "lte": 11.0}`
+
+**Output**:
+```python
+{
+    "search_type": "two_step",
+    "text_description": "Peach and apricot fruit preparation...",
+    "features": ["Flavour: Peach, Apricot", "Color: Vibrant deep orange", ...],
+    "feature_values": ["Peach", "Apricot", "Vibrant deep orange", ...],
+    "numerical_filters": {
+        "Z_FRUCHTG": {"gt": 30.0},
+        "Z_PH": {"lt": 4.1},
+        "Z_BRIX": {"gte": 25.0, "lte": 35.0},
+        "Z_VISK20S": {"gte": 7.0, "lte": 11.0}
+    },
+    "binary_filters": {
+        "Z_INH04": "No",  # No preservatives
+        "Z_INH05": "No",  # No artificial colors
+        "Z_INH09": "Yes"  # Natural flavors
+    },
+    "reasoning": "Extracted flavors, product segment..."
+}
+```
+
+### 2. **Recipe Search Agent** (`recipe_search_agent.py`)
+
+**Purpose**: Searches Qdrant for matching recipes and generates comparison table
+
+**Input**: Output from Data Extractor Router Agent
+
+**Processing**:
+
+1. **Two-Step Search** (`qdrant_recipe_manager.py`):
+   - **Step 1a**: Text-based semantic search using `paraphrase-multilingual-MiniLM-L12-v2` embeddings
+   - **Step 1b**: Feature-based search using 484-dimensional feature vectors
+   - **Step 2**: Refine and merge results, applying numerical and binary filters
+
+2. **Filtering**:
+   - **Version filter**: P (Production) or L (Legacy)
+   - **Country filter**: Optional country-specific filtering
+   - **Numerical range filters**: Applied to `numerical.Z_BRIX`, `numerical.Z_PH`, etc.
+   - **Binary filters**: Applied to `spec_fields.Z_INH04`, `spec_fields.Z_INH05`, etc.
+
+3. **Scoring**:
+   - Text similarity score (15% weight)
+   - Feature search score (65% weight)
+   - Feature match score (20% weight)
+   - Flavor boost (+0.25 for flavor matches)
+
+4. **Translation**:
+   - Detects query language (EN, DE, FR, etc.)
+   - Translates field names using cached translations from database
+   - Translates recipe values if needed
+
+5. **Comparison Table Generation**:
+   - Extracts all 60 specified fields for top 3 recipes
+   - Orders fields according to `SPECIFIED_FIELDS_60` constant
+   - Creates structured table with field codes, names, and values
+
+**Output**:
+```python
+{
+    "recipes": [
+        {
+            "recipe_name": "000000000000242036_PL10_06_P",
+            "recipe_id": "...",
+            "values": [None, "Yes", None, ...]  # 60 values in order
+        },
+        ...
+    ],
+    "field_definitions": [
+        {"code": "Z_MAKTX", "en": "Material short text", "de": "Materialkurztext", "display": "Materialkurztext"},
+        ...
+    ],
+    "has_data": True
+}
+```
+
+### 3. **Response Generation**
+
+The backend uses LLM to:
+- Generate natural language explanation of results
+- Create follow-up questions for refinement
+- Format the response in the detected language
+
+**Final Response**:
+```json
+{
+    "response": "Ich habe 3 ähnliche Rezepte gefunden...",
+    "followup_questions": ["1. Welche Geschmacksrichtungen...", ...],
+    "comparison_table": {
+        "field_definitions": [...],
+        "recipes": [...],
+        "has_data": true
+    }
+}
+```
+
+---
+
+## Prerequisites
+
+### Software Requirements
+
+- **Docker** and **Docker Compose**
+- **Python 3.9+** (for running scripts outside containers)
+- **Git**
+- **PostgreSQL 13+** (via Docker)
+- **Qdrant** (via Docker)
+
+### Data Requirements
+
+- Recipe JSON files in `app/data/` directory
+- Feature mapping file: `Test_Input/charactDescr_valueCharLong_map.json`
+- Feature extraction mappings: `app/data/feature_extraction_mappings.json`
+
+### API Keys
+
+- **OpenAI API Key** (or Azure OpenAI) for LLM operations
+- **Azure AD credentials** (if using SSO)
+
+---
+
+## Deployment on a New Server
+
+### Step 1: Infrastructure Setup
+
+1. **Clone the repository**:
+```bash
+git clone https://github.com/fredboneML/RECIPE_AGENT.git
+cd RECIPE_AGENT/app
+```
+
+2. **Create environment file**:
+```bash
+cp ../env.example .env
+# Edit .env with your configuration (see Environment Variables section)
+```
+
+3. **Create Docker network**:
+```bash
+docker network create app-network
+```
+
+4. **Deploy infrastructure** (PostgreSQL + Qdrant):
+```bash
+./deploy-infrastructure.sh
+```
+
+This will:
+- Start PostgreSQL database
+- Start Qdrant vector database
+- Wait for both services to be ready
+
+**Verify infrastructure**:
+```bash
+# Check PostgreSQL
+docker-compose -f infrastructure-compose.yml exec database pg_isready -U ${POSTGRES_USER}
+
+# Check Qdrant
+curl http://localhost:6333/healthz
+```
+
+---
+
+### Step 2: Database Initialization
+
+The database is automatically initialized by the `db_init` container when infrastructure is deployed. However, you can also run it manually:
+
+```bash
+# Inside backend container or with Python environment
+cd app/backend
+python3 init_db.py
+```
+
+**What it does**:
+- Creates all required tables:
+  - `users`: User authentication
+  - `user_memory`: Conversation history
+  - `query_cache`: Query result caching
+  - `recipe_translation_cache`: Cached recipe translations
+  - `field_name_translation_cache`: Cached field name translations
+  - `azure_ad_users`: Azure AD user tracking (if SSO enabled)
+  - `azure_ad_group_mappings`: Group-to-role mappings (if SSO enabled)
+- Creates indexes for performance
+- Sets up triggers for automatic password hashing
+- Creates initial admin and read-only users (from `.env`)
+
+**Verify database**:
+```bash
+docker-compose -f infrastructure-compose.yml exec database psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c "\dt"
+```
+
+---
+
+### Step 3: Qdrant Vector Database Setup
+
+Qdrant is started automatically with infrastructure. The collection is created during recipe indexing.
+
+**Verify Qdrant**:
+```bash
+curl http://localhost:6333/collections
+```
+
+**Check collection status** (after indexing):
+```bash
+curl http://localhost:6333/collections/food_recipes_two_step | jq '{points: .result.points_count, status: .result.status}'
+```
+
+---
+
+### Step 4: Recipe Indexing
+
+**IMPORTANT**: Indexing 600K recipes can take several hours. Run this in a screen/tmux session.
+
+#### Recipe Encoding Process
+
+Before indexing, recipes undergo sophisticated encoding to ensure accurate search matching:
+
+**1. Field Extraction (60 Specified Fields)**
+- Extracts exactly 60 predefined fields (Z_MAKTX, Z_BRIX, Z_PH, Z_FRUCHTG, etc.)
+- Handles missing fields gracefully (stores as `None` in payload)
+- Maintains field order according to `SPECIFIED_FIELDS_ORDERED`
+
+**2. Multilingual Feature Normalization**
+- **Feature Name Normalization**: Converts German/French/etc. feature names to English
+  - German "Stärke" → English "Starch"
+  - German "Künstliche Farben" → English "Artificial colors"
+  - Uses `FeatureNormalizer` with mappings from `feature_extraction_mappings.json`
+- **Value Normalization**: Converts multilingual values to standardized English
+  - German "Ja" / "Nein" → English "Yes" / "No"
+  - German "Stärke enthalten" → English "Yes"
+  - German "keine künstl. Farbe" → English "No"
+  - French "Oui" / "Non" → English "Yes" / "No"
+- **Purpose**: Enables English queries to match German/French-indexed recipes via vector similarity
+
+**3. Binary Opposition Mapping**
+- **Detects binary features**: Features with Yes/No, with/without, present/absent patterns
+- **Maps oppositions**: 
+  - "no sugar" → encoded as -1.0 (negative)
+  - "sugar" → encoded as +1.0 (positive)
+  - "preservative-free" → encoded as -1.0
+  - "with preservatives" → encoded as +1.0
+- **Multilingual support**: Handles German ("nein", "ohne"), French ("non", "sans"), etc.
+- **Purpose**: Ensures "no preservatives" query matches "preservative-free" recipes
+
+**4. Feature Type Detection**
+- **Binary**: Yes/No, with/without patterns → encoded as -1.0, 0.0, or +1.0
+- **Numerical**: Brix, pH, viscosity, percentages → normalized to [-1, 1] range
+- **Categorical**: Flavors, colors, stabilizers → hash-based encoding (0-1 range)
+- **Text**: Material descriptions → embedded using SentenceTransformer
+
+**5. Vector Creation**
+
+Each recipe is encoded into **two named vectors** in Qdrant:
+
+**a) Text Vector (384 dimensions)**
+- Created from searchable text: `"Material short text: FP Cherry Vanilla Drink, Standard product: Yes, Brix: 49.0, ..."`
+- Uses `paraphrase-multilingual-MiniLM-L12-v2` embedding model
+- Enables semantic similarity search for natural language queries
+
+**b) Feature Vector (484 dimensions)**
+- **First 384 dim**: Text embedding of normalized feature text
+- **Last 100 dim**: Categorical encoding of features
+  - Binary features: -1.0 (negative), 0.0 (missing), +1.0 (positive)
+  - Numerical features: Normalized to [-1, 1] (e.g., Brix 50 → 0.5)
+  - Categorical features: Hash-based encoding (0-1 range)
+- Enables precise feature-based matching
+
+**6. Payload Structure**
+
+Each recipe point in Qdrant stores:
+```json
+{
+  "recipe_name": "000000000000242036_PL10_06_P",
+  "description": "Peach and apricot fruit preparation...",
+  "country": "PL",
+  "version": "P",
+  "spec_fields": {
+    "Z_MAKTX": "FP Cherry Vanilla Drink",
+    "Z_INH01": "Yes",
+    "Z_BRIX": null,  // Missing field
+    ...
+  },
+  "numerical": {
+    "Z_BRIX": 49.0,
+    "Z_PH": 3.7,
+    "Z_FRUCHTG": 61.6,
+    ...
+  },
+  "feature_text": "Material short text: FP Cherry Vanilla Drink | Standard product: Yes | ...",
+  "num_available": 30,
+  "num_missing": 30
+}
+```
+
+**7. Batch Processing**
+- Processes recipes in configurable batches (default: 1000 files per batch)
+- Uses `EnhancedTwoStepRecipeManager` for consistent encoding
+- Analyzes feature patterns across batches to build binary opposition mappings
+- Upserts to Qdrant in smaller batches (default: 100 points per upsert)
+
+**Key Benefits**:
+- ✅ **Multilingual search**: English queries match German/French recipes
+- ✅ **Binary opposition**: "no sugar" matches "sugar-free" recipes
+- ✅ **Consistent encoding**: Same logic used for indexing and search
+- ✅ **Efficient storage**: Only stores available fields, marks missing as `None`
+
+1. **Prepare recipe data**:
+   - Place all recipe JSON files in `app/data/`
+   - Ensure `Test_Input/charactDescr_valueCharLong_map.json` exists
+
+2. **Run indexing script**:
+```bash
+cd app/backend
+
+# Set environment variables
+export QDRANT_HOST=localhost  # or 'qdrant' if in Docker network
+export QDRANT_PORT=6333
+export RECIPE_COLLECTION_NAME=food_recipes_two_step
+export EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2
+export RECIPE_DATA_DIR=/path/to/app/data
+export FEATURE_MAP_PATH=/path/to/Test_Input/charactDescr_valueCharLong_map.json
+export FEATURE_MAPPINGS_PATH=/path/to/app/data/feature_extraction_mappings.json
+
+# Run indexing
+python3 init_vector_index_qdrant.py
+```
+
+**Or use Docker** (if running in container):
+```bash
+docker-compose -f infrastructure-compose.yml run --rm vector_index_init
+```
+
+**What it does**:
+- Creates Qdrant collection `food_recipes_two_step` with named vectors:
+  - `text`: 384-dimensional embeddings for semantic search
+  - `features`: 484-dimensional feature vectors (384 text + 100 categorical)
+- Extracts 60 specified fields from each recipe
+- Normalizes multilingual features to English
+- Applies binary opposition mapping
+- Indexes recipes in batches (configurable batch size)
+- Stores payload with:
+  - `spec_fields`: All 60 specified fields (with `None` for missing)
+  - `numerical`: Numerical values for range queries
+  - `country`, `version`, `recipe_name`, `description`, etc.
+
+**Monitor progress**:
+```bash
+# Check Qdrant collection size
+curl -s http://localhost:6333/collections/food_recipes_two_step | jq '.result.points_count'
+
+# Check logs
+docker-compose -f infrastructure-compose.yml logs -f vector_index_init
+```
+
+---
+
+### Step 5: Create Payload Indexes
+
+**CRITICAL**: Without payload indexes, searches with numerical filters will timeout on large databases!
+
+After indexing a significant portion of recipes (e.g., 200K+), create indexes:
+
+```bash
+cd app/backend
+python3 create_payload_indexes.py localhost 6333
+```
+
+**What it creates**:
+- **FLOAT indexes** for numerical fields:
+  - `numerical.Z_BRIX`, `numerical.Z_PH`, `numerical.Z_FRUCHTG`, etc.
+  - Enables fast range queries (`>30`, `<4.1`, `25-35`, etc.)
+- **KEYWORD indexes** for spec_fields:
+  - `spec_fields.Z_INH01`, `spec_fields.Z_INH04`, etc.
+  - Enables fast exact match filtering
+- **Metadata indexes**:
+  - `version`, `country`, `recipe_name`
+- **TEXT index**:
+  - `description` for full-text search
+
+**Verify indexes**:
+```bash
+curl -s http://localhost:6333/collections/food_recipes_two_step | jq '.result.payload_schema'
+```
+
+You should see entries like:
+```json
+{
+  "numerical.Z_BRIX": {"data_type": "Float", ...},
+  "numerical.Z_PH": {"data_type": "Float", ...},
+  ...
+}
+```
+
+**Note**: Index creation can take time for large collections. The script will wait for each index to be created.
+
+---
+
+### Step 6: Application Deployment
+
+1. **Deploy application**:
+```bash
+cd app
+./deploy-app.sh
+```
+
+This will:
+- Build frontend and backend containers
+- Start the application services
+- Connect to the `app-network` Docker network
+
+2. **Verify deployment**:
+```bash
+# Check backend health
+curl http://localhost:8000/health
+
+# Check frontend (if accessible)
+curl http://localhost:3000
+```
+
+3. **View logs**:
+```bash
+docker-compose -f app-compose.yml logs -f
+```
+
+---
+
+### Step 7: User Management
+
+### Option A: Add Users Without SSO (SQL)
+
+1. **Connect to database**:
+```bash
+docker-compose -f infrastructure-compose.yml exec database psql -U ${POSTGRES_USER} -d ${POSTGRES_DB}
+```
+
+2. **Insert user** (password will be auto-hashed by trigger):
+```sql
+-- Insert user (password will be auto-generated if not provided)
+INSERT INTO users (username, password_hash, role) 
+VALUES ('newuser', 'plaintext_password_here', 'read_only')
+ON CONFLICT (username) DO NOTHING;
+
+-- Or let trigger generate password
+INSERT INTO users (username, role) 
+VALUES ('newuser', 'read_only');
+
+-- Get generated password
+SELECT * FROM get_generated_password('newuser');
+```
+
+**Available roles**:
+- `admin`: Full access
+- `write`: Can create/edit recipes
+- `read_only`: Read-only access
+
+### Option B: Add Users With SSO (Azure AD)
+
+1. **Follow Azure AD SSO Setup**:
+   - See `app/docs/AZURE_AD_SSO_SETUP.md` for detailed instructions
+   - Create Azure AD app registration
+   - Configure security groups
+   - Set up group-to-role mappings
+
+2. **Configure environment variables**:
+```bash
+# In .env file
+AZURE_AD_TENANT_ID=your-tenant-id
+AZURE_AD_CLIENT_ID=your-client-id
+SSO_ENABLED=true
+LOCAL_AUTH_ENABLED=true  # Keep both enabled during migration
+```
+
+3. **Create group mappings in database**:
+```sql
+-- Insert group mappings (use Object IDs from Azure AD)
+INSERT INTO azure_ad_group_mappings (group_id, group_name, app_role) VALUES
+('group-object-id-1', 'Recipe-Agent-Admins', 'admin'),
+('group-object-id-2', 'Recipe-Agent-Writers', 'write'),
+('group-object-id-3', 'Recipe-Agent-Users', 'read_only');
+```
+
+4. **Users are automatically created** on first SSO login
+
+**Verify SSO setup**:
+```bash
+# Check if tables exist
+docker-compose -f infrastructure-compose.yml exec database psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c "SELECT * FROM azure_ad_group_mappings;"
+```
+
+---
+
+## Environment Variables
+
+### Required Variables
+
+```bash
+# Database
+POSTGRES_USER=your_db_user
+POSTGRES_PASSWORD=your_db_password
+POSTGRES_DB=your_db_name
+DB_HOST=database  # or 'localhost' if not in Docker
+DB_PORT=5432
+
+# OpenAI / Azure OpenAI
+AI_ANALYZER_OPENAI_API_KEY=your_openai_api_key
+# OR for Azure OpenAI:
+AZURE_OPENAI_API_KEY=your_azure_key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_MODEL_DEPLOYMENT=gpt-4o-mini
+
+# JWT Authentication
+JWT_SECRET_KEY=your_secret_key_here
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=1440  # 24 hours
+
+# Initial Users (for non-SSO)
+ADMIN_USER=admin
+ADMIN_PASSWORD=your_admin_password
+READ_USER=readonly
+READ_USER_PASSWORD=your_readonly_password
+
+# Azure AD SSO (optional)
+AZURE_AD_TENANT_ID=your-tenant-id
+AZURE_AD_CLIENT_ID=your-client-id
+SSO_ENABLED=true
+LOCAL_AUTH_ENABLED=true
+
+# Application
+HOST=localhost  # or your domain
+ALLOWED_ORIGINS=http://localhost:3000,https://your-domain.com
+```
+
+### Optional Variables
+
+```bash
+# Qdrant (defaults work for Docker)
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
+RECIPE_COLLECTION_NAME=food_recipes_two_step
+
+# Embedding Model
+EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2
+
+# Data Directories
+RECIPE_DATA_DIR=/usr/src/app/data
+FEATURE_MAP_PATH=/usr/src/app/Test_Input/charactDescr_valueCharLong_map.json
+```
+
+---
+
+## Troubleshooting
+
+### Searches Timeout or Return Empty Results
+
+**Problem**: Searches with numerical filters (Brix >40, pH <4.1) timeout after 60 seconds.
+
+**Solution**: Create payload indexes (see [Step 5: Create Payload Indexes](#step-5-create-payload-indexes))
+
+```bash
+cd app/backend
+python3 create_payload_indexes.py localhost 6333
+```
+
+### Qdrant Collection Not Found
+
+**Problem**: `Collection 'food_recipes_two_step' doesn't exist`
+
+**Solution**: Run recipe indexing (see [Step 4: Recipe Indexing](#step-4-recipe-indexing))
+
+### Database Connection Errors
+
+**Problem**: Backend cannot connect to PostgreSQL
+
+**Solution**:
+1. Check if database container is running: `docker ps | grep postgres`
+2. Verify network: `docker network ls | grep app-network`
+3. Check environment variables: `echo $POSTGRES_USER $POSTGRES_PASSWORD`
+4. Test connection: `docker-compose -f infrastructure-compose.yml exec database pg_isready`
+
+### Frontend Shows Old Comparison Table Format
+
+**Problem**: UI still shows "Characteristic | Value" instead of "Code | Field Name | Recipe 1 | Recipe 2 | Recipe 3"
+
+**Solution**:
+1. Rebuild frontend: `docker-compose -f app-compose.yml build --no-cache frontend_app`
+2. Restart: `docker-compose -f app-compose.yml restart frontend_app`
+3. Hard refresh browser (Ctrl+Shift+R or Cmd+Shift+R)
+
+### SSO Not Working
+
+**Problem**: "Sign in with Microsoft" button doesn't appear or authentication fails
+
+**Solution**:
+1. Verify environment variables: `echo $AZURE_AD_TENANT_ID $AZURE_AD_CLIENT_ID`
+2. Check SSO enabled: `echo $SSO_ENABLED` (should be `true`)
+3. Verify Azure AD app registration redirect URI matches your domain
+4. Check browser console for JavaScript errors
+5. See `app/docs/AZURE_AD_SSO_SETUP.md` for detailed troubleshooting
+
+### Indexing Fails or Is Slow
+
+**Problem**: Recipe indexing fails or takes too long
+
+**Solution**:
+1. Check available disk space: `df -h`
+2. Monitor Qdrant memory: `docker stats qdrant`
+3. Reduce batch size in `init_vector_index_qdrant.py`:
+   ```python
+   FILE_BATCH_SIZE = 100  # Default: 1000
+   QDRANT_UPSERT_BATCH_SIZE = 50  # Default: 100
+   ```
+4. Check logs: `docker-compose -f infrastructure-compose.yml logs vector_index_init`
+
+### Translation Cache Issues
+
+**Problem**: Field names or recipe values not translating
+
+**Solution**:
+1. Check database tables exist:
+   ```sql
+   SELECT * FROM field_name_translation_cache LIMIT 1;
+   SELECT * FROM recipe_translation_cache LIMIT 1;
+   ```
+2. Clear cache if needed:
+   ```sql
+   DELETE FROM field_name_translation_cache;
+   DELETE FROM recipe_translation_cache;
+   ```
+3. Translations will be regenerated on next query
+
+---
+
+## Additional Resources
+
+- **API Documentation**: `app/docs/api_documentation.md`
+- **Backend Documentation**: `app/docs/backend_documentation.md`
+- **Frontend Documentation**: `app/docs/frontend_documentation.md`
+- **Azure AD SSO Setup**: `app/docs/AZURE_AD_SSO_SETUP.md`
+- **Project Overview**: `app/docs/project_overview.md`
+
+---
+
+## Support
+
+For issues or questions:
+1. Check the troubleshooting section above
+2. Review the documentation in `app/docs/`
+3. Check application logs: `docker-compose -f app-compose.yml logs -f`
+
+---
+
+## License
+
+[Your License Here]
