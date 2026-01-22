@@ -480,7 +480,7 @@ function App() {
                                   <th className="field-name-header sticky-col-2">Field Name</th>
                                   {message.comparison_table.recipes.map((recipe, idx) => (
                                     <th key={idx} className="recipe-value-header">
-                                      {recipe.recipe_name || recipe.recipe_id}
+                                      {idx + 1}. {recipe.recipe_name || recipe.recipe_id}
                                     </th>
                                   ))}
                                 </tr>
