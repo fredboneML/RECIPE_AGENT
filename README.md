@@ -571,36 +571,149 @@ docker-compose -f app-compose.yml logs -f
 
 **CRITICAL**: For production deployments with HTTPS and long-running AI queries, you need a reverse proxy with extended timeouts.
 
-#### Option A: Using the provided nginx.conf
+#### Complete Nginx Configuration
 
-1. **Copy nginx configuration**:
+1. **Install nginx**:
 ```bash
-cp app/nginx.conf /etc/nginx/sites-available/recipe-agent
-ln -sf /etc/nginx/sites-available/recipe-agent /etc/nginx/sites-enabled/
+sudo apt update
+sudo apt install nginx
 ```
 
-2. **Obtain SSL certificates** (using Certbot):
+2. **Create nginx configuration**:
+```bash
+sudo nano /etc/nginx/sites-available/recipe-agent
+```
+
+3. **Paste the complete configuration** (replace `your-domain.com` with your actual domain):
+
+```nginx
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    # Allow Let's Encrypt renewals
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    
+    # Redirect to HTTPS
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+# HTTPS server
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+    
+    # SSL certificates (will be added by Certbot)
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+    
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    # Frontend application (default location)
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+    
+    # Backend API - routes /api/* to backend:8000/api/*
+    location /api {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # CRITICAL: Extended timeouts for AI/search queries (can take 60-120s)
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        
+        # Large file uploads (briefs/documents up to 50MB)
+        client_max_body_size 50M;
+        
+        # CORS headers (if backend doesn't handle them)
+        add_header 'Access-Control-Allow-Origin' '$http_origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Accept,Authorization,Cache-Control,Content-Type,DNT,If-Modified-Since,Keep-Alive,Origin,User-Agent,X-Requested-With' always;
+        
+        # Handle preflight requests
+        if ($request_method = 'OPTIONS') {
+            return 204;
+        }
+    }
+    
+    # WebSocket support - routes /ws to frontend:3000/ws
+    location /ws {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+    
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+}
+```
+
+4. **Enable the site**:
+```bash
+sudo ln -sf /etc/nginx/sites-available/recipe-agent /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default  # Remove default site
+```
+
+5. **Obtain SSL certificates** (using Certbot):
 ```bash
 # Install Certbot
 sudo apt install certbot python3-certbot-nginx
 
-# Obtain certificate
-sudo certbot --nginx -d recipe-agent-agrana.westeurope.cloudapp.azure.com
+# Obtain certificate (will auto-update nginx config)
+sudo certbot --nginx -d your-domain.com
 ```
 
-3. **Adjust timeout settings** in `/etc/nginx/sites-available/recipe-agent`:
-```nginx
-# CRITICAL: Increase timeouts for AI/search queries (can take 60-120s)
-proxy_read_timeout 300s;
-proxy_connect_timeout 300s;
-proxy_send_timeout 300s;
-```
-
-4. **Test and reload nginx**:
+6. **Test and reload nginx**:
 ```bash
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+#### Key Timeout Settings Explained
+
+| Setting | Location | Value | Why |
+|---------|----------|-------|-----|
+| `proxy_read_timeout` | `/api` block | **300s** | AI/search queries can take 60-120s with 600K+ recipes |
+| `proxy_connect_timeout` | `/api` block | **300s** | Backend may be slow to respond under load |
+| `proxy_send_timeout` | `/api` block | **300s** | Large requests need time to upload |
+| `client_max_body_size` | `/api` block | **50M** | Allow large document uploads (PDFs, DOCX) |
+| `proxy_read_timeout` | `/ws` block | **86400s** | Keep WebSocket alive for 24 hours |
+
+**⚠️ Important**: Without these timeout settings in the `/api` block, you will get **504 Gateway Timeout** errors when the AI search takes longer than 60 seconds (the default nginx timeout).
+
+#### Option B: Using Docker nginx container
 
 #### Option B: Using Docker nginx container
 
