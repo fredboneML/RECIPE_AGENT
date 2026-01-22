@@ -15,7 +15,8 @@ An intelligent recipe search system that uses AI agents to extract requirements 
   - [Step 4: Recipe Indexing](#step-4-recipe-indexing)
   - [Step 5: Create Payload Indexes](#step-5-create-payload-indexes)
   - [Step 6: Application Deployment](#step-6-application-deployment)
-  - [Step 7: User Management](#step-7-user-management)
+  - [Step 7: Nginx Reverse Proxy (Production)](#step-7-nginx-reverse-proxy-production)
+  - [Step 8: User Management](#step-8-user-management)
 - [Environment Variables](#environment-variables)
 - [Troubleshooting](#troubleshooting)
 
@@ -566,7 +567,92 @@ docker-compose -f app-compose.yml logs -f
 
 ---
 
-### Step 7: User Management
+### Step 7: Nginx Reverse Proxy (Production)
+
+**CRITICAL**: For production deployments with HTTPS and long-running AI queries, you need a reverse proxy with extended timeouts.
+
+#### Option A: Using the provided nginx.conf
+
+1. **Copy nginx configuration**:
+```bash
+cp app/nginx.conf /etc/nginx/sites-available/recipe-agent
+ln -sf /etc/nginx/sites-available/recipe-agent /etc/nginx/sites-enabled/
+```
+
+2. **Obtain SSL certificates** (using Certbot):
+```bash
+# Install Certbot
+sudo apt install certbot python3-certbot-nginx
+
+# Obtain certificate
+sudo certbot --nginx -d recipe-agent-agrana.westeurope.cloudapp.azure.com
+```
+
+3. **Adjust timeout settings** in `/etc/nginx/sites-available/recipe-agent`:
+```nginx
+# CRITICAL: Increase timeouts for AI/search queries (can take 60-120s)
+proxy_read_timeout 300s;
+proxy_connect_timeout 300s;
+proxy_send_timeout 300s;
+```
+
+4. **Test and reload nginx**:
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+#### Option B: Using Docker nginx container
+
+1. **Add nginx to docker-compose** (create `production-compose.yml`):
+```yaml
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx.Dockerfile
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/letsencrypt/live/your-domain:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend_app
+      - backend_app
+    networks:
+      - app-network
+```
+
+2. **Build and start**:
+```bash
+docker-compose -f production-compose.yml up -d nginx
+```
+
+#### Option C: Azure Application Gateway
+
+If using Azure Application Gateway, configure the backend settings:
+
+1. **Go to Azure Portal** → Application Gateway → Backend settings
+2. **Set timeouts**:
+   - Request timeout: **300 seconds** (5 minutes)
+   - Connection draining timeout: 300 seconds
+
+3. **Health probe settings**:
+   - Path: `/health`
+   - Interval: 30 seconds
+   - Unhealthy threshold: 3
+
+#### Key Timeout Settings
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `proxy_read_timeout` | 300s | AI/search queries can take 60-120s |
+| `proxy_connect_timeout` | 300s | Backend may be slow to respond |
+| `client_max_body_size` | 50M | Large document uploads (PDFs, DOCX) |
+
+---
+
+### Step 8: User Management
 
 ### Option A: Add Users Without SSO (SQL)
 
@@ -691,6 +777,59 @@ FEATURE_MAP_PATH=/usr/src/app/Test_Input/charactDescr_valueCharLong_map.json
 ---
 
 ## Troubleshooting
+
+### 504 Gateway Timeout / UI Cancels Request
+
+**Problem**: The backend completes processing (visible in logs), but the UI shows "Error: Failed to submit query" or the request is cancelled. Browser console shows `504` status.
+
+**Causes**:
+1. **Reverse proxy timeout too short** (default nginx: 60s, default Azure Application Gateway: 30s)
+2. **Complex search queries** can take 60-120 seconds with 600K+ recipes
+
+**Solution**:
+
+**Option 1: Nginx** - Increase timeout in nginx config:
+```nginx
+# In /etc/nginx/sites-available/recipe-agent or nginx.conf
+proxy_read_timeout 300s;
+proxy_send_timeout 300s;
+proxy_connect_timeout 300s;
+```
+Then reload: `sudo nginx -s reload`
+
+**Option 2: Azure Application Gateway**:
+1. Go to Azure Portal → Application Gateway → Backend settings
+2. Set **Request timeout: 300 seconds** (5 minutes)
+
+**Verify backend is completing** (check logs show response):
+```bash
+docker-compose -f app-compose.yml logs -f backend_app | grep "Returning response"
+```
+
+If you see `Returning response for conversation_id:` but UI doesn't show results, it's definitely a proxy timeout issue.
+
+### WebSocket Connection Failed
+
+**Problem**: Browser console shows `WebSocket connection to 'wss://...:3000/ws' failed: net::ERR_CONNECTION_TIMED_OUT`
+
+**Causes**:
+1. Port 3000 not exposed in firewall
+2. WebSocket not configured in reverse proxy
+
+**Solution**: Add WebSocket support to nginx:
+```nginx
+location /ws {
+    proxy_pass http://backend:8000/ws;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400s;
+}
+```
+
+For Azure Application Gateway, ensure WebSocket is enabled in HTTP settings.
+
+---
 
 ### Searches Timeout or Return Empty Results
 
