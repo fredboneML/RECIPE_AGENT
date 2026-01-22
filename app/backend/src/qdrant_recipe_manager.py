@@ -901,12 +901,13 @@ class QdrantRecipeManager:
     def _check_exact_recipe_name_match(self,
                                        query: str,
                                        country_filter: Optional[str] = None,
-                                       version_filter: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                                       version_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Check if the query is an exact recipe name match.
+        Check if the query is an exact or partial recipe name match.
 
         This handles cases where users search with just a recipe name like
-        "FZ APFEL MATCHA SIGGIS o.A." - we should find exact matches first.
+        "FZ APFEL MATCHA SIGGIS o.A." or partial names like "FZ Orange Mango Grüner Tee"
+        which should find "FZ Orange Mango Grüner Tee Smoothie".
 
         Args:
             query: The search query (potentially a recipe name)
@@ -914,8 +915,9 @@ class QdrantRecipeManager:
             version_filter: Optional version filter
 
         Returns:
-            Recipe dict with high text_score (0.95) if exact match found, None otherwise
+            List of recipe dicts with high text_score (0.95 for exact, 0.90 for partial) if matches found
         """
+        matches = []
         try:
             # Heuristic: Check if query looks like a recipe name
             # Recipe names are typically:
@@ -926,13 +928,13 @@ class QdrantRecipeManager:
 
             # Skip if query is too long (likely a description, not a name)
             if len(query_clean) > 150:
-                return None
+                return []
 
             # Skip if query is too short (likely not a recipe name)
             if len(query_clean) < 5:
-                return None
+                return []
 
-            # Try to find exact match in description field (where MaterialMasterShorttext is stored)
+            # Try to find exact/partial match in description field (where MaterialMasterShorttext is stored)
             # Recipe names are typically in format: "MaterialMasterShorttext: FZ APFEL MATCHA SIGGIS o.A."
             # So we search for the query text in the description field using full-text search
             filter_conditions = [
@@ -962,20 +964,21 @@ class QdrantRecipeManager:
 
             exact_filter = Filter(must=filter_conditions)
 
-            # Search for exact match using scroll (more efficient for exact matches)
+            # Search for matches using scroll (more efficient for exact matches)
             scroll_results, _ = self.qdrant_client.scroll(
                 collection_name=self.collection_name,
                 scroll_filter=exact_filter,
-                limit=10,  # Get a few results to find the best match
+                limit=20,  # Get more results to find best matches
                 with_payload=True,
                 with_vectors=False,
                 timeout=60  # Increased timeout for large databases with filters
             )
 
             if scroll_results and len(scroll_results) > 0:
-                # Find the best match - one where the query appears in MaterialMasterShorttext
-                best_match = None
+                # Find best matches - prioritize exact matches, then partial matches
                 query_lower = query_clean.lower()
+                exact_matches = []
+                partial_matches = []
 
                 for point in scroll_results:
                     payload = point.payload if point.payload is not None else {}
@@ -983,50 +986,64 @@ class QdrantRecipeManager:
 
                     # Check if query appears in MaterialMasterShorttext part of description
                     # Format is typically: "MaterialMasterShorttext: FZ APFEL MATCHA SIGGIS o.A., ..."
+                    mst_part = ""
                     if "MaterialMasterShorttext:" in description:
                         # Extract the MaterialMasterShorttext value
                         mst_part = description.split("MaterialMasterShorttext:")[
                             1].split(",")[0].strip()
+                        
                         if query_lower == mst_part.lower():
-                            best_match = point
-                            break
+                            # Exact match - highest priority
+                            exact_matches.append((point, 0.95))
+                        elif query_lower in mst_part.lower():
+                            # Partial match - query is contained in recipe name
+                            partial_matches.append((point, 0.92))
+                        elif mst_part.lower().startswith(query_lower):
+                            # Prefix match - recipe name starts with query
+                            partial_matches.append((point, 0.90))
+                
+                # Sort partial matches by how similar the name length is (prefer shorter, closer matches)
+                partial_matches.sort(key=lambda x: len(x[0].payload.get("description", "")))
+                
+                # Combine: exact matches first, then partial matches
+                all_matches = exact_matches + partial_matches[:10]  # Limit to top 10 partial matches
+                
+                logger.info(f"Recipe name match search for '{query_clean}': "
+                           f"found {len(exact_matches)} exact, {len(partial_matches)} partial matches")
+                
+                for point, score in all_matches:
+                    payload = point.payload if point.payload is not None else {}
+                    
+                    # Create recipe data with appropriate text score
+                    recipe_data = {
+                        "id": point.id,
+                        "text_score": score,  # 0.95 for exact, 0.92/0.90 for partial
+                        "feature_search_score": 0.0,
+                        "recipe_name": payload.get("recipe_name", ""),
+                        "description": payload.get("description", ""),
+                        "features": payload.get("features", []),
+                        "values": payload.get("values", []),
+                        "num_features": payload.get("num_features", 0),
+                        "metadata": {
+                            "recipe_name": payload.get("recipe_name", "")
+                        },
+                        "search_source": "text",
+                        "_name_match": True,  # Flag to indicate this is a name match
+                        "_match_score": score
+                    }
+                    matches.append(recipe_data)
+                    
+                    logger.info(
+                        f"  ✓ Name match (score={score:.2f}): '{query_clean}' → "
+                        f"{recipe_data.get('recipe_name', 'Unknown')[:60]}"
+                    )
 
-                # If no exact MaterialMasterShorttext match, use first result
-                if not best_match:
-                    best_match = scroll_results[0]
-
-                point = best_match
-                payload = point.payload if point.payload is not None else {}
-
-                # Create recipe data with very high text score for exact match
-                recipe_data = {
-                    "id": point.id,
-                    "text_score": 0.95,  # Very high score for exact match
-                    "feature_search_score": 0.0,
-                    "recipe_name": payload.get("recipe_name", ""),
-                    "description": payload.get("description", ""),
-                    "features": payload.get("features", []),
-                    "values": payload.get("values", []),
-                    "num_features": payload.get("num_features", 0),
-                    "metadata": {
-                        "recipe_name": payload.get("recipe_name", "")
-                    },
-                    "search_source": "text",
-                    "_exact_match": True  # Flag to indicate this is an exact match
-                }
-
-                logger.info(
-                    f"Exact recipe name match found: '{query_clean}' → "
-                    f"{recipe_data.get('recipe_name', 'Unknown')}"
-                )
-                return recipe_data
-
-            return None
+            return matches
 
         except Exception as e:
-            # Don't fail the whole search if exact match check fails
-            logger.debug(f"Exact recipe name match check failed: {e}")
-            return None
+            # Don't fail the whole search if name match check fails
+            logger.debug(f"Recipe name match check failed: {e}")
+            return []
 
     def search_two_step(self,
                         text_description: str,
@@ -1087,12 +1104,12 @@ class QdrantRecipeManager:
                 query_features = query_df.iloc[:, 0].tolist()
                 query_values = query_df.iloc[:, 1].tolist()
 
-        # Step 0: Check for exact recipe name match (before semantic search)
-        # This handles cases where user searches with just a recipe name
+        # Step 0: Check for exact/partial recipe name matches (before semantic search)
+        # This handles cases where user searches with just a recipe name like "FZ Orange Mango Grüner Tee"
         # Use original_query if available (before AI extraction/translation), otherwise use text_description
-        query_for_exact_match = original_query if original_query else text_description
-        exact_match = self._check_exact_recipe_name_match(
-            query_for_exact_match, country_filter, version_filter)
+        query_for_name_match = original_query if original_query else text_description
+        name_matches = self._check_exact_recipe_name_match(
+            query_for_name_match, country_filter, version_filter)
 
         # Step 1a: Text-based search using Qdrant
         # OPTIMIZATION: Get query embedding to reuse later (avoids re-encoding)
@@ -1109,18 +1126,19 @@ class QdrantRecipeManager:
             text_candidates = text_search_result
             cached_query_embedding = None
 
-        # Merge exact match with text candidates (exact match goes first)
-        if exact_match:
-            # Remove exact match from text_candidates if it's already there (to avoid duplicates)
+        # Merge name matches with text candidates (name matches go first)
+        if name_matches:
+            # Get IDs of name matches to avoid duplicates
+            name_match_ids = {nm.get("id") for nm in name_matches}
+            # Remove name matches from text_candidates to avoid duplicates
             text_candidates = [
                 c for c in text_candidates
-                if c.get("id") != exact_match.get("id")
+                if c.get("id") not in name_match_ids
             ]
-            # Insert exact match at the beginning with highest priority
-            text_candidates.insert(0, exact_match)
+            # Insert name matches at the beginning with highest priority
+            text_candidates = name_matches + text_candidates
             logger.info(
-                f"✓ Exact recipe name match found: {exact_match.get('recipe_name', 'Unknown')} "
-                f"(Text Score: {exact_match.get('text_score', 0.0):.4f})"
+                f"✓ Found {len(name_matches)} recipe name match(es) for original query"
             )
 
         search_metadata["text_results_found"] = len(text_candidates)
@@ -1170,6 +1188,31 @@ class QdrantRecipeManager:
                 additional_text = self.search_by_text_description(
                     text_description, text_top_k)
                 text_candidates = additional_text
+
+        # If original query differs from text_description, also search with original query
+        # This helps when users search with German product names that get translated
+        if original_query and original_query.strip().lower() != text_description.strip().lower():
+            logger.info(f"Step 1a+: Additional text search using original query: '{original_query[:60]}...'")
+            original_query_results = self.search_by_text_description(
+                original_query, text_search_k, country_filter, version_filter,
+                numerical_filters=numerical_filters, return_embedding=False
+            )
+            
+            # Handle return value (may be tuple if return_embedding=True)
+            if isinstance(original_query_results, tuple):
+                original_query_results = original_query_results[0]
+            
+            # Merge with existing text candidates
+            existing_ids = {c.get("id") for c in text_candidates}
+            added_from_original = 0
+            for candidate in original_query_results:
+                if candidate.get("id") not in existing_ids:
+                    text_candidates.append(candidate)
+                    existing_ids.add(candidate.get("id"))
+                    added_from_original += 1
+            
+            if added_from_original > 0:
+                logger.info(f"  Added {added_from_original} additional candidates from original query search")
 
         # Merge candidates from both searches
         if feature_candidates:
