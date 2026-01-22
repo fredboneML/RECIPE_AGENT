@@ -116,10 +116,39 @@ User Uploads Brief → Data Extractor Router Agent → Recipe Search Agent → Q
 
 **Processing**:
 
-1. **Two-Step Search** (`qdrant_recipe_manager.py`):
-   - **Step 1a**: Text-based semantic search using `paraphrase-multilingual-MiniLM-L12-v2` embeddings
-   - **Step 1b**: Feature-based search using 484-dimensional feature vectors
-   - **Step 2**: Refine and merge results, applying numerical and binary filters
+1. **Two-Step Hybrid Search** (`qdrant_recipe_manager.py`):
+
+   - **Step 0: Recipe Name Matching** (using original query)
+     - Searches for exact and partial matches on MaterialMasterShorttext
+     - Example: Query "FZ Orange Mango Grüner Tee" finds "FZ Orange Mango Grüner Tee Smoothie"
+     - **Exact match**: Score 0.95 (query == recipe name)
+     - **Partial match**: Score 0.92 (query contained in recipe name)
+     - **Prefix match**: Score 0.90 (recipe name starts with query)
+     - Uses original query text (before LLM translation) for German/French product names
+
+   - **Step 1a: Text-based semantic search** (15 candidates)
+     - Uses `paraphrase-multilingual-MiniLM-L12-v2` embeddings
+     - Searches with LLM-translated description (e.g., "Frozen orange mango green tea")
+
+   - **Step 1a+: Original query text search** (if different from translated)
+     - Searches with original query (e.g., "FZ Orange Mango Grüner Tee")
+     - Finds German/French recipe names that semantic search might miss
+     - Merges additional candidates with deduplication
+
+   - **Step 1b: Feature-based search** (15 candidates)
+     - Uses 484-dimensional feature vectors
+     - Applies country and version filters
+
+   - **Flavor Safeguard**: 
+     - Vector search for flavor keywords
+     - Full-text search for exact keyword matches in description/recipe_name
+     - Ensures flavor-specific recipes aren't missed by embedding similarity
+
+   - **Step 2: Merge and refine**
+     - Combines all candidates with deduplication
+     - Calculates combined scores (text + feature)
+     - Applies numerical range filters
+     - Returns top N results
 
 2. **Filtering**:
    - **Version filter**: P (Production) or L (Legacy)
@@ -228,7 +257,32 @@ cp ../env.example .env
 docker network create app-network
 ```
 
-4. **Deploy infrastructure** (PostgreSQL + Qdrant):
+4. **Configure Microsoft Defender for Endpoint (MDE)** (Azure servers only):
+
+   **IMPORTANT**: These commands ensure the server is properly onboarded, protected, compliant, and audit-ready. This is the correct way to configure MDE for future servers.
+
+   ```bash
+   # Make script executable
+   chmod +x ../enable-mde.sh
+   
+   # Run MDE configuration
+   ../enable-mde.sh
+   ```
+
+   **What it does**:
+   - Disables passive mode (enables active protection)
+   - Enables real-time protection
+   - Enables behavior monitoring
+   - Restarts Microsoft Defender service
+   - Verifies health status
+
+   **Important notes** (read once):
+   - ✅ **Safe to run multiple times** (idempotent)
+   - ❌ **Do not run if another AV/EDR is intentionally installed**
+   - ⏳ **Azure portals may take 30–120 min to reflect compliance**
+   - 📌 **If passive mode reappears, it's being enforced by tenant policy**
+
+5. **Deploy infrastructure** (PostgreSQL + Qdrant):
 ```bash
 ./deploy-infrastructure.sh
 ```
@@ -715,6 +769,38 @@ python3 create_payload_indexes.py localhost 6333
    DELETE FROM recipe_translation_cache;
    ```
 3. Translations will be regenerated on next query
+
+### Product Name Search Not Finding Expected Recipe
+
+**Problem**: Searching for "FZ Orange Mango Grüner Tee" doesn't find "FZ Orange Mango Grüner Tee Smoothie"
+
+**Possible Causes**:
+1. Recipe might use different spelling (e.g., "Grüntee" vs "Grüner Tee")
+2. Recipe might be in a different country/version than filtered
+3. Recipe might not be indexed yet
+
+**Solution**:
+1. Verify recipe exists in Qdrant:
+   ```bash
+   curl -X POST "http://localhost:6333/collections/food_recipes_two_step/points/scroll" \
+     -H "Content-Type: application/json" \
+     -d '{"filter":{"must":[{"key":"description","match":{"text":"Orange Mango Grüner Tee"}}]},"limit":10,"with_payload":true}'
+   ```
+
+2. Try alternative spellings:
+   - "Grüntee" instead of "Grüner Tee"
+   - Without special characters: "Gruner Tee"
+
+3. Check country filter - the recipe might be indexed under a different country
+
+4. Check logs for search flow:
+   ```
+   Step 0: Recipe name matching (exact/partial)
+   Step 1a: Text-based search (translated query)
+   Step 1a+: Original query search (untranslated)
+   ```
+
+**Note**: The search now includes Step 1a+ which searches using the original query text (before LLM translation), improving matches for German/French product names.
 
 ---
 
