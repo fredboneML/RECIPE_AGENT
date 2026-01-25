@@ -99,6 +99,9 @@ BRIEF_FIELD_TO_CODE: Dict[str, str] = {
     'fruit percentage': 'Z_FRUCHTG',
     '% fruit': 'Z_FRUCHTG',
     'fruit content %': 'Z_FRUCHTG',
+    'fruit in finished product': 'Z_FRUCHTG',
+    'fruit in finished product (%)': 'Z_FRUCHTG',
+    'fruit in product': 'Z_FRUCHTG',
     
     # Viscosity variants
     'viscosity': 'Z_VISK20S',
@@ -139,6 +142,9 @@ BRIEF_FIELD_TO_CODE: Dict[str, str] = {
     'sugar content (%)': 'Z_ZUCKER',
     'zuckergehalt': 'Z_ZUCKER',
     'zucker': 'Z_ZUCKER',
+    'sugar in finished product': 'Z_ZUCKER',
+    'sugar in finished product (%)': 'Z_ZUCKER',
+    'sugar in product': 'Z_ZUCKER',
     
     # Salt
     'salt': 'Z_SALZ',
