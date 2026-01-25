@@ -1255,18 +1255,27 @@ class QdrantRecipeManager:
                 # SAFEGUARD: Direct keyword search + Vector search hybrid approach
                 # 1. Vector search for semantic matches (fast, catches most cases)
                 # 2. Direct keyword search for exact matches (catches edge cases)
+                # IMPORTANT: Apply numerical filters to ensure flavor matches also meet numerical constraints
                 existing_ids = {c.get("id") for c in all_candidates}
                 flavor_matched_candidates = []
                 skipped_already_in_pool = 0
 
                 # Method 1: Vector search for semantic matches (top 50)
+                # Apply numerical_filters to ensure flavor matches meet pH, Brix, etc. constraints
                 vector_flavor_results = self.search_by_text_description(
-                    query_flavor, top_k=100, country_filter=country_filter, version_filter=version_filter)
+                    query_flavor, top_k=100, country_filter=country_filter, version_filter=version_filter,
+                    numerical_filters=numerical_filters)
 
-                logger.info(
-                    f"Flavor safeguard (vector search): Found {len(vector_flavor_results)} candidates for '{query_flavor}'. "
-                    f"Existing pool has {len(existing_ids)} recipes."
-                )
+                if numerical_filters:
+                    logger.info(
+                        f"Flavor safeguard (vector search): Found {len(vector_flavor_results)} candidates for '{query_flavor}' "
+                        f"WITH numerical filters {numerical_filters}. Existing pool has {len(existing_ids)} recipes."
+                    )
+                else:
+                    logger.info(
+                        f"Flavor safeguard (vector search): Found {len(vector_flavor_results)} candidates for '{query_flavor}'. "
+                        f"Existing pool has {len(existing_ids)} recipes."
+                    )
 
                 # Add top vector search results (semantic matches)
                 # Limit to top 50 from vector search
@@ -1280,10 +1289,16 @@ class QdrantRecipeManager:
                 # Method 2: Direct keyword search using Qdrant full-text search (catches exact keyword matches)
                 # This ensures we find recipes that contain the keyword even if embedding similarity is low
                 # Uses Qdrant's MatchText for efficient full-text search across ALL recipes
-                logger.info(
-                    f"Flavor safeguard (full-text search): Searching for keywords {flavor_keywords} "
-                    f"in description/recipe_name..."
-                )
+                if numerical_filters:
+                    logger.info(
+                        f"Flavor safeguard (full-text search): Searching for keywords {flavor_keywords} "
+                        f"in description/recipe_name WITH numerical filters: {numerical_filters}"
+                    )
+                else:
+                    logger.info(
+                        f"Flavor safeguard (full-text search): Searching for keywords {flavor_keywords} "
+                        f"in description/recipe_name..."
+                    )
 
                 keyword_matches_found = 0
 
@@ -1327,6 +1342,23 @@ class QdrantRecipeManager:
                                         match=MatchValue(value=version_filter)
                                     )
                                 )
+
+                            # Add numerical filters to ensure flavor matches meet numerical constraints
+                            # This is critical for queries like "Matcha with pH ~4.5"
+                            if numerical_filters:
+                                for field_code, range_spec in numerical_filters.items():
+                                    range_obj = Range(
+                                        gt=range_spec.get('gt'),
+                                        gte=range_spec.get('gte'),
+                                        lt=range_spec.get('lt'),
+                                        lte=range_spec.get('lte')
+                                    )
+                                    filter_conditions.append(
+                                        FieldCondition(
+                                            key=field_code,
+                                            range=range_obj
+                                        )
+                                    )
 
                             keyword_filter = Filter(must=filter_conditions)
 
