@@ -255,6 +255,12 @@ class DataExtractorRouterAgent:
             "   - If brief specifies 'Sugar in finished product (%) Max X%', extract as numerical_constraint: {\"field\": \"Sugar content\", \"constraint\": \"max X%\"}",
             "   - If brief specifies 'Fruit in finished product (%) X%' or 'Fruit in finished product Max X%', extract as numerical_constraint: {\"field\": \"Fruit content\", \"constraint\": \"max X%\"}",
             "   - CRITICAL: In form-style briefs, BOTH 'Fruit in finished product' AND 'Sugar in finished product' often have separate % values - extract BOTH!",
+            "   - ⚠️  NUMERICAL CONSTRAINTS MUST CONTAIN ACTUAL NUMBERS! Valid examples: 'max 5%', '>30%', '5%', '5-10%'",
+            "   - ⚠️  NEVER put descriptive text like 'any fruit possible' as a constraint value - ONLY numbers!",
+            "   - If you see 'Fruit in finished product (%) 5%' in the same row/line, the constraint is '5%' or 'max 5%'",
+            "   - 📋 FORM TABLE HEURISTIC: In form-style documents, 'Fruit in finished product (%)' and 'Sugar in finished product (%)' are usually adjacent rows with similar percentage limits.",
+            "   - If OCR merged the rows (e.g., 'Fruit in finished product (%) Sugar in finished product (%) Max 5%'), extract BOTH with the same max value:",
+            "     → {\"field\": \"Fruit content\", \"constraint\": \"max 5%\"} AND {\"field\": \"Sugar content\", \"constraint\": \"max 5%\"}",
             "   - Extract 'Saccharose: Saccharose' if sucrose is allowed, regardless of percentage constraint",
             "   - If 'No added sugar' is checked, ensure this is mentioned in text_description",
             "8. FLAVOURING PREFERENCES:",
@@ -583,6 +589,15 @@ Provide your response as a JSON object following the specified format.
             constraint_text = item.get('constraint', '')
             
             if not field_name or not constraint_text:
+                continue
+            
+            # Early validation: constraint must contain at least one digit
+            # This catches LLM hallucinations like "any fruit possible except those already included"
+            if not any(char.isdigit() for char in constraint_text):
+                logger.warning(
+                    f"Skipping non-numerical constraint for '{field_name}': '{constraint_text}' "
+                    f"(constraint must contain numbers like '5%', 'max 10', '>30')"
+                )
                 continue
             
             # Map field name to Z_* code
