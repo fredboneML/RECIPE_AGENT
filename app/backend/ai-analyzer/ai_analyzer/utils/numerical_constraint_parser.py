@@ -53,8 +53,16 @@ class NumericalConstraint:
                 result["lte"] = self.max_value
             return result
         elif self.operator == 'eq':
-            # For exact match, use small range around value
-            return {"gte": self.value - 0.01, "lte": self.value + 0.01}
+            # For exact match, use field-specific tolerance ranges
+            # pH values: use ±0.2 (pH is logarithmic, typical measurement variance)
+            # Percentages and other values: use ±5% relative or ±1 absolute (whichever is larger)
+            if self.field_code == 'Z_PH' or self.field_code == 'ZM_PH':
+                # pH tolerance: ±0.2 for food industry standards
+                tolerance = 0.2
+            else:
+                # For percentages and other values: ±5% relative, minimum ±1 absolute
+                tolerance = max(abs(self.value) * 0.05, 1.0)
+            return {"gte": round(self.value - tolerance, 2), "lte": round(self.value + tolerance, 2)}
         return {}
 
 
