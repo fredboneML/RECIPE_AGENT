@@ -1,4 +1,4 @@
-EXCEL OUTPUT - SHEET DESCRIPTIONS
+git statusEXCEL OUTPUT - SHEET DESCRIPTIONS
 ==================================
 
 This Excel file contains extracted recipe data organized into 5 sheets:

@@ -592,7 +592,19 @@ Provide your response as a JSON object following the specified format.
                         break
             
             if not field_code:
-                logger.warning(f"Could not map field '{field_name}' to Z_* code")
+                # Common unmapped fields with explanations
+                unmapped_explanations = {
+                    'shelf life': 'Shelf life is not in the 60 specified fields schema - use text_description for semantic search',
+                    'mindesthaltbarkeit': 'Shelf life (Mindesthaltbarkeit) is not in the 60 specified fields schema',
+                    'haltbarkeit': 'Shelf life (Haltbarkeit) is not in the 60 specified fields schema',
+                    'best before': 'Shelf life is not in the 60 specified fields schema',
+                    'expiry': 'Expiry/shelf life is not in the 60 specified fields schema',
+                }
+                explanation = unmapped_explanations.get(field_name, None)
+                if explanation:
+                    logger.info(f"Field '{field_name}' cannot be used for numerical filtering: {explanation}")
+                else:
+                    logger.warning(f"Could not map field '{field_name}' to Z_* code")
                 continue
             
             # Parse the constraint

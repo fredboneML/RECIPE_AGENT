@@ -153,6 +153,11 @@ BRIEF_FIELD_TO_CODE: Dict[str, str] = {
     'particles size': 'Z_FLST',
     'particle size': 'Z_FLST',
     'partikelgröße': 'Z_FLST',
+    
+    # NOTE: The following fields are commonly requested but NOT in the 60 specified fields:
+    # - Shelf life / Haltbarkeit / Mindesthaltbarkeit: Not indexed as Z_* field
+    #   The data exists in MaterialMasterASegment as 'mhdhb' but isn't in Qdrant schema
+    #   These constraints will be captured in text_description for semantic search instead
 }
 
 # Field codes with their English descriptions (for output)
@@ -231,6 +236,17 @@ def parse_constraint_text(text: str) -> Tuple[str, Optional[float], Optional[flo
         - 'eq': (op, value, None)
     """
     text = normalize_decimal(text.lower().strip())
+    
+    # Pattern: "58% bzw. 60%" or "58 bzw. 60" or "58 or 60" or "58/60" (alternatives)
+    # German "bzw." = "beziehungsweise" = "or/respectively"
+    # This should be treated as a range from min to max
+    match = re.search(r'(\d+\.?\d*)\s*%?\s*(?:bzw\.?|or|/)\s*(\d+\.?\d*)\s*%?', text)
+    if match:
+        val1 = float(match.group(1))
+        val2 = float(match.group(2))
+        min_val = min(val1, val2)
+        max_val = max(val1, val2)
+        return ('range', min_val, max_val)
     
     # Pattern: ">30%" or "> 30" or ">30" (can appear anywhere in text)
     match = re.search(r'>\s*(\d+\.?\d*)', text)
@@ -542,6 +558,11 @@ if __name__ == "__main__":
         "less than 4.1",
         "at least 30%",
         "approximately 70",
+        # Alternative values (German "bzw." = or/respectively)
+        "58% bzw. 60%",
+        "58 bzw. 60",
+        "58 or 60",
+        "58/60%",
     ]
     
     print("Testing numerical constraint parser:")
