@@ -1510,7 +1510,9 @@ class QdrantRecipeManager:
 
             # Refine all_candidates (merged from text + feature search) based on feature matching
             final_results = self._refine_by_features(
-                all_candidates, query_features, query_values, final_top_k
+                all_candidates, query_features, query_values, final_top_k,
+                original_query=original_query,
+                numerical_filters=numerical_filters
             )
             search_metadata["refinement_completed"] = True
 
@@ -1578,7 +1580,9 @@ class QdrantRecipeManager:
                             candidates: List[Dict[str, Any]],
                             query_features: List[str],
                             query_values: List[Any],
-                            top_k: int) -> List[Dict[str, Any]]:
+                            top_k: int,
+                            original_query: Optional[str] = None,
+                            numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """
         Refine candidates using feature-based similarity with language-independent scoring.
 
@@ -1589,12 +1593,14 @@ class QdrantRecipeManager:
 
         ENHANCED with:
         - Flavor boosting: Recipes matching the query Flavour get a significant bonus
+        - Recipe name match boost: Recipes with names matching the original query get priority
 
         Args:
             candidates: Candidate recipes from text and feature search
             query_features: Feature names to match
             query_values: Feature values to match
             top_k: Number of results to return
+            original_query: Original search query (for recipe name matching)
 
         Returns:
             Refined and reranked results
@@ -1605,6 +1611,147 @@ class QdrantRecipeManager:
             FLAVOR_BONUS = 0.20  # Base bonus added to combined score for flavor match
             # Extra boost for text-only candidates (compensates for missing feature search score)
             TEXT_ONLY_FLAVOR_BOOST = 0.25  # Additional boost when feature_search_score is 0
+            # Boost for exact recipe name matches (when user searches by recipe name)
+            RECIPE_NAME_EXACT_BOOST = 0.50  # Significant boost for exact name match
+            RECIPE_NAME_PARTIAL_BOOST = 0.35  # Boost for partial/substring name match
+            
+            # Flag to track if this is a short query (recipe name search mode)
+            is_short_query_mode = False
+
+            # Pre-compute recipe name matching for all candidates
+            # Heuristic: if query is SHORT (< 50 chars) AND no specific features/constraints extracted,
+            # treat it as a recipe name search and boost candidates based on string similarity
+            recipe_name_matches = {}  # candidate_id -> (match_type, boost, similarity)
+            
+            # Determine if this is a "recipe name search" vs "feature-based search"
+            # Recipe name search mode is used when:
+            # - Query is short (< 50 chars)
+            # - No numerical constraints extracted (like pH, Brix, fruit content %)
+            # - Few or generic features (≤ 2, typically just Flavour and Produktsegment)
+            num_features = len(query_features)
+            has_numerical_filters = numerical_filters and len(numerical_filters) > 0
+            
+            # Check for "specific" features beyond Flavour and Produktsegment
+            generic_feature_names = {'flavour', 'flavor', 'produktsegment', 'produktsegment (sd reporting)'}
+            specific_features = [f for f in query_features if f.lower() not in generic_feature_names]
+            has_specific_features = len(specific_features) > 0
+            
+            if original_query:
+                query_clean = original_query.strip()
+                query_len = len(query_clean)
+                
+                # Short queries (< 50 chars) are likely recipe name searches
+                # BUT only if no specific features/constraints or numerical filters were extracted
+                if query_len < 50 and query_len >= 3 and not has_specific_features and not has_numerical_filters:
+                    is_short_query_mode = True
+                    query_lower = query_clean.lower()
+                    query_words = set(query_lower.split())
+                    logger.info(
+                        f"Short query detected ({query_len} chars, {num_features} features, no specific constraints) "
+                        f"- enabling recipe name similarity matching for: '{query_clean}'"
+                    )
+                elif query_len < 50 and query_len >= 3 and (has_specific_features or has_numerical_filters):
+                    reason = []
+                    if has_specific_features:
+                        reason.append(f"specific features: {specific_features[:3]}")
+                    if has_numerical_filters:
+                        reason.append(f"numerical filters: {list(numerical_filters.keys())}")
+                    logger.info(
+                        f"Short query ({query_len} chars) but has {', '.join(reason)} "
+                        f"- using normal feature-based search"
+                    )
+                    
+                    def calculate_name_similarity(query: str, candidate_name: str) -> float:
+                        """Calculate similarity between query and candidate name (0.0 to 1.0)"""
+                        if not candidate_name:
+                            return 0.0
+                        q = query.lower()
+                        c = candidate_name.lower()
+                        
+                        # Exact match
+                        if q == c:
+                            return 1.0
+                        
+                        # Query is substring of candidate name
+                        if q in c:
+                            return 0.85 + (len(q) / len(c)) * 0.15  # 0.85-1.0 based on coverage
+                        
+                        # Candidate name is substring of query
+                        if c in q:
+                            return 0.80 + (len(c) / len(q)) * 0.15  # 0.80-0.95
+                        
+                        # Word-level matching (for partial queries like "ALOE VERA-PASSIONFRUIT D")
+                        q_words = set(q.replace('-', ' ').replace('_', ' ').split())
+                        c_words = set(c.replace('-', ' ').replace('_', ' ').split())
+                        
+                        if q_words and c_words:
+                            common_words = q_words & c_words
+                            if common_words:
+                                # Calculate word overlap ratio
+                                word_similarity = len(common_words) / max(len(q_words), len(c_words))
+                                
+                                # Also check character-level similarity for the common parts
+                                q_common = ' '.join(sorted(common_words))
+                                c_common = ' '.join(w for w in c.split() if w in common_words or any(cw in w for cw in common_words))
+                                char_similarity = len(q_common) / max(len(q), len(c)) if max(len(q), len(c)) > 0 else 0
+                                
+                                return 0.5 + word_similarity * 0.3 + char_similarity * 0.2
+                        
+                        return 0.0
+                    
+                    for candidate in candidates:
+                        cand_id = candidate.get("id", "")
+                        cand_name = candidate.get("recipe_name", "")
+                        cand_desc = candidate.get("description", "")
+                        
+                        # Extract MaterialMasterShorttext from description
+                        mst_part = ""
+                        if "MaterialMasterShorttext:" in cand_desc:
+                            try:
+                                mst_part = cand_desc.split("MaterialMasterShorttext:")[1].split(",")[0].strip()
+                            except:
+                                mst_part = ""
+                        
+                        # Calculate similarity with both recipe_name and MaterialMasterShorttext
+                        sim_name = calculate_name_similarity(query_clean, cand_name)
+                        sim_mst = calculate_name_similarity(query_clean, mst_part)
+                        best_sim = max(sim_name, sim_mst)
+                        
+                        # For short queries, calculate boost for ALL candidates with any similarity
+                        # This ensures the most similar recipes rank highest even without exact matches
+                        if best_sim >= 0.95:
+                            # Near-exact match
+                            boost = RECIPE_NAME_EXACT_BOOST
+                            match_type = "exact"
+                            recipe_name_matches[cand_id] = (match_type, boost, best_sim)
+                            logger.info(f"  ★★★ EXACT NAME MATCH (sim={best_sim:.2f}): {mst_part or cand_name[:60]} → boost +{boost}")
+                        elif best_sim >= 0.7:
+                            # Strong partial match
+                            boost = RECIPE_NAME_PARTIAL_BOOST * (best_sim / 0.95)  # Scale by similarity
+                            match_type = "partial"
+                            recipe_name_matches[cand_id] = (match_type, boost, best_sim)
+                            logger.info(f"  ★★ STRONG NAME MATCH (sim={best_sim:.2f}): {mst_part or cand_name[:60]} → boost +{boost:.2f}")
+                        elif best_sim >= 0.5:
+                            # Weak partial match
+                            boost = RECIPE_NAME_PARTIAL_BOOST * 0.5 * (best_sim / 0.7)
+                            match_type = "weak"
+                            recipe_name_matches[cand_id] = (match_type, boost, best_sim)
+                            logger.debug(f"  ★ WEAK NAME MATCH (sim={best_sim:.2f}): {mst_part or cand_name[:60]} → boost +{boost:.2f}")
+                        elif best_sim >= 0.3:
+                            # Very weak match - still useful for ranking similar alternatives
+                            boost = RECIPE_NAME_PARTIAL_BOOST * 0.25 * best_sim
+                            match_type = "similar"
+                            recipe_name_matches[cand_id] = (match_type, boost, best_sim)
+                            # Don't log these to avoid noise, but they help rank similar alternatives
+                    
+                    if recipe_name_matches:
+                        # Sort and show top matches
+                        top_matches = sorted(recipe_name_matches.items(), key=lambda x: x[1][2], reverse=True)[:5]
+                        logger.info(f"Found {len(recipe_name_matches)} recipe name matches for short query. Top 5:")
+                        for cid, (mtype, boost, sim) in top_matches:
+                            cand = next((c for c in candidates if c.get("id") == cid), None)
+                            if cand:
+                                logger.info(f"    {mtype}: {cand.get('recipe_name', 'Unknown')[:50]} (sim={sim:.2f}, boost=+{boost:.2f})")
 
             # Extract query flavor value for boosting
             query_flavor = None
@@ -1619,8 +1766,18 @@ class QdrantRecipeManager:
                     f"Flavor boost enabled. Query flavors: {query_flavor[:100]}...")
 
             # Determine scoring weights based on number of features
+            # SPECIAL CASE: For short queries (recipe name searches), use name similarity as primary factor
             num_features = len(query_features)
-            if num_features == 0:
+            if is_short_query_mode and recipe_name_matches:
+                # Short query with name matches: prioritize name similarity over everything else
+                # The name_boost will be the dominant factor (added later to combined_score)
+                # Use minimal base weights since name_boost will determine ranking
+                text_weight = 0.30  # Some text similarity still matters
+                feature_search_weight = 0.05  # Minimal feature influence
+                feature_refinement_weight = 0.05  # Minimal feature match influence
+                weight_scheme = "name-similarity"
+                logger.info(f"SHORT QUERY MODE: Name similarity will be the primary ranking factor")
+            elif num_features == 0:
                 text_weight = 1.0
                 feature_search_weight = 0.0
                 feature_refinement_weight = 0.0
@@ -1774,6 +1931,22 @@ class QdrantRecipeManager:
                                 f"+{actual_boost:.2f} (reduced - matches flavor only, no other features)"
                             )
 
+                # Apply recipe name match boost (if query looks like a recipe name)
+                cand_id = candidate.get("id", "")
+                if cand_id in recipe_name_matches:
+                    match_info = recipe_name_matches[cand_id]
+                    # Handle both old (match_type, boost) and new (match_type, boost, similarity) formats
+                    if len(match_info) == 3:
+                        match_type, name_boost, name_similarity = match_info
+                    else:
+                        match_type, name_boost = match_info
+                        name_similarity = 0.0
+                    combined_score += name_boost
+                    candidate["_name_match"] = True
+                    candidate["_name_match_type"] = match_type
+                    candidate["_name_boost"] = name_boost
+                    candidate["_name_similarity"] = name_similarity
+
                 candidate["feature_score"] = feature_refinement_score
                 candidate["feature_search_score"] = feature_search_score
                 candidate["combined_score"] = combined_score
@@ -1797,20 +1970,36 @@ class QdrantRecipeManager:
                 text_only_boost = result.get('_text_only_boost', False)
 
                 # Show flavor boost info with correct amounts
+                boost_info_parts = []
+                
+                # Name match boost
+                name_match = result.get('_name_match', False)
+                if name_match:
+                    name_boost = result.get('_name_boost', 0)
+                    name_sim = result.get('_name_similarity', 0)
+                    match_type = result.get('_name_match_type', 'partial')
+                    if match_type == "exact":
+                        boost_info_parts.append(f"★★★NAME(sim={name_sim:.2f})+{name_boost:.2f}")
+                    elif match_type in ("partial", "weak"):
+                        boost_info_parts.append(f"★★NAME(sim={name_sim:.2f})+{name_boost:.2f}")
+                    else:
+                        boost_info_parts.append(f"★NAME(sim={name_sim:.2f})+{name_boost:.2f}")
+                
+                # Flavor boost
                 if flavor_matched:
                     if text_only_boost:
                         actual_text_boost = result.get('_actual_text_boost', TEXT_ONLY_FLAVOR_BOOST)
                         total_boost = FLAVOR_BONUS + actual_text_boost
                         # Use ★★ for full boost, ★ for reduced boost
                         star_symbol = "★★" if actual_text_boost >= TEXT_ONLY_FLAVOR_BOOST * 0.8 else "★"
-                        flavor_info = f" {star_symbol}FLAVOR+{total_boost:.2f}"
+                        boost_info_parts.append(f"{star_symbol}FLAVOR+{total_boost:.2f}")
                     else:
-                        flavor_info = f" ★FLAVOR+{FLAVOR_BONUS}"
-                else:
-                    flavor_info = ""
+                        boost_info_parts.append(f"★FLAVOR+{FLAVOR_BONUS}")
+                
+                boost_info = " " + " ".join(boost_info_parts) if boost_info_parts else ""
 
                 logger.info(
-                    f"  {i}. {recipe_name}{flavor_info} | Combined: {combined_score:.4f} "
+                    f"  {i}. {recipe_name}{boost_info} | Combined: {combined_score:.4f} "
                     f"(Text: {text_score:.4f}×{text_weight:.2f} + FeatSearch: {feature_search_score:.4f}×{feature_search_weight:.2f} + FeatMatch: {feature_score:.4f}×{feature_refinement_weight:.2f})"
                 )
 
