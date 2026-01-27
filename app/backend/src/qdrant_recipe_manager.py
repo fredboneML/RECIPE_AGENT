@@ -1772,14 +1772,14 @@ class QdrantRecipeManager:
             # SPECIAL CASE: For short queries (recipe name searches), use name similarity as primary factor
             num_features = len(query_features)
             if is_short_query_mode and recipe_name_matches:
-                # Short query with name matches: prioritize name similarity over everything else
-                # The name_boost will be the dominant factor (added later to combined_score)
-                # Use minimal base weights since name_boost will determine ranking
-                text_weight = 0.30  # Some text similarity still matters
-                feature_search_weight = 0.05  # Minimal feature influence
-                feature_refinement_weight = 0.05  # Minimal feature match influence
-                weight_scheme = "name-similarity"
-                logger.info(f"SHORT QUERY MODE: Name similarity will be the primary ranking factor")
+                # Short query with name matches: NAME SIMILARITY IS THE ONLY FACTOR
+                # Text and feature scores are ignored - ranking is purely by name match quality
+                # This ensures "FP ALOE VERA-PASSIONFRUIT DY" finds the closest matching recipe name
+                text_weight = 0.0  # Ignore text similarity for name searches
+                feature_search_weight = 0.0  # Ignore feature similarity
+                feature_refinement_weight = 0.0  # Ignore feature matching
+                weight_scheme = "name-only"
+                logger.info(f"SHORT QUERY MODE: Name similarity is the ONLY ranking factor (text/feature weights = 0)")
             elif num_features == 0:
                 text_weight = 1.0
                 feature_search_weight = 0.0
