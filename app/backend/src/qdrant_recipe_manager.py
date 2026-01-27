@@ -1650,17 +1650,8 @@ class QdrantRecipeManager:
                         f"Short query detected ({query_len} chars, {num_features} features, no specific constraints) "
                         f"- enabling recipe name similarity matching for: '{query_clean}'"
                     )
-                elif query_len < 50 and query_len >= 3 and (has_specific_features or has_numerical_filters):
-                    reason = []
-                    if has_specific_features:
-                        reason.append(f"specific features: {specific_features[:3]}")
-                    if has_numerical_filters:
-                        reason.append(f"numerical filters: {list(numerical_filters.keys())}")
-                    logger.info(
-                        f"Short query ({query_len} chars) but has {', '.join(reason)} "
-                        f"- using normal feature-based search"
-                    )
                     
+                    # Define similarity calculation function for name matching
                     def calculate_name_similarity(query: str, candidate_name: str) -> float:
                         """Calculate similarity between query and candidate name (0.0 to 1.0)"""
                         if not candidate_name:
@@ -1752,6 +1743,18 @@ class QdrantRecipeManager:
                             cand = next((c for c in candidates if c.get("id") == cid), None)
                             if cand:
                                 logger.info(f"    {mtype}: {cand.get('recipe_name', 'Unknown')[:50]} (sim={sim:.2f}, boost=+{boost:.2f})")
+                                
+                elif query_len < 50 and query_len >= 3 and (has_specific_features or has_numerical_filters):
+                    # Short query but has specific features/constraints - use feature-based search
+                    reason = []
+                    if has_specific_features:
+                        reason.append(f"specific features: {specific_features[:3]}")
+                    if has_numerical_filters:
+                        reason.append(f"numerical filters: {list(numerical_filters.keys())}")
+                    logger.info(
+                        f"Short query ({query_len} chars) but has {', '.join(reason)} "
+                        f"- using normal feature-based search"
+                    )
 
             # Extract query flavor value for boosting
             query_flavor = None
