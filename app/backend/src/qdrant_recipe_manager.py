@@ -1749,14 +1749,30 @@ class QdrantRecipeManager:
                     # EXTRA BOOST: Text-only candidates (found via text search but not feature search)
                     # get additional bonus to compensate for missing feature_search_score
                     # This ensures flavor-matched recipes found via text search can compete
+                    # BUT: Scale the boost by feature_refinement_score to prioritize recipes
+                    # that also match other specified features (not JUST the flavor)
                     is_text_only = feature_search_score == 0.0 and text_score > 0.0
                     if is_text_only:
-                        combined_score += TEXT_ONLY_FLAVOR_BOOST
+                        # Scale TEXT_ONLY_FLAVOR_BOOST by feature match score
+                        # - If recipe matches other features (feature_refinement_score > 0), get full boost
+                        # - If recipe matches NO features (feature_refinement_score = 0), get reduced boost
+                        # This prevents recipes that ONLY match flavor from outranking recipes
+                        # that match flavor + other criteria (like "Aromafrei", "Quark/Topfen", etc.)
+                        feature_match_multiplier = min(1.0, 0.3 + feature_refinement_score * 7.0)
+                        actual_boost = TEXT_ONLY_FLAVOR_BOOST * feature_match_multiplier
+                        combined_score += actual_boost
                         candidate["_text_only_boost"] = True
-                        logger.info(
-                            f"  ★★ TEXT-ONLY FLAVOR BOOST: {candidate.get('recipe_name', 'Unknown')[:50]} "
-                            f"+{TEXT_ONLY_FLAVOR_BOOST} (total flavor boost: +{FLAVOR_BONUS + TEXT_ONLY_FLAVOR_BOOST})"
-                        )
+                        candidate["_actual_text_boost"] = actual_boost
+                        if feature_refinement_score > 0:
+                            logger.info(
+                                f"  ★★ TEXT-ONLY FLAVOR BOOST: {candidate.get('recipe_name', 'Unknown')[:50]} "
+                                f"+{actual_boost:.2f} (full boost, matches {feature_refinement_score:.2%} features)"
+                            )
+                        else:
+                            logger.info(
+                                f"  ★ REDUCED FLAVOR BOOST: {candidate.get('recipe_name', 'Unknown')[:50]} "
+                                f"+{actual_boost:.2f} (reduced - matches flavor only, no other features)"
+                            )
 
                 candidate["feature_score"] = feature_refinement_score
                 candidate["feature_search_score"] = feature_search_score
@@ -1783,8 +1799,11 @@ class QdrantRecipeManager:
                 # Show flavor boost info with correct amounts
                 if flavor_matched:
                     if text_only_boost:
-                        total_boost = FLAVOR_BONUS + TEXT_ONLY_FLAVOR_BOOST
-                        flavor_info = f" ★★FLAVOR+{total_boost:.2f}"
+                        actual_text_boost = result.get('_actual_text_boost', TEXT_ONLY_FLAVOR_BOOST)
+                        total_boost = FLAVOR_BONUS + actual_text_boost
+                        # Use ★★ for full boost, ★ for reduced boost
+                        star_symbol = "★★" if actual_text_boost >= TEXT_ONLY_FLAVOR_BOOST * 0.8 else "★"
+                        flavor_info = f" {star_symbol}FLAVOR+{total_boost:.2f}"
                     else:
                         flavor_info = f" ★FLAVOR+{FLAVOR_BONUS}"
                 else:
