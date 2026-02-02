@@ -17,14 +17,16 @@ function App() {
   const [uploadedDocuments, setUploadedDocuments] = useState([]); // Support up to 5 documents
   const [isUploading, setIsUploading] = useState(false);
   const [countries, setCountries] = useState([]);
-  const [selectedCountry, setSelectedCountry] = useState('All');
+  const [selectedCountries, setSelectedCountries] = useState([]);
   const [selectedVersion, setSelectedVersion] = useState('P');
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
   
   const navigate = useNavigate();
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const countryDropdownRef = useRef(null);
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -110,6 +112,23 @@ function App() {
     loadCountries();
   }, []);
 
+  // Close country dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (countryDropdownRef.current && !countryDropdownRef.current.contains(event.target)) {
+        setShowCountryDropdown(false);
+      }
+    };
+
+    if (showCountryDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showCountryDropdown]);
+
   // Replace getHeaders with tokenManager logic
   const getHeaders = () => ({
     'Content-Type': 'application/json',
@@ -169,7 +188,7 @@ function App() {
       const response = await tokenManager.post('/query', {
         query: finalQuery,
         conversation_id: currentConversation?.id,
-        country_filter: selectedCountry === 'All' ? null : selectedCountry,
+        country_filter: selectedCountries.length === 0 ? null : selectedCountries,
         version_filter: selectedVersion === 'All' ? null : selectedVersion
       }, {
         signal: abortControllerRef.current.signal
@@ -369,6 +388,24 @@ function App() {
     });
   };
 
+  const handleCountryToggle = (countryName) => {
+    setSelectedCountries(prev => {
+      if (prev.includes(countryName)) {
+        return prev.filter(c => c !== countryName);
+      } else {
+        return [...prev, countryName];
+      }
+    });
+  };
+
+  const handleSelectAllCountries = () => {
+    if (selectedCountries.length === countries.length) {
+      setSelectedCountries([]);
+    } else {
+      setSelectedCountries(countries.map(c => c.name));
+    }
+  };
+
   return (
     <div className="app">
       <div className="sidebar">
@@ -399,18 +436,57 @@ function App() {
         <div className="top-bar">
           <div className="country-filter">
             <label htmlFor="country-select">Country:</label>
-            <select
-              id="country-select"
-              value={selectedCountry}
-              onChange={(e) => setSelectedCountry(e.target.value)}
-              className="country-dropdown"
-            >
-              {countries.map((country) => (
-                <option key={country.code} value={country.name}>
-                  {country.name}
-                </option>
-              ))}
-            </select>
+            <div className="country-multiselect-wrapper" ref={countryDropdownRef}>
+              <button
+                type="button"
+                className={`country-multiselect-button ${showCountryDropdown ? 'open' : ''}`}
+                onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+              >
+                {selectedCountries.length === 0 
+                  ? 'All Countries' 
+                  : selectedCountries.length === 1
+                  ? selectedCountries[0]
+                  : `${selectedCountries.length} selected`}
+                <span className="country-dropdown-arrow">▼</span>
+              </button>
+              {showCountryDropdown && (
+                <div className="country-multiselect-dropdown">
+                  <div className="country-multiselect-header">
+                    <button
+                      type="button"
+                      className="country-select-all-btn"
+                      onClick={handleSelectAllCountries}
+                    >
+                      {selectedCountries.length === countries.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                    {selectedCountries.length > 0 && (
+                      <button
+                        type="button"
+                        className="country-clear-btn"
+                        onClick={() => setSelectedCountries([])}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <div className="country-multiselect-list">
+                    {countries.map((country) => (
+                      <label
+                        key={country.code}
+                        className="country-multiselect-option"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedCountries.includes(country.name)}
+                          onChange={() => handleCountryToggle(country.name)}
+                        />
+                        <span>{country.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <div className="version-filter">
             <label htmlFor="version-select">Version:</label>

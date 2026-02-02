@@ -769,8 +769,28 @@ async def process_query(
         features = body.get("features", None)
         text_top_k = body.get("text_top_k", 20)
         final_top_k = body.get("final_top_k", 3)
-        country_filter = body.get("country_filter", None)
+        country_filter_raw = body.get("country_filter", None)
         version_filter = body.get("version_filter", None)
+
+        # Handle country_filter: support both single string (backward compatibility) and list
+        country_filter = None
+        if country_filter_raw is not None:
+            if isinstance(country_filter_raw, list):
+                # Multiple countries selected
+                if len(country_filter_raw) > 0:
+                    country_filter = country_filter_raw
+                    logger.info(f"/api/query: Multiple countries filter received: {country_filter} (count: {len(country_filter)})")
+                else:
+                    logger.info("/api/query: Empty country filter list received, treating as 'All Countries'")
+            elif isinstance(country_filter_raw, str):
+                # Single country (backward compatibility)
+                if country_filter_raw and country_filter_raw != "All":
+                    country_filter = country_filter_raw
+                    logger.info(f"/api/query: Single country filter received: {country_filter}")
+                else:
+                    logger.info("/api/query: Country filter is 'All' or empty, no filter applied")
+            else:
+                logger.warning(f"/api/query: Unexpected country_filter type: {type(country_filter_raw)}, value: {country_filter_raw}")
 
         # Validate input
         if not query:
@@ -834,7 +854,12 @@ async def process_query(
 
         # Search for recipes with extracted features
         # Pass original query for language detection (the extracted description may be in English)
-        logger.info(f"/api/query: Country filter: {country_filter}")
+        if isinstance(country_filter, list):
+            logger.info(f"/api/query: Applying multi-country filter: {country_filter} ({len(country_filter)} countries)")
+        elif country_filter:
+            logger.info(f"/api/query: Applying single country filter: {country_filter}")
+        else:
+            logger.info("/api/query: No country filter applied (searching all countries)")
         logger.info(f"/api/query: Version filter: {version_filter}")
         results, metadata, formatted_response, detected_language, comparison_table = recipe_search_agent.search_recipes(
             description=text_description,

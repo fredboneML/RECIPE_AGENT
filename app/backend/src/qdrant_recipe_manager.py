@@ -12,13 +12,13 @@ import logging
 import re
 import os
 import json
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Filter, FieldCondition, MatchValue, MatchText, Range
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue, MatchAny, MatchText, Range
 
 # Import EnhancedTwoStepRecipeManager for consistent encoding with indexing
 from src.two_step_recipe_search import EnhancedTwoStepRecipeManager
@@ -400,7 +400,7 @@ class QdrantRecipeManager:
                            query_features: List[str],
                            query_values: List[Any],
                            top_k: int = 20,
-                           country_filter: Optional[str] = None,
+                           country_filter: Optional[Union[str, List[str]]] = None,
                            version_filter: Optional[str] = None,
                            numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """
@@ -417,7 +417,7 @@ class QdrantRecipeManager:
             query_features: List of feature names
             query_values: List of feature values
             top_k: Number of results to return
-            country_filter: Optional country name to filter results (None or "All" means no filter)
+            country_filter: Optional country name(s) to filter results. Can be a single string or a list of strings. None or "All" means no filter.
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             numerical_filters: Optional dict mapping field codes to Qdrant range filters
                 Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
@@ -474,14 +474,29 @@ class QdrantRecipeManager:
             filter_conditions = []
 
             if country_filter and country_filter != "All":
-                filter_conditions.append(
-                    FieldCondition(
-                        key="country",
-                        match=MatchValue(value=country_filter)
+                if isinstance(country_filter, list):
+                    # Multiple countries: use MatchAny
+                    if len(country_filter) > 0:
+                        filter_conditions.append(
+                            FieldCondition(
+                                key="country",
+                                match=MatchAny(any=country_filter)
+                            )
+                        )
+                        logger.info(
+                            f"Applying multi-country filter in feature search: {country_filter} ({len(country_filter)} countries)")
+                    else:
+                        logger.info("Empty country filter list, skipping country filter")
+                else:
+                    # Single country: use MatchValue (backward compatibility)
+                    filter_conditions.append(
+                        FieldCondition(
+                            key="country",
+                            match=MatchValue(value=country_filter)
+                        )
                     )
-                )
-                logger.info(
-                    f"Applying country filter in feature search: {country_filter}")
+                    logger.info(
+                        f"Applying single country filter in feature search: {country_filter}")
 
             if version_filter and version_filter != "All":
                 filter_conditions.append(
@@ -564,7 +579,7 @@ class QdrantRecipeManager:
     def search_by_text_description(self,
                                    text_description: str,
                                    top_k: int = 20,
-                                   country_filter: Optional[str] = None,
+                                   country_filter: Optional[Union[str, List[str]]] = None,
                                    version_filter: Optional[str] = None,
                                    numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
                                    return_embedding: bool = False):
@@ -574,7 +589,7 @@ class QdrantRecipeManager:
         Args:
             text_description: Text description for search
             top_k: Number of results to return
-            country_filter: Optional country name to filter results (None or "All" means no filter)
+            country_filter: Optional country name(s) to filter results. Can be a single string or a list of strings. None or "All" means no filter.
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             numerical_filters: Optional dict mapping field codes to Qdrant range filters
                 Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
@@ -593,13 +608,29 @@ class QdrantRecipeManager:
             filter_conditions = []
 
             if country_filter and country_filter != "All":
-                filter_conditions.append(
-                    FieldCondition(
-                        key="country",
-                        match=MatchValue(value=country_filter)
+                if isinstance(country_filter, list):
+                    # Multiple countries: use MatchAny
+                    if len(country_filter) > 0:
+                        filter_conditions.append(
+                            FieldCondition(
+                                key="country",
+                                match=MatchAny(any=country_filter)
+                            )
+                        )
+                        logger.info(
+                            f"Applying multi-country filter in text search: {country_filter} ({len(country_filter)} countries)")
+                    else:
+                        logger.info("Empty country filter list, skipping country filter")
+                else:
+                    # Single country: use MatchValue (backward compatibility)
+                    filter_conditions.append(
+                        FieldCondition(
+                            key="country",
+                            match=MatchValue(value=country_filter)
+                        )
                     )
-                )
-                logger.info(f"Applying country filter: {country_filter}")
+                    logger.info(
+                        f"Applying single country filter in text search: {country_filter}")
 
             if version_filter and version_filter != "All":
                 filter_conditions.append(
@@ -900,7 +931,7 @@ class QdrantRecipeManager:
 
     def _check_exact_recipe_name_match(self,
                                        query: str,
-                                       country_filter: Optional[str] = None,
+                                       country_filter: Optional[Union[str, List[str]]] = None,
                                        version_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Check if the query is an exact or partial recipe name match.
@@ -911,7 +942,7 @@ class QdrantRecipeManager:
 
         Args:
             query: The search query (potentially a recipe name)
-            country_filter: Optional country filter
+            country_filter: Optional country name(s) to filter results. Can be a single string or a list of strings.
             version_filter: Optional version filter
 
         Returns:
@@ -946,12 +977,28 @@ class QdrantRecipeManager:
 
             # Add country filter if specified
             if country_filter and country_filter != "All":
-                filter_conditions.append(
-                    FieldCondition(
-                        key="country",
-                        match=MatchValue(value=country_filter)
+                if isinstance(country_filter, list):
+                    # Multiple countries: use MatchAny
+                    if len(country_filter) > 0:
+                        filter_conditions.append(
+                            FieldCondition(
+                                key="country",
+                                match=MatchAny(any=country_filter)
+                            )
+                        )
+                        logger.info(
+                            f"Applying multi-country filter in recipe name match: {country_filter} ({len(country_filter)} countries)")
+                    # else: empty list, skip filter
+                else:
+                    # Single country: use MatchValue (backward compatibility)
+                    filter_conditions.append(
+                        FieldCondition(
+                            key="country",
+                            match=MatchValue(value=country_filter)
+                        )
                     )
-                )
+                    logger.info(
+                        f"Applying single country filter in recipe name match: {country_filter}")
 
             # Add version filter if specified
             if version_filter and version_filter != "All":
@@ -1050,7 +1097,7 @@ class QdrantRecipeManager:
                         query_df: Optional[pd.DataFrame] = None,
                         text_top_k: int = 50,
                         final_top_k: int = 10,
-                        country_filter: Optional[str] = None,
+                        country_filter: Optional[Union[str, List[str]]] = None,
                         version_filter: Optional[str] = None,
                         original_query: Optional[str] = None,
                         numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -1064,7 +1111,7 @@ class QdrantRecipeManager:
             query_df: Optional DataFrame with features for refinement
             text_top_k: Total number of candidates (split between text and feature search)
             final_top_k: Final number of results
-            country_filter: Optional country name to filter results (None or "All" means no filter)
+            country_filter: Optional country name(s) to filter results. Can be a single string or a list of strings. None or "All" means no filter.
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             numerical_filters: Optional dict mapping field codes to Qdrant range filters
                 Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
@@ -1327,12 +1374,28 @@ class QdrantRecipeManager:
 
                             # Add country filter if specified
                             if country_filter and country_filter != "All":
-                                filter_conditions.append(
-                                    FieldCondition(
-                                        key="country",
-                                        match=MatchValue(value=country_filter)
+                                if isinstance(country_filter, list):
+                                    # Multiple countries: use MatchAny
+                                    if len(country_filter) > 0:
+                                        filter_conditions.append(
+                                            FieldCondition(
+                                                key="country",
+                                                match=MatchAny(any=country_filter)
+                                            )
+                                        )
+                                        logger.debug(
+                                            f"Applying multi-country filter in flavor safeguard: {country_filter} ({len(country_filter)} countries)")
+                                    # else: empty list, skip filter
+                                else:
+                                    # Single country: use MatchValue (backward compatibility)
+                                    filter_conditions.append(
+                                        FieldCondition(
+                                            key="country",
+                                            match=MatchValue(value=country_filter)
+                                        )
                                     )
-                                )
+                                    logger.debug(
+                                        f"Applying single country filter in flavor safeguard: {country_filter}")
 
                             # Add version filter if specified
                             if version_filter and version_filter != "All":

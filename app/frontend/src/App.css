@@ -99,6 +99,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  position: relative;
 }
 
 .country-filter label {
@@ -107,7 +108,11 @@
   color: #333;
 }
 
-.country-dropdown {
+.country-multiselect-wrapper {
+  position: relative;
+}
+
+.country-multiselect-button {
   padding: 8px 12px;
   background-color: #9f1a15;
   color: white;
@@ -118,28 +123,102 @@
   font-weight: 500;
   transition: background-color 0.2s;
   min-width: 150px;
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='white' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   padding-right: 30px;
 }
 
-.country-dropdown:hover {
+.country-multiselect-button:hover {
   background-color: #851612;
 }
 
-.country-dropdown:focus {
+.country-multiselect-button:focus {
   outline: none;
   box-shadow: 0 0 0 2px rgba(159, 26, 21, 0.3);
 }
 
-.country-dropdown option {
+.country-dropdown-arrow {
+  position: absolute;
+  right: 10px;
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+}
+
+.country-multiselect-button.open .country-dropdown-arrow {
+  transform: rotate(180deg);
+}
+
+.country-multiselect-dropdown {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
   background-color: white;
-  color: #333;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 200px;
+  max-width: 300px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.country-multiselect-header {
+  display: flex;
+  gap: 8px;
   padding: 8px;
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #f5f5f5;
+}
+
+.country-select-all-btn,
+.country-clear-btn {
+  padding: 4px 8px;
+  background-color: #9f1a15;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background-color 0.2s;
+}
+
+.country-select-all-btn:hover,
+.country-clear-btn:hover {
+  background-color: #851612;
+}
+
+.country-multiselect-list {
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.country-multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  user-select: none;
+}
+
+.country-multiselect-option:hover {
+  background-color: #f0f0f0;
+}
+
+.country-multiselect-option input[type="checkbox"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: #9f1a15;
+}
+
+.country-multiselect-option span {
+  font-size: 0.9rem;
+  color: #333;
 }
 
 .version-filter {
@@ -619,10 +698,15 @@
     font-size: 0.8rem;
   }
 
-  .country-dropdown {
+  .country-multiselect-button {
     min-width: 120px;
     padding: 6px 10px;
     font-size: 0.85rem;
+  }
+
+  .country-multiselect-dropdown {
+    min-width: 180px;
+    max-width: 250px;
   }
 
   .version-filter {

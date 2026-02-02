@@ -1038,7 +1038,7 @@ class RecipeSearchAgent:
                        text_top_k: int = 20,
                        final_top_k: int = 3,
                        original_query: Optional[str] = None,
-                       country_filter: Optional[str] = None,
+                       country_filter: Optional[Union[str, List[str]]] = None,
                        version_filter: Optional[str] = None,
                        numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
@@ -1050,7 +1050,7 @@ class RecipeSearchAgent:
             text_top_k: Number of candidates from text search
             final_top_k: Final number of results to return
             original_query: Original user query (used for language detection if provided)
-            country_filter: Optional country name to filter results (None or "All" means no filter)
+            country_filter: Optional country name(s) to filter results. Can be a single string or a list of strings. None or "All" means no filter.
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             numerical_filters: Optional dict mapping field codes to Qdrant range filters
                 Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
