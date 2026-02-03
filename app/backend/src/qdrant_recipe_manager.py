@@ -402,7 +402,8 @@ class QdrantRecipeManager:
                            top_k: int = 20,
                            country_filter: Optional[Union[str, List[str]]] = None,
                            version_filter: Optional[str] = None,
-                           numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+                           numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                           categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """
         Search recipes by features using the feature vector in Qdrant.
 
@@ -421,6 +422,8 @@ class QdrantRecipeManager:
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             numerical_filters: Optional dict mapping field codes to Qdrant range filters
                 Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
+            categorical_filters: Optional dict mapping field codes to Qdrant match filters
+                Example: {"Z_INH04": {"value": "No"}, "Z_INH01H": {"value": "Yes"}}
 
         Returns:
             List of matching recipes with scores
@@ -530,6 +533,19 @@ class QdrantRecipeManager:
                     logger.info(
                         f"Applying numerical range filter: {field_code} → {range_spec}")
 
+            # Add categorical exact-match filters (e.g., Preservative: No, Halal: Yes)
+            if categorical_filters:
+                for field_code, match_spec in categorical_filters.items():
+                    # Categorical filters use spec_fields.Z_xxx for the payload path
+                    filter_conditions.append(
+                        FieldCondition(
+                            key=f"spec_fields.{field_code}",
+                            match=MatchValue(value=match_spec.get('value'))
+                        )
+                    )
+                    logger.info(
+                        f"Applying categorical exact-match filter in feature search: {field_code} → {match_spec}")
+
             if filter_conditions:
                 query_filter = Filter(must=filter_conditions)
 
@@ -582,6 +598,7 @@ class QdrantRecipeManager:
                                    country_filter: Optional[Union[str, List[str]]] = None,
                                    version_filter: Optional[str] = None,
                                    numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                                   categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
                                    return_embedding: bool = False):
         """
         Search recipes by text description using Qdrant vector search
@@ -593,6 +610,8 @@ class QdrantRecipeManager:
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             numerical_filters: Optional dict mapping field codes to Qdrant range filters
                 Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
+            categorical_filters: Optional dict mapping field codes to Qdrant match filters
+                Example: {"Z_INH04": {"value": "No"}, "Z_INH01H": {"value": "Yes"}}
             return_embedding: If True, also return the query embedding for reuse
 
         Returns:
@@ -658,6 +677,19 @@ class QdrantRecipeManager:
                     )
                     logger.info(
                         f"Applying numerical range filter in text search: {field_code} → {range_spec}")
+
+            # Add categorical exact-match filters (e.g., Preservative: No, Halal: Yes)
+            if categorical_filters:
+                for field_code, match_spec in categorical_filters.items():
+                    # Categorical filters use spec_fields.Z_xxx for the payload path
+                    filter_conditions.append(
+                        FieldCondition(
+                            key=f"spec_fields.{field_code}",
+                            match=MatchValue(value=match_spec.get('value'))
+                        )
+                    )
+                    logger.info(
+                        f"Applying categorical exact-match filter in text search: {field_code} → {match_spec}")
 
             if filter_conditions:
                 query_filter = Filter(must=filter_conditions)
@@ -1100,7 +1132,8 @@ class QdrantRecipeManager:
                         country_filter: Optional[Union[str, List[str]]] = None,
                         version_filter: Optional[str] = None,
                         original_query: Optional[str] = None,
-                        numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                        numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                        categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Two-step hybrid search: 
         - Step 1: Get candidates from both text search AND feature search (50/50 split)
@@ -1115,6 +1148,8 @@ class QdrantRecipeManager:
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             numerical_filters: Optional dict mapping field codes to Qdrant range filters
                 Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
+            categorical_filters: Optional dict mapping field codes to Qdrant match filters
+                Example: {"Z_INH04": {"value": "No"}, "Z_INH01H": {"value": "Yes"}}
 
         Returns:
             Tuple of (results, metadata)
@@ -1127,7 +1162,8 @@ class QdrantRecipeManager:
             "final_results": final_top_k,
             "country_filter": country_filter,
             "version_filter": version_filter,
-            "numerical_filters": numerical_filters if numerical_filters else {}
+            "numerical_filters": numerical_filters if numerical_filters else {},
+            "categorical_filters": categorical_filters if categorical_filters else {}
         }
         
         # Log numerical filters if present
@@ -1135,6 +1171,12 @@ class QdrantRecipeManager:
             logger.info(f"Applying {len(numerical_filters)} numerical range filter(s):")
             for field_code, range_spec in numerical_filters.items():
                 logger.info(f"  - {field_code}: {range_spec}")
+        
+        # Log categorical filters if present
+        if categorical_filters:
+            logger.info(f"Applying {len(categorical_filters)} categorical exact-match filter(s):")
+            for field_code, match_spec in categorical_filters.items():
+                logger.info(f"  - {field_code}: {match_spec}")
 
         # Calculate split for hybrid search (both searches return 15 candidates)
         text_search_k = 15
@@ -1164,7 +1206,8 @@ class QdrantRecipeManager:
             f"Step 1a: Text-based search in Qdrant (top {text_search_k})")
         text_search_result = self.search_by_text_description(
             text_description, text_search_k, country_filter, version_filter, 
-            numerical_filters=numerical_filters, return_embedding=True)
+            numerical_filters=numerical_filters, categorical_filters=categorical_filters,
+            return_embedding=True)
 
         # Handle return value (may be tuple if return_embedding=True)
         if isinstance(text_search_result, tuple):
@@ -1209,7 +1252,7 @@ class QdrantRecipeManager:
                 f"Step 1b: Feature-based search in Qdrant (top {feature_search_k})")
             feature_candidates = self.search_by_features(
                 query_features, query_values, feature_search_k, country_filter, version_filter,
-                numerical_filters=numerical_filters)
+                numerical_filters=numerical_filters, categorical_filters=categorical_filters)
 
             search_metadata["feature_search_results_found"] = len(
                 feature_candidates)
@@ -1242,7 +1285,8 @@ class QdrantRecipeManager:
             logger.info(f"Step 1a+: Additional text search using original query: '{original_query[:60]}...'")
             original_query_results = self.search_by_text_description(
                 original_query, text_search_k, country_filter, version_filter,
-                numerical_filters=numerical_filters, return_embedding=False
+                numerical_filters=numerical_filters, categorical_filters=categorical_filters,
+                return_embedding=False
             )
             
             # Handle return value (may be tuple if return_embedding=True)
@@ -1311,7 +1355,7 @@ class QdrantRecipeManager:
                 # Apply numerical_filters to ensure flavor matches meet pH, Brix, etc. constraints
                 vector_flavor_results = self.search_by_text_description(
                     query_flavor, top_k=100, country_filter=country_filter, version_filter=version_filter,
-                    numerical_filters=numerical_filters)
+                    numerical_filters=numerical_filters, categorical_filters=categorical_filters)
 
                 if numerical_filters:
                     logger.info(

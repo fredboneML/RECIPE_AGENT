@@ -852,6 +852,13 @@ async def process_query(
             for field_code, range_spec in numerical_filters.items():
                 logger.info(f"/api/query:   - {field_code}: {range_spec}")
 
+        # Extract categorical filters for exact-match queries (e.g., Preservative: No, Halal: Yes)
+        categorical_filters = extraction_result.get('categorical_filters', {})
+        if categorical_filters:
+            logger.info(f"/api/query: Extracted {len(categorical_filters)} categorical constraint(s):")
+            for field_code, match_spec in categorical_filters.items():
+                logger.info(f"/api/query:   - {field_code}: {match_spec}")
+
         # Search for recipes with extracted features
         # Pass original query for language detection (the extracted description may be in English)
         if isinstance(country_filter, list):
@@ -869,7 +876,8 @@ async def process_query(
             original_query=query,
             country_filter=country_filter,
             version_filter=version_filter,
-            numerical_filters=numerical_filters
+            numerical_filters=numerical_filters,
+            categorical_filters=categorical_filters
         )
 
         # Use the formatted response from the agent

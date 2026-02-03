@@ -32,6 +32,20 @@ try:
 except ImportError:
     NUMERICAL_PARSER_AVAILABLE = False
 
+# Import categorical constraint parser for binary field filtering
+try:
+    from ai_analyzer.utils.categorical_constraint_parser import (
+        extract_categorical_from_brief_text,
+        parse_llm_categorical_constraints,
+        constraints_to_qdrant_filters as categorical_to_qdrant_filters,
+        generate_categorical_extraction_prompt,
+        BINARY_FIELD_INFO,
+        BRIEF_FIELD_TO_CODE as CATEGORICAL_FIELD_TO_CODE
+    )
+    CATEGORICAL_PARSER_AVAILABLE = True
+except ImportError:
+    CATEGORICAL_PARSER_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -199,10 +213,20 @@ class DataExtractorRouterAgent:
             '    {"field": "Brix", "constraint": ">40"},',
             '    {"field": "pH", "constraint": "<4.1"},',
             '    {"field": "Fruit content", "constraint": ">30%"},',
-            '    {"field": "Fruit in finished product", "constraint": "max 5%"},',
-            '    {"field": "Sugar in finished product", "constraint": "max 5%"},',
-            '    {"field": "Viscosity", "constraint": "6-9"},',
-            '    {"field": "Fat content", "constraint": "58±2%"}',
+            '    {"field": "Viscosity", "constraint": "6-9"}',
+            "  ],",
+            '  "categorical_constraints": [',
+            '    {"field": "Preservative", "value": "No"},',
+            '    {"field": "Artificial colors", "value": "No"},',
+            '    {"field": "Natural flavor", "value": "Yes"},',
+            '    {"field": "Starch", "value": "Yes"},',
+            '    {"field": "Pectin", "value": "Yes"},',
+            '    {"field": "Xanthan", "value": "Yes"},',
+            '    {"field": "Guar", "value": "Yes"},',
+            '    {"field": "LBG", "value": "Yes"},',
+            '    {"field": "Halal", "value": "Yes"},',
+            '    {"field": "Kosher", "value": "Yes"},',
+            '    {"field": "Allergens", "value": "Yes"}',
             "  ],",
             '  "reasoning": "Brief explanation of extraction choices"',
             "}",
@@ -266,6 +290,28 @@ class DataExtractorRouterAgent:
             "8. FLAVOURING PREFERENCES:",
             "   - If brief says 'Without if possible' or 'No flavoring' → 'Natürliche Aromen: Kein naturidentes Aroma'",
             "   - If brief says 'Natural flavor' or 'With natural flavor' → 'Natürliche Aromen: Natürliches Aroma'",
+            "",
+            "9. CATEGORICAL CONSTRAINTS (for Qdrant exact-match filtering):",
+            "   - Extract binary Yes/No constraints for these fields when EXPLICITLY mentioned:",
+            "   - PRESERVATIVES: 'No Preservatives' → {\"field\": \"Preservative\", \"value\": \"No\"}",
+            "   - ARTIFICIAL COLORS: 'No Artificial Colours' → {\"field\": \"Artificial colors\", \"value\": \"No\"}",
+            "   - NATURAL FLAVORS: 'Only Natural Flavours' → {\"field\": \"Natural flavor\", \"value\": \"Yes\"}",
+            "   - STABILIZERS (from codes in brief):",
+            "     * 'Modified Starch (1442)' → {\"field\": \"Starch\", \"value\": \"Yes\"}",
+            "     * 'Pectin (440)' → {\"field\": \"Pectin\", \"value\": \"Yes\"}",
+            "     * 'Guar (412)' → {\"field\": \"Guar\", \"value\": \"Yes\"}",
+            "     * 'Xanthan (415)' → {\"field\": \"Xanthan\", \"value\": \"Yes\"}",
+            "     * 'LBG (410)' → {\"field\": \"LBG\", \"value\": \"Yes\"}",
+            "   - CERTIFICATIONS:",
+            "     * 'Halal & Kosher Preferred' → {\"field\": \"Halal\", \"value\": \"Yes\"} AND {\"field\": \"Kosher\", \"value\": \"Yes\"}",
+            "     * 'Halal required' → {\"field\": \"Halal\", \"value\": \"Yes\"}",
+            "   - ALLERGENS:",
+            "     * 'Milk containing products' → {\"field\": \"Allergens\", \"value\": \"Yes\"}",
+            "     * 'Allergen-free' → {\"field\": \"Allergens\", \"value\": \"No\"}",
+            "   - SWEETENER: 'No sweetener' → {\"field\": \"Sweetener\", \"value\": \"No\"}",
+            "   - GMO: 'GMO-free' or 'Non-GMO' → {\"field\": \"GMO\", \"value\": \"No\"}",
+            "   - SACCHAROSE: If sugar/sucrose allowed → {\"field\": \"Saccharose\", \"value\": \"Yes\"}",
+            "   ⚠️  ONLY extract categorical constraints for fields that are EXPLICITLY mentioned!",
             "",
             "IMPORTANT NOTES:",
             "- Extract features ONLY when clearly mentioned or strongly implied",
@@ -494,6 +540,34 @@ Provide your response as a JSON object following the specified format.
             
             result['numerical_filters'] = numerical_filters
 
+            # ============================================================
+            # CATEGORICAL CONSTRAINTS: Parse and convert to Qdrant filters
+            # ============================================================
+            categorical_filters = {}
+            
+            if CATEGORICAL_PARSER_AVAILABLE:
+                # Method 1: Parse from raw brief text (keyword matching)
+                try:
+                    text_categorical = extract_categorical_from_brief_text(combined_brief)
+                    if text_categorical:
+                        categorical_filters.update(categorical_to_qdrant_filters(text_categorical))
+                        logger.info(f"Extracted {len(text_categorical)} categorical constraints from brief text")
+                except Exception as e:
+                    logger.warning(f"Error parsing categorical constraints from text: {e}")
+                
+                # Method 2: Parse from LLM-extracted categorical_constraints
+                llm_categorical = result.get('categorical_constraints', [])
+                if llm_categorical:
+                    try:
+                        parsed_llm_cat = parse_llm_categorical_constraints(llm_categorical)
+                        # LLM extraction takes priority (more accurate)
+                        categorical_filters.update(parsed_llm_cat)
+                        logger.info(f"Parsed {len(parsed_llm_cat)} categorical constraints from LLM output")
+                    except Exception as e:
+                        logger.warning(f"Error parsing LLM categorical constraints: {e}")
+            
+            result['categorical_filters'] = categorical_filters
+
             logger.info(
                 f"Extraction completed. Search type: {result['search_type']}")
             logger.info(f"Reasoning: {result.get('reasoning', 'N/A')}")
@@ -541,6 +615,16 @@ Provide your response as a JSON object following the specified format.
                 logger.info("  No numerical constraints extracted")
             logger.info("-" * 40)
             
+            # Log categorical constraints
+            logger.info("CATEGORICAL CONSTRAINTS (for Qdrant exact-match filtering):")
+            logger.info("-" * 40)
+            if result.get('categorical_filters'):
+                for field_code, qdrant_filter in result['categorical_filters'].items():
+                    logger.info(f"  {field_code}: {qdrant_filter}")
+            else:
+                logger.info("  No categorical constraints extracted")
+            logger.info("-" * 40)
+            
             # Log reasoning
             logger.info("EXTRACTION REASONING:")
             logger.info("-" * 40)
@@ -558,6 +642,7 @@ Provide your response as a JSON object following the specified format.
                 'text_description': document_text if document_text else supplier_brief,
                 'features_df': None,
                 'numerical_filters': {},
+                'categorical_filters': {},
                 'reasoning': f'Error in extraction: {str(e)}. Falling back to two-step search with text only.'
             }
 
@@ -682,6 +767,8 @@ Provide your response as a JSON object following the specified format.
                 result['features'] = []
             if 'numerical_constraints' not in result:
                 result['numerical_constraints'] = []
+            if 'categorical_constraints' not in result:
+                result['categorical_constraints'] = []
             if 'reasoning' not in result:
                 result['reasoning'] = 'No reasoning provided'
 

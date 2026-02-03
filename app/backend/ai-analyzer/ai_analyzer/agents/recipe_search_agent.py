@@ -1040,7 +1040,8 @@ class RecipeSearchAgent:
                        original_query: Optional[str] = None,
                        country_filter: Optional[Union[str, List[str]]] = None,
                        version_filter: Optional[str] = None,
-                       numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
+                       numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                       categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
         Search for similar recipes based on description and optional features
 
@@ -1054,6 +1055,8 @@ class RecipeSearchAgent:
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
             numerical_filters: Optional dict mapping field codes to Qdrant range filters
                 Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30}}
+            categorical_filters: Optional dict mapping field codes to Qdrant match filters
+                Example: {"Z_INH04": {"value": "No"}, "Z_INH01H": {"value": "Yes"}}
 
         Returns:
             Tuple of (results, metadata, formatted_response, detected_language, comparison_table)
@@ -1111,6 +1114,12 @@ class RecipeSearchAgent:
                 for field_code, range_spec in numerical_filters.items():
                     logger.info(f"  - {field_code}: {range_spec}")
             
+            # Log categorical filters if present
+            if categorical_filters:
+                logger.info(f"Applying {len(categorical_filters)} categorical exact-match filter(s) to search:")
+                for field_code, match_spec in categorical_filters.items():
+                    logger.info(f"  - {field_code}: {match_spec}")
+            
             # Run two-step search using Qdrant
             results, metadata = self.recipe_manager.search_two_step(
                 text_description=description,
@@ -1120,7 +1129,8 @@ class RecipeSearchAgent:
                 country_filter=country_filter,
                 version_filter=version_filter,
                 original_query=original_query,
-                numerical_filters=numerical_filters
+                numerical_filters=numerical_filters,
+                categorical_filters=categorical_filters
             )
 
             # Format response in the detected language using AI
