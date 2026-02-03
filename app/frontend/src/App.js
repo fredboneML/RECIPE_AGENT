@@ -390,10 +390,16 @@ function App() {
 
   const handleCountryToggle = (countryName) => {
     setSelectedCountries(prev => {
+      // If "All" is selected, clear all other selections (means search all countries)
+      if (countryName === 'All') {
+        return prev.includes('All') ? [] : ['All'];
+      }
+      // If selecting a specific country, remove "All" from selection
+      const withoutAll = prev.filter(c => c !== 'All');
       if (prev.includes(countryName)) {
-        return prev.filter(c => c !== countryName);
+        return withoutAll.filter(c => c !== countryName);
       } else {
-        return [...prev, countryName];
+        return [...withoutAll, countryName];
       }
     });
   };

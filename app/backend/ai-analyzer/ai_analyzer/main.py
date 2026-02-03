@@ -777,9 +777,14 @@ async def process_query(
         if country_filter_raw is not None:
             if isinstance(country_filter_raw, list):
                 # Multiple countries selected
-                if len(country_filter_raw) > 0:
-                    country_filter = country_filter_raw
+                # Filter out "All" from the list - if "All" is present, it means no filtering
+                filtered_countries = [c for c in country_filter_raw if c != "All"]
+                if len(filtered_countries) > 0:
+                    country_filter = filtered_countries
                     logger.info(f"/api/query: Multiple countries filter received: {country_filter} (count: {len(country_filter)})")
+                elif len(country_filter_raw) > 0 and "All" in country_filter_raw:
+                    # List contains only "All" or "All" was filtered out
+                    logger.info("/api/query: Country filter contains 'All', no country filter applied (searching all countries)")
                 else:
                     logger.info("/api/query: Empty country filter list received, treating as 'All Countries'")
             elif isinstance(country_filter_raw, str):
