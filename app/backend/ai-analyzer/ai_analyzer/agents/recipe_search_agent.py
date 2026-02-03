@@ -692,7 +692,7 @@ SPECIFIED_FIELDS_60 = [
     ('Z_KOCHART',     'Pasteurization type',             'Kochart'),
     ('Z_KNOGM',       'GMO presence',                    'GMO enthalten'),
     ('Z_INH08',       'Contains GMO',                    'Nicht Genfrei'),
-    ('Z_INH12',       'Allergens',                       'Allergene'),
+    ('Z_INH12',       'Allergen-free',                   'Allergenfrei'),
     ('ZMX_TIPOALERG', 'Allergenic type',                 'Allergentyp'),
     ('Z_INH02',       'Sweetener',                       'Süßstoff'),
     ('Z_INH03',       'Saccharose',                      'Saccharose'),

@@ -83,7 +83,7 @@ class FeatureNormalizer:
             "kochart": "Pasteurization type",
             "gmo enthalten": "GMO presence",
             "nicht genfrei": "Contains GMO",
-            "allergene": "Allergens",
+            "allergene": "Allergen-free",
             "allergentyp": "Alergenic type",
             "süßstoff": "Sweetener",
             "saccharose": "Saccharose",
@@ -320,11 +320,12 @@ class FeatureNormalizer:
             "no sweetener": "No",
             "sweetener": "Yes",
 
-            # Allergens
-            "allergenfrei": "No",
-            "no allergens": "No",
-            "mit allergenen": "Yes",
-            "allergens": "Yes",
+            # Allergen-free (Yes = product is allergen-free, No = contains allergens)
+            "allergenfrei": "Yes",
+            "no allergens": "Yes",
+            "allergen-free": "Yes",
+            "mit allergenen": "No",
+            "contains allergens": "No",
 
             # GMO
             "nicht genfrei": "Yes",  # Contains GMO

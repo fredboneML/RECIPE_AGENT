@@ -80,7 +80,7 @@ SPECIFIED_FIELDS = {
     'Z_KOCHART':     {'order': 7,  'en': 'Pasteurization type',           'de': 'Kochart',                        'type': 'categorical'},
     'Z_KNOGM':       {'order': 8,  'en': 'GMO presence',                  'de': 'GMO enthalten',                  'type': 'binary'},
     'Z_INH08':       {'order': 9,  'en': 'Contains GMO',                  'de': 'Nicht Genfrei',                  'type': 'binary'},
-    'Z_INH12':       {'order': 10, 'en': 'Allergens',                     'de': 'Allergene',                      'type': 'binary'},
+    'Z_INH12':       {'order': 10, 'en': 'Allergen-free',                  'de': 'Allergenfrei',                   'type': 'binary'},
     'ZMX_TIPOALERG': {'order': 11, 'en': 'Alergenic type',                'de': 'Allergentyp',                    'type': 'categorical'},
     'Z_INH02':       {'order': 12, 'en': 'Sweetener',                     'de': 'Süßstoff',                       'type': 'binary'},
     'Z_INH03':       {'order': 13, 'en': 'Saccharose',                    'de': 'Saccharose',                     'type': 'binary'},

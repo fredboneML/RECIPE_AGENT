@@ -174,12 +174,12 @@ BINARY_FIELD_INFO: Dict[str, Dict[str, Any]] = {
         'keywords_no': ['no other stabilizer', 'keine anderen stabil', 'no additional stabilizer'],
     },
     
-    # Allergens & Dietary
+    # Allergen-free (Yes = product is allergen-free, No = contains allergens)
     'Z_INH12': {
-        'en': 'Allergens',
-        'de': 'Allergene',
-        'keywords_yes': ['contains allergen', 'allergen', 'mit allergenen', 'allergenic', 'milk containing'],
-        'keywords_no': ['allergen-free', 'allergenfrei', 'no allergens', 'ohne allergene', 'allergen free'],
+        'en': 'Allergen-free',
+        'de': 'Allergenfrei',
+        'keywords_yes': ['allergen-free', 'allergenfrei', 'no allergens', 'ohne allergene', 'allergen free', 'hypoallergenic'],
+        'keywords_no': ['contains allergen', 'allergen', 'mit allergenen', 'allergenic', 'milk containing', 'has allergens'],
     },
     
     # GMO
