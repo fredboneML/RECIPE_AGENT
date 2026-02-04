@@ -1197,6 +1197,7 @@ class QdrantRecipeManager:
         for candidate in candidates:
             payload = candidate.get("payload", {})
             passed_all = True
+            passed_strict = True
             numerical_penalty = 0.0
             categorical_unknowns = []
             categorical_mismatches = []
@@ -1213,6 +1214,7 @@ class QdrantRecipeManager:
                         # Field not present - fail the filter
                         filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
                         numerical_penalty += 0.25
+                        passed_strict = False
                         continue
 
                     try:
@@ -1220,6 +1222,7 @@ class QdrantRecipeManager:
                     except (ValueError, TypeError):
                         filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
                         numerical_penalty += 0.25
+                        passed_strict = False
                         continue
 
                     # Apply range checks with tolerance
@@ -1231,6 +1234,7 @@ class QdrantRecipeManager:
                             allowed_min = threshold * (1 - numerical_tolerance)
                             denom = max(abs(allowed_min), 1e-6)
                             numerical_penalty += max(0.0, (allowed_min - value) / denom)
+                            passed_strict = False
                             continue
 
                     if "gte" in range_spec:
@@ -1240,6 +1244,7 @@ class QdrantRecipeManager:
                             allowed_min = threshold * (1 - numerical_tolerance)
                             denom = max(abs(allowed_min), 1e-6)
                             numerical_penalty += max(0.0, (allowed_min - value) / denom)
+                            passed_strict = False
                             continue
 
                     if "lt" in range_spec:
@@ -1249,6 +1254,7 @@ class QdrantRecipeManager:
                             allowed_max = threshold * (1 + numerical_tolerance)
                             denom = max(abs(allowed_max), 1e-6)
                             numerical_penalty += max(0.0, (value - allowed_max) / denom)
+                            passed_strict = False
                             continue
 
                     if "lte" in range_spec:
@@ -1258,6 +1264,7 @@ class QdrantRecipeManager:
                             allowed_max = threshold * (1 + numerical_tolerance)
                             denom = max(abs(allowed_max), 1e-6)
                             numerical_penalty += max(0.0, (value - allowed_max) / denom)
+                            passed_strict = False
                             continue
 
                     # Passed this numerical filter
@@ -1283,6 +1290,7 @@ class QdrantRecipeManager:
                         filter_stats["categorical_unknown"][field_code] = filter_stats["categorical_unknown"].get(field_code, 0) + 1
                         categorical_unknowns.append(field_code)
                         categorical_penalty += 0.15
+                        passed_strict = False
                         continue
 
                     # Normalize for comparison
@@ -1302,6 +1310,7 @@ class QdrantRecipeManager:
                             filter_stats["categorical_mismatch"][field_code] = filter_stats["categorical_mismatch"].get(field_code, 0) + 1
                             categorical_mismatches.append(field_code)
                             categorical_penalty += 0.30
+                            passed_strict = False
                             continue
                     elif expected_norm in no_values:
                         if actual_norm not in no_values:
@@ -1312,6 +1321,7 @@ class QdrantRecipeManager:
                             filter_stats["categorical_mismatch"][field_code] = filter_stats["categorical_mismatch"].get(field_code, 0) + 1
                             categorical_mismatches.append(field_code)
                             categorical_penalty += 0.30
+                            passed_strict = False
                             continue
                     elif actual_norm != expected_norm:
                         if is_strict:
@@ -1321,12 +1331,15 @@ class QdrantRecipeManager:
                         filter_stats["categorical_mismatch"][field_code] = filter_stats["categorical_mismatch"].get(field_code, 0) + 1
                         categorical_mismatches.append(field_code)
                         categorical_penalty += 0.30
+                        passed_strict = False
                         continue
 
                     # Passed this categorical filter
                     filter_stats["categorical_matches"][field_code] = filter_stats["categorical_matches"].get(field_code, 0) + 1
 
             if passed_all:
+                if passed_strict:
+                    filter_stats["passed"] += 1
                 # Mark if filters were relaxed
                 if relaxation_level > 0:
                     candidate["_filter_relaxed"] = True
@@ -1341,7 +1354,6 @@ class QdrantRecipeManager:
                     candidate["_categorical_penalty"] = categorical_penalty
                 filtered.append(candidate)
 
-        filter_stats["passed"] = len(filtered)
         return filtered, filter_stats
 
     def search_two_step(self,
@@ -2113,7 +2125,8 @@ class QdrantRecipeManager:
                     filter_penalty += 0.10 * unknown_count
 
                 if filter_penalty > 0:
-                    FILTER_PENALTY_WEIGHT = 0.20
+                    FILTER_PENALTY_WEIGHT = 0.10
+                    filter_penalty = min(filter_penalty, 2.5)
                     combined_score = max(
                         0.0, combined_score - filter_penalty * FILTER_PENALTY_WEIGHT)
 
