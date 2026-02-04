@@ -1165,7 +1165,8 @@ class QdrantRecipeManager:
             "categorical_matches": {},
             "failed_numerical": {},
             "failed_categorical": {},
-            "categorical_unknown": {}
+            "categorical_unknown": {},
+            "categorical_mismatch": {}
         }
 
         # Initialize counters
@@ -1178,6 +1179,7 @@ class QdrantRecipeManager:
                 filter_stats["categorical_matches"][field_code] = 0
                 filter_stats["failed_categorical"][field_code] = 0
                 filter_stats["categorical_unknown"][field_code] = 0
+                filter_stats["categorical_mismatch"][field_code] = 0
 
         # Calculate tolerance based on relaxation level
         # Level 0: strict (exact match)
@@ -1197,6 +1199,8 @@ class QdrantRecipeManager:
             passed_all = True
             numerical_penalty = 0.0
             categorical_unknowns = []
+            categorical_mismatches = []
+            categorical_penalty = 0.0
 
             # Check numerical filters
             if numerical_filters and relaxation_level < 3:
@@ -1278,6 +1282,7 @@ class QdrantRecipeManager:
                         # Treat missing categorical field as unknown (soft)
                         filter_stats["categorical_unknown"][field_code] = filter_stats["categorical_unknown"].get(field_code, 0) + 1
                         categorical_unknowns.append(field_code)
+                        categorical_penalty += 0.15
                         continue
 
                     # Normalize for comparison
@@ -1290,17 +1295,32 @@ class QdrantRecipeManager:
 
                     if expected_norm in yes_values:
                         if actual_norm not in yes_values:
-                            passed_all = False
-                            filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                            if is_strict:
+                                passed_all = False
+                                filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                                continue
+                            filter_stats["categorical_mismatch"][field_code] = filter_stats["categorical_mismatch"].get(field_code, 0) + 1
+                            categorical_mismatches.append(field_code)
+                            categorical_penalty += 0.30
                             continue
                     elif expected_norm in no_values:
                         if actual_norm not in no_values:
+                            if is_strict:
+                                passed_all = False
+                                filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                                continue
+                            filter_stats["categorical_mismatch"][field_code] = filter_stats["categorical_mismatch"].get(field_code, 0) + 1
+                            categorical_mismatches.append(field_code)
+                            categorical_penalty += 0.30
+                            continue
+                    elif actual_norm != expected_norm:
+                        if is_strict:
                             passed_all = False
                             filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
                             continue
-                    elif actual_norm != expected_norm:
-                        passed_all = False
-                        filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                        filter_stats["categorical_mismatch"][field_code] = filter_stats["categorical_mismatch"].get(field_code, 0) + 1
+                        categorical_mismatches.append(field_code)
+                        categorical_penalty += 0.30
                         continue
 
                     # Passed this categorical filter
@@ -1315,6 +1335,10 @@ class QdrantRecipeManager:
                     candidate["_numerical_penalty"] = numerical_penalty
                 if categorical_unknowns:
                     candidate["_categorical_unknowns"] = categorical_unknowns
+                if categorical_mismatches:
+                    candidate["_categorical_mismatches"] = categorical_mismatches
+                if categorical_penalty > 0:
+                    candidate["_categorical_penalty"] = categorical_penalty
                 filtered.append(candidate)
 
         filter_stats["passed"] = len(filtered)
@@ -2083,6 +2107,7 @@ class QdrantRecipeManager:
 
                 # Apply soft filter penalty (numerical deviations + unknown categorical fields)
                 filter_penalty = candidate.get("_numerical_penalty", 0.0)
+                filter_penalty += candidate.get("_categorical_penalty", 0.0)
                 unknown_count = len(candidate.get("_categorical_unknowns", []))
                 if unknown_count:
                     filter_penalty += 0.10 * unknown_count
