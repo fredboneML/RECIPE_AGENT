@@ -1164,7 +1164,8 @@ class QdrantRecipeManager:
             "numerical_matches": {},
             "categorical_matches": {},
             "failed_numerical": {},
-            "failed_categorical": {}
+            "failed_categorical": {},
+            "categorical_unknown": {}
         }
 
         # Initialize counters
@@ -1176,6 +1177,7 @@ class QdrantRecipeManager:
             for field_code in categorical_filters:
                 filter_stats["categorical_matches"][field_code] = 0
                 filter_stats["failed_categorical"][field_code] = 0
+                filter_stats["categorical_unknown"][field_code] = 0
 
         # Calculate tolerance based on relaxation level
         # Level 0: strict (exact match)
@@ -1193,6 +1195,8 @@ class QdrantRecipeManager:
         for candidate in candidates:
             payload = candidate.get("payload", {})
             passed_all = True
+            numerical_penalty = 0.0
+            categorical_unknowns = []
 
             # Check numerical filters
             if numerical_filters and relaxation_level < 3:
@@ -1203,15 +1207,15 @@ class QdrantRecipeManager:
 
                     if value is None:
                         # Field not present - fail the filter
-                        passed_all = False
                         filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                        numerical_penalty += 0.25
                         continue
 
                     try:
                         value = float(value)
                     except (ValueError, TypeError):
-                        passed_all = False
                         filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                        numerical_penalty += 0.25
                         continue
 
                     # Apply range checks with tolerance
@@ -1219,29 +1223,37 @@ class QdrantRecipeManager:
                         threshold = range_spec["gt"]
                         # With tolerance: value > threshold * (1 - tolerance)
                         if value <= threshold * (1 - numerical_tolerance):
-                            passed_all = False
                             filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                            allowed_min = threshold * (1 - numerical_tolerance)
+                            denom = max(abs(allowed_min), 1e-6)
+                            numerical_penalty += max(0.0, (allowed_min - value) / denom)
                             continue
 
                     if "gte" in range_spec:
                         threshold = range_spec["gte"]
                         if value < threshold * (1 - numerical_tolerance):
-                            passed_all = False
                             filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                            allowed_min = threshold * (1 - numerical_tolerance)
+                            denom = max(abs(allowed_min), 1e-6)
+                            numerical_penalty += max(0.0, (allowed_min - value) / denom)
                             continue
 
                     if "lt" in range_spec:
                         threshold = range_spec["lt"]
                         if value >= threshold * (1 + numerical_tolerance):
-                            passed_all = False
                             filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                            allowed_max = threshold * (1 + numerical_tolerance)
+                            denom = max(abs(allowed_max), 1e-6)
+                            numerical_penalty += max(0.0, (value - allowed_max) / denom)
                             continue
 
                     if "lte" in range_spec:
                         threshold = range_spec["lte"]
                         if value > threshold * (1 + numerical_tolerance):
-                            passed_all = False
                             filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                            allowed_max = threshold * (1 + numerical_tolerance)
+                            denom = max(abs(allowed_max), 1e-6)
+                            numerical_penalty += max(0.0, (value - allowed_max) / denom)
                             continue
 
                     # Passed this numerical filter
@@ -1251,6 +1263,7 @@ class QdrantRecipeManager:
             if categorical_filters and passed_all:
                 for field_code, match_spec in categorical_filters.items():
                     expected_value = match_spec.get("value")
+                    is_strict = match_spec.get("strict", False)
 
                     # Get the categorical value from payload (spec_fields)
                     spec_fields = payload.get("spec_fields", {})
@@ -1258,8 +1271,13 @@ class QdrantRecipeManager:
 
                     if actual_value is None:
                         # Field not present - fail the filter
-                        passed_all = False
-                        filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                        if is_strict:
+                            passed_all = False
+                            filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                            continue
+                        # Treat missing categorical field as unknown (soft)
+                        filter_stats["categorical_unknown"][field_code] = filter_stats["categorical_unknown"].get(field_code, 0) + 1
+                        categorical_unknowns.append(field_code)
                         continue
 
                     # Normalize for comparison
@@ -1293,6 +1311,10 @@ class QdrantRecipeManager:
                 if relaxation_level > 0:
                     candidate["_filter_relaxed"] = True
                     candidate["_relaxation_level"] = relaxation_level
+                if numerical_penalty > 0:
+                    candidate["_numerical_penalty"] = numerical_penalty
+                if categorical_unknowns:
+                    candidate["_categorical_unknowns"] = categorical_unknowns
                 filtered.append(candidate)
 
         filter_stats["passed"] = len(filtered)
@@ -2058,6 +2080,17 @@ class QdrantRecipeManager:
                     feature_search_weight * feature_search_score +
                     feature_refinement_weight * feature_refinement_score
                 )
+
+                # Apply soft filter penalty (numerical deviations + unknown categorical fields)
+                filter_penalty = candidate.get("_numerical_penalty", 0.0)
+                unknown_count = len(candidate.get("_categorical_unknowns", []))
+                if unknown_count:
+                    filter_penalty += 0.10 * unknown_count
+
+                if filter_penalty > 0:
+                    FILTER_PENALTY_WEIGHT = 0.20
+                    combined_score = max(
+                        0.0, combined_score - filter_penalty * FILTER_PENALTY_WEIGHT)
 
                 # Apply flavor bonus - this is the key differentiator!
                 # Recipes matching the query flavor get a significant boost
