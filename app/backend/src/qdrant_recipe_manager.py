@@ -580,7 +580,8 @@ class QdrantRecipeManager:
                     "metadata": {
                         "recipe_name": payload.get("recipe_name", "")
                     },
-                    "search_source": "features"
+                    "search_source": "features",
+                    "payload": payload  # Include full payload for comparison table
                 }
                 results.append(recipe_data)
 
@@ -737,7 +738,8 @@ class QdrantRecipeManager:
                     "metadata": {
                         "recipe_name": payload.get("recipe_name", "")
                     },
-                    "search_source": "text"
+                    "search_source": "text",
+                    "payload": payload  # Include full payload for comparison table
                 }
                 results.append(recipe_data)
 
@@ -1108,7 +1110,8 @@ class QdrantRecipeManager:
                         },
                         "search_source": "text",
                         "_name_match": True,  # Flag to indicate this is a name match
-                        "_match_score": score
+                        "_match_score": score,
+                        "payload": payload  # Include full payload for comparison table
                     }
                     matches.append(recipe_data)
                     
@@ -1506,7 +1509,8 @@ class QdrantRecipeManager:
                                     "metadata": {
                                         "recipe_name": payload.get("recipe_name", "")
                                     },
-                                    "search_source": "flavor_keyword"
+                                    "search_source": "flavor_keyword",
+                                    "payload": payload  # Include full payload for comparison table
                                 }
                                 flavor_matched_candidates.append(recipe_data)
                                 existing_ids.add(point.id)
