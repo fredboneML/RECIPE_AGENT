@@ -46,7 +46,11 @@ BINARY_FIELD_INFO: Dict[str, Dict[str, Any]] = {
         'en': 'Sweetener',
         'de': 'Süßstoff',
         'keywords_yes': ['sweetener', 'süßstoff', 'süssstoff', 'with sweetener', 'mit süßstoff'],
-        'keywords_no': ['no sweetener', 'keine süsstoffe', 'ohne süßstoff', 'sweetener-free', 'without sweetener'],
+        'keywords_no': [
+            'no sweetener', 'sweetener-free', 'without sweetener',
+            'kein süßstoff', 'keine süßstoffe', 'kein süsstoff', 'keine süsstoffe',
+            'ohne süßstoff', 'ohne süsstoff'
+        ],
     },
     'Z_INH03': {
         'en': 'Saccharose',
@@ -83,9 +87,12 @@ BINARY_FIELD_INFO: Dict[str, Dict[str, Any]] = {
         'en': 'Artificial colors',
         'de': 'Künstliche Farben',
         'keywords_yes': ['artificial color', 'artificial colours', 'künstliche farbe', 'synthetic color'],
-        'keywords_no': ['no artificial color', 'no artificial colours', 'keine künstl. farbe', 
-                       'natural colors only', 'no synthetic color', 'artificial color free',
-                       'only natural colours', 'n1 colours', 'natcol'],
+        'keywords_no': [
+            'no artificial color', 'no artificial colours', 'keine künstl. farbe',
+            'keine künstliche farbe', 'kein künstliches farbe', 'keine künstlichen farben',
+            'natural colors only', 'no synthetic color', 'artificial color free',
+            'only natural colours', 'n1 colours', 'natcol'
+        ],
     },
     
     # Flavors/Aromas
@@ -107,7 +114,10 @@ BINARY_FIELD_INFO: Dict[str, Dict[str, Any]] = {
         'de': 'Natürliche Aromen',
         'keywords_yes': ['natural flavor', 'natural flavour', 'natürliches aroma', 'natural flavouring',
                         'with natural flavor', 'only natural flavours', 'allowed flavouring agents only natural'],
-        'keywords_no': ['no natural flavor', 'no flavoring', 'without flavor', 'without if possible'],
+        'keywords_no': [
+            'no natural flavor', 'no flavoring', 'without flavor', 'without if possible',
+            'kein natürliches aroma', 'keine natürlichen aromen', 'ohne natürliches aroma', 'ohne natürliche aromen'
+        ],
     },
     
     # Vitamins
@@ -179,7 +189,7 @@ BINARY_FIELD_INFO: Dict[str, Dict[str, Any]] = {
         'en': 'Allergen-free',
         'de': 'Allergenfrei',
         'keywords_yes': ['allergen-free', 'allergenfrei', 'no allergens', 'ohne allergene', 'allergen free', 'hypoallergenic'],
-        'keywords_no': ['contains allergen', 'allergen', 'mit allergenen', 'allergenic', 'milk containing', 'has allergens'],
+        'keywords_no': ['contains allergen', 'mit allergenen', 'has allergens', 'milk containing'],
     },
     
     # GMO

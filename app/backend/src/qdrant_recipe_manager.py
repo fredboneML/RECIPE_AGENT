@@ -1385,6 +1385,15 @@ class QdrantRecipeManager:
         # Step 0: Check for exact/partial recipe name matches (UNCHANGED)
         # =====================================================================
         query_for_name_match = original_query if original_query else text_description
+        if original_query and "\n" in original_query:
+            # Use the first non-empty line for name matching when a full brief is provided.
+            # This prevents multiline constraints from suppressing exact recipe name hits.
+            name_line = next(
+                (line.strip() for line in original_query.splitlines() if line.strip()),
+                ""
+            )
+            if name_line:
+                query_for_name_match = name_line
         name_matches = self._check_exact_recipe_name_match(
             query_for_name_match, country_filter, version_filter)
 
