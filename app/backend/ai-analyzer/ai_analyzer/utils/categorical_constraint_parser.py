@@ -413,7 +413,13 @@ def normalize_to_yes_no(value: str, field_code: Optional[str] = None) -> Optiona
     # Check specific values
     if value_lower in ['stärke enthalten', 'pektin enthalten', 'xanthan enthalten']:
         return "Yes"
-    if value_lower in ['nicht konserviert', 'allergenfrei', 'genfrei']:
+    if value_lower in ['nicht konserviert', 'genfrei']:
+        return "No"
+    # Allergen-free: "allergenfrei" means product IS allergen-free, so return "Yes"
+    if value_lower in ['allergenfrei', 'allergen-free', 'allergen free', 'no allergens', 'ohne allergene', 'hypoallergenic']:
+        return "Yes"
+    # Contains allergens: return "No" (product is NOT allergen-free)
+    if 'contains allergen' in value_lower or 'mit allergenen' in value_lower or 'has allergens' in value_lower:
         return "No"
     if 'suitable' in value_lower:
         return "Yes"
@@ -563,6 +569,7 @@ Extract categorical constraints as:
 "categorical_constraints": [
     {{"field": "Preservative", "value": "No"}},
     {{"field": "Artificial colors", "value": "No"}},
+    {{"field": "Allergen-free", "value": "Yes"}},
     {{"field": "Halal", "value": "Yes"}},
     {{"field": "Kosher", "value": "Yes"}},
     {{"field": "Natural flavor", "value": "Yes"}},

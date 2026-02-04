@@ -226,7 +226,7 @@ class DataExtractorRouterAgent:
             '    {"field": "LBG", "value": "Yes"},',
             '    {"field": "Halal", "value": "Yes"},',
             '    {"field": "Kosher", "value": "Yes"},',
-            '    {"field": "Allergens", "value": "Yes"}',
+            '    {"field": "Allergen-free", "value": "Yes"}',
             "  ],",
             '  "reasoning": "Brief explanation of extraction choices"',
             "}",
@@ -305,9 +305,9 @@ class DataExtractorRouterAgent:
             "   - CERTIFICATIONS:",
             "     * 'Halal & Kosher Preferred' → {\"field\": \"Halal\", \"value\": \"Yes\"} AND {\"field\": \"Kosher\", \"value\": \"Yes\"}",
             "     * 'Halal required' → {\"field\": \"Halal\", \"value\": \"Yes\"}",
-            "   - ALLERGENS:",
-            "     * 'Milk containing products' → {\"field\": \"Allergens\", \"value\": \"Yes\"}",
-            "     * 'Allergen-free' → {\"field\": \"Allergens\", \"value\": \"No\"}",
+            "   - ALLERGEN-FREE (Z_INH12):",
+            "     * 'Allergen-free', 'Allergenfrei', 'No allergens' → {\"field\": \"Allergen-free\", \"value\": \"Yes\"}",
+            "     * 'Milk containing products', 'Contains allergens' → {\"field\": \"Allergen-free\", \"value\": \"No\"}",
             "   - SWEETENER: 'No sweetener' → {\"field\": \"Sweetener\", \"value\": \"No\"}",
             "   - GMO: 'GMO-free' or 'Non-GMO' → {\"field\": \"GMO\", \"value\": \"No\"}",
             "   - SACCHAROSE: If sugar/sucrose allowed → {\"field\": \"Saccharose\", \"value\": \"Yes\"}",
@@ -402,9 +402,9 @@ class DataExtractorRouterAgent:
         guide_lines.append("  With pieces/chunks: 'Stückig'")
         guide_lines.append("  Smooth/liquid: 'Flüssig'")
 
-        guide_lines.append("\nALLERGENS & DIETARY:")
+        guide_lines.append("\nALLERGEN-FREE & DIETARY:")
         guide_lines.append(
-            "  Allergene: 'Allergenfrei' (allergen-free) | specific allergen")
+            "  Allergen-free (Z_INH12): 'Allergenfrei' → Yes | 'Contains allergens' → No")
         guide_lines.append(
             "  Laktosefrei: 'Laktosefrei' | 'nicht laktosefrei'")
         guide_lines.append(
