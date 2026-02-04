@@ -80,7 +80,7 @@ def get_db():
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)) -> User:
     logger = logging.getLogger(__name__)
-    logger.info(f"get_current_user: Received credentials: {credentials}")
+    logger.debug("get_current_user: Validating Bearer token")
     credentials_exception = HTTPException(
         status_code=401,
         detail="Could not validate credentials",
@@ -88,10 +88,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     )
     try:
         token = credentials.credentials
-        logger.info(f"get_current_user: Decoding token: {token}")
+        # Note: Token not logged for security reasons
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        logger.info(f"get_current_user: Token payload: {payload}")
+        logger.debug(f"get_current_user: Token decoded successfully for user: {username}")
         if username is None:
             logger.warning(
                 "get_current_user: Username missing in token payload")

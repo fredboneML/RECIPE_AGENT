@@ -24,27 +24,34 @@ logger = logging.getLogger(__name__)
 NUMERICAL_FIELDS = [
     'Z_BRIX', 'Z_PH', 'ZM_PH', 
     'Z_VISK20S', 'Z_VISK20S_7C', 'Z_VISK30S', 'Z_VISK60S', 'Z_VISKHAAKE',
+    'Z_VISK4S', 'Z_VISK70S',  # Additional viscosity fields
     'ZMX_DD103', 'ZMX_DD102',
     'ZM_AW', 'Z_FGAW',
     'Z_FRUCHTG', 'ZMX_DD108', 'Z_AW',
     'ZMX_DD109', 'Z_DOSIER',
-    'Z_ZUCKER', 'Z_FETTST', 'Z_PROT', 'Z_SALZ'
+    'Z_ZUCKER', 'Z_FETTST', 'Z_PROT', 'Z_SALZ',
+    'Z_VERHAN',  # Dilution ratio
+    'Z_TRMA',    # Dry matter %
+    'Z_PAST',    # Pasteurization temperature
+    'Z_HALTB',   # Shelf life (months)
 ]
 
 # All 60 specified fields for keyword indexes
 SPECIFIED_FIELDS = [
     'Z_MAKTX', 'Z_INH01', 'Z_WEIM', 'Z_KUNPROGRU', 'Z_PRODK',
-    'Z_INH07', 'Z_KOCHART', 'Z_KNOGM', 'Z_INH08', 'Z_INH12',
+    'Z_INH07', 'Z_KOCHART', 'Z_KNOGM', 'Z_INH08', 'Z_INH10', 'Z_INH12',  # Added Z_INH10 (GMO)
     'ZMX_TIPOALERG', 'Z_INH02', 'Z_INH03', 'Z_INH19', 'Z_INH04',
     'Z_INH18', 'Z_INH05', 'Z_INH09', 'Z_INH06', 'Z_INH06Z',
     'Z_FSTAT', 'Z_INH21', 'Z_INH13', 'Z_INH14', 'Z_INH15',
     'Z_INH16', 'Z_INH20', 'Z_STABGU', 'Z_STABCAR', 'Z_STAGEL',
     'Z_STANO', 'Z_INH17', 'Z_BRIX', 'Z_PH', 'ZM_PH',
     'Z_VISK20S', 'Z_VISK20S_7C', 'Z_VISK30S', 'Z_VISK60S', 'Z_VISKHAAKE',
+    'Z_VISK4S', 'Z_VISK70S',  # Additional viscosity fields
     'ZMX_DD103', 'ZMX_DD102', 'ZM_AW', 'Z_FGAW', 'Z_FRUCHTG',
     'ZMX_DD108', 'Z_AW', 'Z_FLST', 'Z_PP', 'ZMX_DD109',
     'Z_DOSIER', 'Z_ZUCKER', 'Z_FETTST', 'ZMX_DD104', 'Z_PROT',
-    'Z_SALZ', 'Z_INH01K', 'Z_INH01H', 'Z_DAIRY', 'Z_BFS'
+    'Z_SALZ', 'Z_INH01K', 'Z_INH01H', 'Z_DAIRY', 'Z_BFS',
+    'Z_VERHAN', 'Z_TRMA', 'Z_PAST', 'Z_HALTB',  # Additional fields
 ]
 
 
