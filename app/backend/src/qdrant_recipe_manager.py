@@ -1127,6 +1127,177 @@ class QdrantRecipeManager:
             logger.debug(f"Recipe name match check failed: {e}")
             return []
 
+    def _apply_filters_to_candidates(self,
+                                      candidates: List[Dict[str, Any]],
+                                      numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                                      categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                                      relaxation_level: int = 0) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Apply numerical and categorical filters to candidates in-memory.
+
+        This is used in the new search architecture where:
+        1. Text search finds top 100 semantically similar recipes (without filters)
+        2. Filters are applied to those 100 candidates (this method)
+
+        Args:
+            candidates: List of candidate recipes with payload data
+            numerical_filters: Dict of field codes to range filters
+                Example: {"Z_BRIX": {"gt": 40}, "Z_FRUCHTG": {"gte": 30, "lte": 50}}
+            categorical_filters: Dict of field codes to exact match filters
+                Example: {"Z_INH04": {"value": "No"}, "Z_INH01H": {"value": "Yes"}}
+            relaxation_level: Level of filter relaxation (0=strict, 1=10% tolerance, 2=20% tolerance, 3=no numerical)
+
+        Returns:
+            Tuple of (filtered_candidates, filter_stats)
+        """
+        if not candidates:
+            return [], {"total": 0, "passed": 0, "relaxation_level": relaxation_level}
+
+        if not numerical_filters and not categorical_filters:
+            return candidates, {"total": len(candidates), "passed": len(candidates), "relaxation_level": 0}
+
+        filtered = []
+        filter_stats = {
+            "total": len(candidates),
+            "passed": 0,
+            "relaxation_level": relaxation_level,
+            "numerical_matches": {},
+            "categorical_matches": {},
+            "failed_numerical": {},
+            "failed_categorical": {}
+        }
+
+        # Initialize counters
+        if numerical_filters:
+            for field_code in numerical_filters:
+                filter_stats["numerical_matches"][field_code] = 0
+                filter_stats["failed_numerical"][field_code] = 0
+        if categorical_filters:
+            for field_code in categorical_filters:
+                filter_stats["categorical_matches"][field_code] = 0
+                filter_stats["failed_categorical"][field_code] = 0
+
+        # Calculate tolerance based on relaxation level
+        # Level 0: strict (exact match)
+        # Level 1: 10% tolerance on numerical
+        # Level 2: 20% tolerance on numerical
+        # Level 3: Skip numerical filters entirely
+        numerical_tolerance = 0.0
+        if relaxation_level == 1:
+            numerical_tolerance = 0.10
+        elif relaxation_level == 2:
+            numerical_tolerance = 0.20
+        elif relaxation_level >= 3:
+            numerical_tolerance = float('inf')  # Skip numerical filters
+
+        for candidate in candidates:
+            payload = candidate.get("payload", {})
+            passed_all = True
+
+            # Check numerical filters
+            if numerical_filters and relaxation_level < 3:
+                for field_code, range_spec in numerical_filters.items():
+                    # Get the numerical value from payload
+                    numerical_data = payload.get("numerical", {})
+                    value = numerical_data.get(field_code)
+
+                    if value is None:
+                        # Field not present - fail the filter
+                        passed_all = False
+                        filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                        continue
+
+                    try:
+                        value = float(value)
+                    except (ValueError, TypeError):
+                        passed_all = False
+                        filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                        continue
+
+                    # Apply range checks with tolerance
+                    if "gt" in range_spec:
+                        threshold = range_spec["gt"]
+                        # With tolerance: value > threshold * (1 - tolerance)
+                        if value <= threshold * (1 - numerical_tolerance):
+                            passed_all = False
+                            filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                            continue
+
+                    if "gte" in range_spec:
+                        threshold = range_spec["gte"]
+                        if value < threshold * (1 - numerical_tolerance):
+                            passed_all = False
+                            filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                            continue
+
+                    if "lt" in range_spec:
+                        threshold = range_spec["lt"]
+                        if value >= threshold * (1 + numerical_tolerance):
+                            passed_all = False
+                            filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                            continue
+
+                    if "lte" in range_spec:
+                        threshold = range_spec["lte"]
+                        if value > threshold * (1 + numerical_tolerance):
+                            passed_all = False
+                            filter_stats["failed_numerical"][field_code] = filter_stats["failed_numerical"].get(field_code, 0) + 1
+                            continue
+
+                    # Passed this numerical filter
+                    filter_stats["numerical_matches"][field_code] = filter_stats["numerical_matches"].get(field_code, 0) + 1
+
+            # Check categorical filters
+            if categorical_filters and passed_all:
+                for field_code, match_spec in categorical_filters.items():
+                    expected_value = match_spec.get("value")
+
+                    # Get the categorical value from payload (spec_fields)
+                    spec_fields = payload.get("spec_fields", {})
+                    actual_value = spec_fields.get(field_code)
+
+                    if actual_value is None:
+                        # Field not present - fail the filter
+                        passed_all = False
+                        filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                        continue
+
+                    # Normalize for comparison
+                    actual_norm = str(actual_value).strip().lower()
+                    expected_norm = str(expected_value).strip().lower()
+
+                    # Handle Yes/No variations
+                    yes_values = {'yes', 'ja', 'oui', 'si', 'true', '1'}
+                    no_values = {'no', 'nein', 'non', 'false', '0'}
+
+                    if expected_norm in yes_values:
+                        if actual_norm not in yes_values:
+                            passed_all = False
+                            filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                            continue
+                    elif expected_norm in no_values:
+                        if actual_norm not in no_values:
+                            passed_all = False
+                            filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                            continue
+                    elif actual_norm != expected_norm:
+                        passed_all = False
+                        filter_stats["failed_categorical"][field_code] = filter_stats["failed_categorical"].get(field_code, 0) + 1
+                        continue
+
+                    # Passed this categorical filter
+                    filter_stats["categorical_matches"][field_code] = filter_stats["categorical_matches"].get(field_code, 0) + 1
+
+            if passed_all:
+                # Mark if filters were relaxed
+                if relaxation_level > 0:
+                    candidate["_filter_relaxed"] = True
+                    candidate["_relaxation_level"] = relaxation_level
+                filtered.append(candidate)
+
+        filter_stats["passed"] = len(filtered)
+        return filtered, filter_stats
+
     def search_two_step(self,
                         text_description: str,
                         query_df: Optional[pd.DataFrame] = None,
@@ -1138,14 +1309,21 @@ class QdrantRecipeManager:
                         numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
                         categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Two-step hybrid search: 
-        - Step 1: Get candidates from both text search AND feature search (50/50 split)
-        - Step 2: Feature-based refinement on merged candidates
+        Two-step hybrid search with TEXT-FIRST architecture:
+        - Step 0: Exact/partial recipe name matching (unchanged)
+        - Step 1a: Text-based semantic search for top 100 similar recipes (NO feature filters)
+        - Step 1b: Apply numerical/categorical filters ON those 100 candidates
+        - Step 2: Feature-based refinement and ranking
+
+        This architecture ensures:
+        1. Semantically similar recipes are found first (no legume when searching for mango)
+        2. Filters are applied to the relevant pool, not to the entire 600K+ database
+        3. Progressive filter relaxation if strict filters return 0 results
 
         Args:
             text_description: Recipe description for search
             query_df: Optional DataFrame with features for refinement
-            text_top_k: Total number of candidates (split between text and feature search)
+            text_top_k: Number of text search candidates (now 100 by default)
             final_top_k: Final number of results
             country_filter: Optional country name(s) to filter results. Can be a single string or a list of strings. None or "All" means no filter.
             version_filter: Optional version filter (P, L, Missing, or "All" means no filter)
@@ -1157,35 +1335,42 @@ class QdrantRecipeManager:
         Returns:
             Tuple of (results, metadata)
         """
+        # Use 100 candidates for text search (the main change)
+        TEXT_SEARCH_K = 100
+
         search_metadata = {
-            "search_type": "two_step_hybrid",
+            "search_type": "two_step_text_first",
             "text_description": text_description,
             "has_feature_refinement": query_df is not None,
-            "total_candidates_requested": text_top_k,
+            "text_candidates_requested": TEXT_SEARCH_K,
             "final_results": final_top_k,
             "country_filter": country_filter,
             "version_filter": version_filter,
             "numerical_filters": numerical_filters if numerical_filters else {},
             "categorical_filters": categorical_filters if categorical_filters else {}
         }
-        
-        # Log numerical filters if present
+
+        # Log the new architecture
+        logger.info("=" * 80)
+        logger.info("SEARCH ARCHITECTURE: Text-First (Semantic → Filter)")
+        logger.info("=" * 80)
+
+        # Log filters that will be applied AFTER text search
+        has_filters = bool(numerical_filters) or bool(categorical_filters)
         if numerical_filters:
-            logger.info(f"Applying {len(numerical_filters)} numerical range filter(s):")
+            logger.info(f"Numerical filters to apply (Step 1b): {len(numerical_filters)} filter(s)")
             for field_code, range_spec in numerical_filters.items():
                 logger.info(f"  - {field_code}: {range_spec}")
-        
-        # Log categorical filters if present
+
         if categorical_filters:
-            logger.info(f"Applying {len(categorical_filters)} categorical exact-match filter(s):")
+            logger.info(f"Categorical filters to apply (Step 1b): {len(categorical_filters)} filter(s)")
             for field_code, match_spec in categorical_filters.items():
                 logger.info(f"  - {field_code}: {match_spec}")
 
-        # Calculate split for hybrid search (both searches return 15 candidates)
-        text_search_k = 15
-        feature_search_k = 15
+        if not has_filters:
+            logger.info("No numerical or categorical filters - will use text similarity only")
 
-        # Extract features for feature-based search
+        # Extract features for feature-based refinement
         query_features = []
         query_values = []
         if query_df is not None and not query_df.empty:
@@ -1196,21 +1381,29 @@ class QdrantRecipeManager:
                 query_features = query_df.iloc[:, 0].tolist()
                 query_values = query_df.iloc[:, 1].tolist()
 
-        # Step 0: Check for exact/partial recipe name matches (before semantic search)
-        # This handles cases where user searches with just a recipe name like "FZ Orange Mango Grüner Tee"
-        # Use original_query if available (before AI extraction/translation), otherwise use text_description
+        # =====================================================================
+        # Step 0: Check for exact/partial recipe name matches (UNCHANGED)
+        # =====================================================================
         query_for_name_match = original_query if original_query else text_description
         name_matches = self._check_exact_recipe_name_match(
             query_for_name_match, country_filter, version_filter)
 
-        # Step 1a: Text-based search using Qdrant
-        # OPTIMIZATION: Get query embedding to reuse later (avoids re-encoding)
-        logger.info(
-            f"Step 1a: Text-based search in Qdrant (top {text_search_k})")
+        # =====================================================================
+        # Step 1a: Text-based semantic search for top 100 candidates
+        # NOTE: NO numerical/categorical filters here - only country/version
+        # =====================================================================
+        logger.info(f"Step 1a: Text-based semantic search (top {TEXT_SEARCH_K}) - NO feature filters")
+        logger.info(f"  Query: '{text_description[:80]}...'")
+
         text_search_result = self.search_by_text_description(
-            text_description, text_search_k, country_filter, version_filter, 
-            numerical_filters=numerical_filters, categorical_filters=categorical_filters,
-            return_embedding=True)
+            text_description,
+            top_k=TEXT_SEARCH_K,
+            country_filter=country_filter,
+            version_filter=version_filter,
+            numerical_filters=None,  # NO filters in text search
+            categorical_filters=None,  # NO filters in text search
+            return_embedding=True
+        )
 
         # Handle return value (may be tuple if return_embedding=True)
         if isinstance(text_search_result, tuple):
@@ -1221,82 +1414,33 @@ class QdrantRecipeManager:
 
         # Merge name matches with text candidates (name matches go first)
         if name_matches:
-            # Get IDs of name matches to avoid duplicates
             name_match_ids = {nm.get("id") for nm in name_matches}
-            # Remove name matches from text_candidates to avoid duplicates
             text_candidates = [
                 c for c in text_candidates
                 if c.get("id") not in name_match_ids
             ]
-            # Insert name matches at the beginning with highest priority
             text_candidates = name_matches + text_candidates
-            logger.info(
-                f"✓ Found {len(name_matches)} recipe name match(es) for original query"
-            )
+            logger.info(f"  ✓ Found {len(name_matches)} recipe name match(es) for original query")
 
-        search_metadata["text_results_found"] = len(text_candidates)
-
-        # Log text search candidates
-        logger.info(f"Text search found {len(text_candidates)} candidates:")
-        for i, candidate in enumerate(text_candidates, 1):
-            recipe_name = candidate.get('recipe_name', 'Unknown')
-            text_score = candidate.get('text_score', 0.0)
-            num_features = candidate.get('num_features', 0)
-            description = candidate.get('description', '')
-            description_preview = description[:80] + \
-                '...' if len(description) > 80 else description
-            logger.info(
-                f"  {i}. {recipe_name} | Text Score: {text_score:.4f} | Features: {num_features} | Desc: {description_preview}")
-
-        # Step 1b: Feature-based search using Qdrant (if features available)
-        feature_candidates = []
-        if query_features:
-            logger.info(
-                f"Step 1b: Feature-based search in Qdrant (top {feature_search_k})")
-            feature_candidates = self.search_by_features(
-                query_features, query_values, feature_search_k, country_filter, version_filter,
-                numerical_filters=numerical_filters, categorical_filters=categorical_filters)
-
-            search_metadata["feature_search_results_found"] = len(
-                feature_candidates)
-
-            # Log feature search candidates
-            logger.info(
-                f"Feature search found {len(feature_candidates)} candidates:")
-            for i, candidate in enumerate(feature_candidates, 1):
-                recipe_name = candidate.get('recipe_name', 'Unknown')
-                feature_search_score = candidate.get(
-                    'feature_search_score', 0.0)
-                num_features = candidate.get('num_features', 0)
-                description = candidate.get('description', '')
-                description_preview = description[:80] + \
-                    '...' if len(description) > 80 else description
-                logger.info(
-                    f"  {i}. {recipe_name} | Feature Search Score: {feature_search_score:.4f} | Features: {num_features} | Desc: {description_preview}")
-        else:
-            logger.info(
-                "Step 1b: Skipped feature search (no features provided)")
-            # If no features, use full text search instead
-            if len(text_candidates) < text_top_k:
-                additional_text = self.search_by_text_description(
-                    text_description, text_top_k)
-                text_candidates = additional_text
-
-        # If original query differs from text_description, also search with original query
-        # This helps when users search with German product names that get translated
+        # Also search with original query if different (for German product names)
         if original_query and original_query.strip().lower() != text_description.strip().lower():
-            logger.info(f"Step 1a+: Additional text search using original query: '{original_query[:60]}...'")
+            logger.info(f"Step 1a+: Additional semantic search using original query")
+            logger.info(f"  Query: '{original_query[:60]}...'")
+
             original_query_results = self.search_by_text_description(
-                original_query, text_search_k, country_filter, version_filter,
-                numerical_filters=numerical_filters, categorical_filters=categorical_filters,
+                original_query,
+                top_k=TEXT_SEARCH_K,
+                country_filter=country_filter,
+                version_filter=version_filter,
+                numerical_filters=None,  # NO filters
+                categorical_filters=None,  # NO filters
                 return_embedding=False
             )
-            
-            # Handle return value (may be tuple if return_embedding=True)
+
             if isinstance(original_query_results, tuple):
                 original_query_results = original_query_results[0]
-            
-            # Merge with existing text candidates
+
+            # Merge with existing candidates
             existing_ids = {c.get("id") for c in text_candidates}
             added_from_original = 0
             for candidate in original_query_results:
@@ -1304,28 +1448,113 @@ class QdrantRecipeManager:
                     text_candidates.append(candidate)
                     existing_ids.add(candidate.get("id"))
                     added_from_original += 1
-            
+
             if added_from_original > 0:
-                logger.info(f"  Added {added_from_original} additional candidates from original query search")
+                logger.info(f"  Added {added_from_original} additional candidates from original query")
 
-        # Merge candidates from both searches
-        if feature_candidates:
-            all_candidates = self._merge_candidates(
-                text_candidates, feature_candidates)
-            logger.info(f"Merged candidates: {len(all_candidates)} unique recipes "
-                        f"(from {len(text_candidates)} text + {len(feature_candidates)} feature, "
-                        f"with deduplication)")
+        search_metadata["text_candidates_found"] = len(text_candidates)
+        logger.info(f"Step 1a complete: Found {len(text_candidates)} semantically similar candidates")
 
-            # Calculate text scores for feature-only candidates
-            # This ensures fair comparison in combined scoring
-            # OPTIMIZATION: Reuse cached query embedding from text search
-            all_candidates = self._calculate_text_scores_for_feature_only(
-                all_candidates, text_description, cached_query_embedding)
+        # Log top 10 text candidates
+        logger.info("Top 10 text search candidates:")
+        for i, candidate in enumerate(text_candidates[:10], 1):
+            recipe_name = candidate.get('recipe_name', 'Unknown')
+            text_score = candidate.get('text_score', 0.0)
+            description = candidate.get('description', '')[:60]
+            logger.info(f"  {i}. {recipe_name} | Score: {text_score:.4f} | {description}...")
+
+        # =====================================================================
+        # Step 1b: Apply numerical/categorical filters ON the text candidates
+        # =====================================================================
+        all_candidates = text_candidates
+        filter_stats = None
+
+        if has_filters:
+            logger.info(f"Step 1b: Applying filters to {len(text_candidates)} candidates")
+
+            # Try strict filters first
+            filtered_candidates, filter_stats = self._apply_filters_to_candidates(
+                text_candidates,
+                numerical_filters=numerical_filters,
+                categorical_filters=categorical_filters,
+                relaxation_level=0
+            )
+
+            logger.info(f"  Strict filters: {filter_stats['passed']}/{filter_stats['total']} candidates passed")
+
+            # Progressive relaxation if strict filters return too few results
+            if len(filtered_candidates) < final_top_k:
+                # Level 1: 10% tolerance on numerical
+                if numerical_filters and len(filtered_candidates) < final_top_k:
+                    logger.info(f"  → Relaxing numerical filters (10% tolerance)...")
+                    filtered_candidates, filter_stats = self._apply_filters_to_candidates(
+                        text_candidates,
+                        numerical_filters=numerical_filters,
+                        categorical_filters=categorical_filters,
+                        relaxation_level=1
+                    )
+                    logger.info(f"  10% tolerance: {filter_stats['passed']}/{filter_stats['total']} candidates passed")
+
+                # Level 2: 20% tolerance on numerical
+                if numerical_filters and len(filtered_candidates) < final_top_k:
+                    logger.info(f"  → Relaxing numerical filters (20% tolerance)...")
+                    filtered_candidates, filter_stats = self._apply_filters_to_candidates(
+                        text_candidates,
+                        numerical_filters=numerical_filters,
+                        categorical_filters=categorical_filters,
+                        relaxation_level=2
+                    )
+                    logger.info(f"  20% tolerance: {filter_stats['passed']}/{filter_stats['total']} candidates passed")
+
+                # Level 3: Skip numerical filters entirely, keep only categorical
+                if len(filtered_candidates) < final_top_k and numerical_filters:
+                    logger.info(f"  → Skipping numerical filters (categorical only)...")
+                    filtered_candidates, filter_stats = self._apply_filters_to_candidates(
+                        text_candidates,
+                        numerical_filters=numerical_filters,
+                        categorical_filters=categorical_filters,
+                        relaxation_level=3
+                    )
+                    logger.info(f"  Categorical only: {filter_stats['passed']}/{filter_stats['total']} candidates passed")
+
+                # Level 4: No filters at all - return text search results with warning
+                if len(filtered_candidates) == 0:
+                    logger.warning(f"  ⚠ No candidates passed ANY filters - returning unfiltered results")
+                    logger.warning(f"    Note: Results are semantically similar but may not match all specifications")
+                    # Mark all candidates as not matching filters
+                    for c in text_candidates:
+                        c["_filter_warning"] = "No recipes matched all filters - showing semantically similar recipes"
+                        c["_filter_relaxed"] = True
+                        c["_relaxation_level"] = 4
+                    filtered_candidates = text_candidates
+                    filter_stats["relaxation_level"] = 4
+
+            all_candidates = filtered_candidates
+            search_metadata["filter_stats"] = filter_stats
+            search_metadata["filtered_candidates"] = len(all_candidates)
+
+            logger.info(f"Step 1b complete: {len(all_candidates)} candidates after filtering")
+            if filter_stats["relaxation_level"] > 0:
+                logger.info(f"  ⚠ Filter relaxation level: {filter_stats['relaxation_level']}")
         else:
-            all_candidates = text_candidates
+            logger.info("Step 1b: Skipped (no numerical/categorical filters)")
 
-        # SAFEGUARD: If we have flavor in query, search for recipes with flavor in name/description
-        # This catches recipes that might be missed by initial searches
+        # =====================================================================
+        # Calculate feature search scores for all candidates
+        # This is done IN-MEMORY using the feature encoder, not via Qdrant search
+        # =====================================================================
+        if query_features and all_candidates:
+            logger.info(f"Calculating feature scores for {len(all_candidates)} candidates...")
+            all_candidates = self._calculate_feature_scores_for_keyword_matches(
+                all_candidates, query_features, query_values
+            )
+
+        # =====================================================================
+        # SAFEGUARD: Flavor boost - search for flavor keywords if present
+        # This adds additional candidates that might have been missed
+        # NOTE: In text-first architecture, we search WITHOUT filters first,
+        # then apply filters in-memory for consistency
+        # =====================================================================
         if query_features:
             FLAVOR_FEATURES = {'flavour', 'flavor', 'geschmack', 'aroma'}
             query_flavor = None
@@ -1335,291 +1564,101 @@ class QdrantRecipeManager:
                     break
 
             if query_flavor:
-                # Extract flavor keywords (split by comma and space)
+                # Extract flavor keywords
                 flavor_keywords = set()
                 for flavor_phrase in query_flavor.split(','):
                     flavor_phrase = flavor_phrase.strip()
                     if flavor_phrase:
                         flavor_keywords.add(flavor_phrase.lower())
-                        # Also add individual words (≥3 chars)
                         for word in flavor_phrase.split():
                             if len(word) >= 3:
                                 flavor_keywords.add(word.lower())
 
-                # SAFEGUARD: Direct keyword search + Vector search hybrid approach
-                # 1. Vector search for semantic matches (fast, catches most cases)
-                # 2. Direct keyword search for exact matches (catches edge cases)
-                # IMPORTANT: Apply numerical filters to ensure flavor matches also meet numerical constraints
                 existing_ids = {c.get("id") for c in all_candidates}
                 flavor_matched_candidates = []
                 skipped_already_in_pool = 0
 
-                # Method 1: Vector search for semantic matches (top 50)
-                # Apply numerical_filters to ensure flavor matches meet pH, Brix, etc. constraints
+                # Vector search for flavor - NO FILTERS (consistent with text-first architecture)
+                logger.info(f"Flavor safeguard: Searching for '{query_flavor}' (NO filters)")
                 vector_flavor_results = self.search_by_text_description(
-                    query_flavor, top_k=100, country_filter=country_filter, version_filter=version_filter,
-                    numerical_filters=numerical_filters, categorical_filters=categorical_filters)
+                    query_flavor,
+                    top_k=50,
+                    country_filter=country_filter,
+                    version_filter=version_filter,
+                    numerical_filters=None,  # NO filters in vector search
+                    categorical_filters=None   # NO filters in vector search
+                )
 
-                if numerical_filters:
-                    logger.info(
-                        f"Flavor safeguard (vector search): Found {len(vector_flavor_results)} candidates for '{query_flavor}' "
-                        f"WITH numerical filters {numerical_filters}. Existing pool has {len(existing_ids)} recipes."
-                    )
-                else:
-                    logger.info(
-                        f"Flavor safeguard (vector search): Found {len(vector_flavor_results)} candidates for '{query_flavor}'. "
-                        f"Existing pool has {len(existing_ids)} recipes."
-                    )
+                logger.info(f"  Found {len(vector_flavor_results)} flavor candidates")
 
-                # Add top vector search results (semantic matches)
-                # Limit to top 50 from vector search
-                for candidate in vector_flavor_results[:50]:
+                # Add to pool (will be filtered later in refinement)
+                for candidate in vector_flavor_results:
                     if candidate.get("id") in existing_ids:
                         skipped_already_in_pool += 1
                         continue
                     flavor_matched_candidates.append(candidate)
                     existing_ids.add(candidate.get("id"))
 
-                # Method 2: Direct keyword search using Qdrant full-text search (catches exact keyword matches)
-                # This ensures we find recipes that contain the keyword even if embedding similarity is low
-                # Uses Qdrant's MatchText for efficient full-text search across ALL recipes
-                if numerical_filters:
-                    logger.info(
-                        f"Flavor safeguard (full-text search): Searching for keywords {flavor_keywords} "
-                        f"in description/recipe_name WITH numerical filters: {numerical_filters}"
+                # Apply filters to flavor candidates if filters are present
+                if has_filters and flavor_matched_candidates:
+                    pre_filter_count = len(flavor_matched_candidates)
+                    flavor_matched_candidates, flavor_filter_stats = self._apply_filters_to_candidates(
+                        flavor_matched_candidates,
+                        numerical_filters=numerical_filters,
+                        categorical_filters=categorical_filters,
+                        relaxation_level=filter_stats.get("relaxation_level", 0) if filter_stats else 0
                     )
-                else:
-                    logger.info(
-                        f"Flavor safeguard (full-text search): Searching for keywords {flavor_keywords} "
-                        f"in description/recipe_name..."
-                    )
-
-                keyword_matches_found = 0
-
-                try:
-                    # Search for each keyword using Qdrant's full-text search
-                    # We search both recipe_name AND description to maximize recall
-                    for keyword in flavor_keywords:
-                        if keyword_matches_found >= 100:  # Limit to 100 additional keyword matches
-                            break
-                        if len(keyword) < 3:  # Skip very short keywords
-                            continue
-
-                        # Search both recipe_name and description fields
-                        # Using 'should' (OR) logic to find matches in either field
-                        for field_name in ["recipe_name", "description"]:
-                            if keyword_matches_found >= 100:
-                                break
-
-                            # Build filter conditions for full-text search
-                            filter_conditions = [
-                                FieldCondition(
-                                    key=field_name,
-                                    match=MatchText(text=keyword)
-                                )
-                            ]
-
-                            # Add country filter if specified
-                            if country_filter and country_filter != "All":
-                                if isinstance(country_filter, list):
-                                    # Multiple countries: use MatchAny
-                                    if len(country_filter) > 0:
-                                        filter_conditions.append(
-                                            FieldCondition(
-                                                key="country",
-                                                match=MatchAny(any=country_filter)
-                                            )
-                                        )
-                                        logger.debug(
-                                            f"Applying multi-country filter in flavor safeguard: {country_filter} ({len(country_filter)} countries)")
-                                    # else: empty list, skip filter
-                                else:
-                                    # Single country: use MatchValue (backward compatibility)
-                                    filter_conditions.append(
-                                        FieldCondition(
-                                            key="country",
-                                            match=MatchValue(value=country_filter)
-                                        )
-                                    )
-                                    logger.debug(
-                                        f"Applying single country filter in flavor safeguard: {country_filter}")
-
-                            # Add version filter if specified
-                            if version_filter and version_filter != "All":
-                                filter_conditions.append(
-                                    FieldCondition(
-                                        key="version",
-                                        match=MatchValue(value=version_filter)
-                                    )
-                                )
-
-                            # Add numerical filters to ensure flavor matches meet numerical constraints
-                            # This is critical for queries like "Matcha with pH ~4.5"
-                            if numerical_filters:
-                                for field_code, range_spec in numerical_filters.items():
-                                    range_obj = Range(
-                                        gt=range_spec.get('gt'),
-                                        gte=range_spec.get('gte'),
-                                        lt=range_spec.get('lt'),
-                                        lte=range_spec.get('lte')
-                                    )
-                                    filter_conditions.append(
-                                        FieldCondition(
-                                            key=field_code,
-                                            range=range_obj
-                                        )
-                                    )
-
-                            keyword_filter = Filter(must=filter_conditions)
-
-                            # Use scroll with full-text filter - this searches ALL recipes efficiently
-                            # REQUIRES text index on the field (run add_text_index.py to create)
-                            scroll_results, _ = self.qdrant_client.scroll(
-                                collection_name=self.collection_name,
-                                scroll_filter=keyword_filter,
-                                limit=100,  # Get up to 100 matches per keyword per field
-                                with_payload=True,
-                                with_vectors=False,
-                                timeout=60  # Increased timeout for large databases
-                            )
-
-                            if scroll_results:
-                                logger.info(
-                                    f"  Full-text search for '{keyword}' in {field_name}: found {len(scroll_results)} matches"
-                                )
-
-                            for point in scroll_results:
-                                if keyword_matches_found >= 100:
-                                    break
-                                if point.id in existing_ids:
-                                    continue  # Already in pool
-
-                                payload = point.payload if point.payload is not None else {}
-
-                                # Found a direct keyword match
-                                recipe_data = {
-                                    "id": point.id,
-                                    "text_score": 0.0,  # Will be calculated in refinement
-                                    "feature_search_score": 0.0,  # Direct match, not from feature search
-                                    "recipe_name": payload.get("recipe_name", ""),
-                                    "description": payload.get("description", ""),
-                                    "features": payload.get("features", []),
-                                    "values": payload.get("values", []),
-                                    "num_features": payload.get("num_features", 0),
-                                    "metadata": {
-                                        "recipe_name": payload.get("recipe_name", "")
-                                    },
-                                    "search_source": "flavor_keyword",
-                                    "payload": payload  # Include full payload for comparison table
-                                }
-                                flavor_matched_candidates.append(recipe_data)
-                                existing_ids.add(point.id)
-                                keyword_matches_found += 1
-                                logger.info(
-                                    f"  ✓ Full-text match: {recipe_data.get('recipe_name', 'Unknown')[:50]} "
-                                    f"(keyword: '{keyword}' in {field_name})"
-                                )
-
-                    logger.info(
-                        f"Flavor safeguard (full-text search): Found {keyword_matches_found} keyword matches "
-                        f"across all {len(flavor_keywords)} keywords."
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Flavor safeguard full-text search failed: {e}")
-                    logger.warning(
-                        "Note: Full-text search requires text indexes on 'recipe_name' and 'description' fields.")
-                    logger.warning(
-                        "Run: docker-compose exec backend python src/add_text_index.py --host qdrant")
+                    logger.info(f"  After filtering: {len(flavor_matched_candidates)}/{pre_filter_count} passed")
 
                 logger.info(
                     f"Flavor safeguard: {skipped_already_in_pool} already in pool, "
-                    f"{len(flavor_matched_candidates)} total new flavor matches added "
-                    f"({len([c for c in flavor_matched_candidates if c.get('search_source') == 'flavor_keyword'])} direct keyword matches)"
+                    f"{len(flavor_matched_candidates)} new flavor matches added"
                 )
 
                 # Add flavor-matched candidates to pool
                 if flavor_matched_candidates:
-                    # Calculate text scores for keyword matches (vector matches already have scores)
-                    keyword_only_matches = [
-                        c for c in flavor_matched_candidates
-                        if c.get("search_source") == "flavor_keyword"
-                    ]
-                    if keyword_only_matches:
-                        # Temporarily set search_source to "features" so _calculate_text_scores works
-                        for kw_match in keyword_only_matches:
-                            kw_match["search_source"] = "features"
+                    # Calculate text scores for new candidates
+                    for c in flavor_matched_candidates:
+                        c["search_source"] = "flavor"
+                    flavor_matched_candidates = self._calculate_text_scores_for_feature_only(
+                        flavor_matched_candidates, text_description, cached_query_embedding
+                    )
 
-                        # Calculate text scores using cached embedding
-                        keyword_only_matches = self._calculate_text_scores_for_feature_only(
-                            keyword_only_matches, text_description, cached_query_embedding
-                        )
-
-                        # Restore search_source and update scores in main list
-                        for kw_match in keyword_only_matches:
-                            kw_match["search_source"] = "flavor_keyword"
-                            # Update corresponding candidate in flavor_matched_candidates
-                            for candidate in flavor_matched_candidates:
-                                if candidate.get("id") == kw_match.get("id"):
-                                    candidate["text_score"] = kw_match.get(
-                                        "text_score", 0.0)
-                                    break
-
-                    # Calculate feature search scores for keyword matches
-                    # This gives them a fair chance to compete with feature-search results
-                    keyword_matches_needing_feature_scores = [
-                        c for c in flavor_matched_candidates
-                        if c.get("search_source") == "flavor_keyword" and c.get("feature_search_score", 0.0) == 0.0
-                    ]
-                    if keyword_matches_needing_feature_scores and query_features:
+                    # Calculate feature scores for new candidates
+                    if query_features:
                         self._calculate_feature_scores_for_keyword_matches(
-                            keyword_matches_needing_feature_scores,
-                            query_features,
-                            query_values
+                            flavor_matched_candidates, query_features, query_values
                         )
-                        # Update scores in main list
-                        for kw_match in keyword_matches_needing_feature_scores:
-                            for candidate in flavor_matched_candidates:
-                                if candidate.get("id") == kw_match.get("id"):
-                                    candidate["feature_search_score"] = kw_match.get(
-                                        "feature_search_score", 0.0)
-                                    break
 
                     all_candidates.extend(flavor_matched_candidates)
-                    logger.info(
-                        f"Added {len(flavor_matched_candidates)} flavor-matched recipes to candidate pool"
-                    )
-                else:
-                    logger.warning(
-                        f"Flavor safeguard: No new flavor matches found for '{query_flavor}' "
-                        f"(keywords: {flavor_keywords})"
-                    )
+                    logger.info(f"Added {len(flavor_matched_candidates)} flavor-matched recipes to candidate pool")
 
-        search_metadata["merged_candidates"] = len(all_candidates)
+        # =====================================================================
+        # Final candidate pool summary
+        # =====================================================================
+        search_metadata["total_candidates"] = len(all_candidates)
 
         if not all_candidates:
-            logger.warning("No candidates found in either search")
+            logger.warning("No candidates found after all search steps")
             return [], search_metadata
 
         # Count sources
-        text_only = sum(1 for c in all_candidates if c.get(
-            "search_source") == "text")
-        feature_only = sum(1 for c in all_candidates if c.get(
-            "search_source") == "features")
-        both = sum(1 for c in all_candidates if c.get(
-            "search_source") == "both")
-        flavor_text = sum(1 for c in all_candidates if c.get(
-            "search_source") == "flavor_text")
-        logger.info(
-            f"Candidate sources: {text_only} text-only, {feature_only} feature-only, {both} from both, {flavor_text} flavor-text")
+        source_counts = {}
+        for c in all_candidates:
+            src = c.get("search_source", "unknown")
+            source_counts[src] = source_counts.get(src, 0) + 1
 
-        # Step 2: Feature refinement on merged candidates
+        logger.info(f"Final candidate pool: {len(all_candidates)} recipes")
+        for src, count in sorted(source_counts.items()):
+            logger.info(f"  - {src}: {count}")
+
+        # =====================================================================
+        # Step 2: Feature refinement and final ranking
+        # =====================================================================
         if query_features:
-            logger.info(
-                "Step 2: Refining merged candidates with feature-based similarity")
+            logger.info("Step 2: Refining candidates with feature-based similarity")
             search_metadata["query_features_count"] = len(query_features)
 
-            # Refine all_candidates (merged from text + feature search) based on feature matching
             final_results = self._refine_by_features(
                 all_candidates, query_features, query_values, final_top_k,
                 original_query=original_query,
@@ -1628,8 +1667,7 @@ class QdrantRecipeManager:
             search_metadata["refinement_completed"] = True
 
         else:
-            logger.info(
-                "Step 2: Skipped (no feature data provided) - using text-only search")
+            logger.info("Step 2: Skipped (no features) - using text similarity only")
             # Sort by text_score when no features are provided
             all_candidates.sort(key=lambda x: x.get(
                 "text_score", 0.0), reverse=True)
