@@ -465,10 +465,11 @@ EXTRACTED DOCUMENT CONTENT:
 ⚠️  SPECIAL MODE: SHORT QUERY DETECTED
 This is likely just a recipe name or simple search term.
 DO NOT elaborate or add details!
-- text_description: Keep it SHORT - just translate/normalize the input (1 sentence maximum)
+- text_description: Keep it SHORT - normalize the input (1 sentence maximum)
+- DO NOT translate to another language or add synonyms (keep original language terms)
 - features: Extract ONLY what's obvious from the name (usually just Flavour and maybe Produktsegment)
 - DO NOT infer texture, colors, stabilizers, or other attributes
-Example: "Mango Chutney für Ofenkäse" → text_description: "Mango chutney for baked cheese"
+Example: "Mango Chutney für Ofenkäse" → text_description: "Mango Chutney für Ofenkäse"
 """
             else:
                 short_query_instruction = ""
@@ -586,6 +587,17 @@ Provide your response as a JSON object following the specified format.
                             f"Error parsing LLM categorical constraints: {e}")
 
             result['categorical_filters'] = categorical_filters
+            if is_short_query:
+                # For short queries, keep the original wording to avoid translations
+                # like "Heidelbeer" -> "Blueberry" that can hurt exact text search.
+                short_line = next(
+                    (line.strip()
+                     for line in combined_brief.splitlines() if line.strip()),
+                    ""
+                )
+                if short_line:
+                    result['text_description'] = short_line
+
             result['text_description'] = self._enhance_text_description(
                 result.get('text_description', ''),
                 result.get('features', []),
