@@ -1491,13 +1491,15 @@ class QdrantRecipeManager:
                     best_flavor_hits = hits
                     best_penalty = penalty
 
+            selected_name_line = False
             if best_line and (best_score >= 2.0 or (best_flavor_hits >= 1 and best_penalty == 0.0)):
                 query_for_name_match = best_line
+                selected_name_line = True
         if flavor_terms:
             noisy_markers = ("[documents uploaded", "[extracted from document", "user description")
             looks_like_name = bool(re.match(r"^[A-Z]{1,3}\b", query_for_name_match)) and len(query_for_name_match) <= 80
             has_noise = any(marker in query_for_name_match.lower() for marker in noisy_markers)
-            if (not query_for_name_match) or has_noise or (not looks_like_name):
+            if (not selected_name_line) and ((not query_for_name_match) or has_noise or (not looks_like_name)):
                 # Use all extracted flavors to keep multi-flavor names searchable
                 query_for_name_match = ", ".join(flavor_terms)
         name_matches = self._check_exact_recipe_name_match(
