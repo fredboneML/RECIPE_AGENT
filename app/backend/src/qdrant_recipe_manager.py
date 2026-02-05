@@ -1443,6 +1443,7 @@ class QdrantRecipeManager:
         # Step 0: Check for exact/partial recipe name matches (UNCHANGED)
         # =====================================================================
         query_for_name_match = original_query if original_query else text_description
+        selected_name_line = False
         # If we have explicit flavour terms, prefer those for name matching only when the name looks noisy
         flavor_terms = []
         if query_features and query_values:
@@ -1491,7 +1492,6 @@ class QdrantRecipeManager:
                     best_flavor_hits = hits
                     best_penalty = penalty
 
-            selected_name_line = False
             if best_line and (best_score >= 2.0 or (best_flavor_hits >= 1 and best_penalty == 0.0)):
                 query_for_name_match = best_line
                 selected_name_line = True
