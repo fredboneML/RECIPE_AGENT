@@ -684,14 +684,24 @@ Provide your response as a JSON object following the specified format.
         description_parts = [
             text_description.strip()] if text_description else []
 
-        # Add first non-empty line as MaterialMasterShorttext when it looks like a recipe name
+        # Add best candidate line as MaterialMasterShorttext (prefer flavor mentions)
         skip_prefixes = (
             "user description:",
             "extracted document content:",
             "[documents uploaded:",
             "[extracted from document:"
         )
-        name_line = ""
+        flavor_terms = []
+        for feature in features or []:
+            feature_name = (feature.get('feature_name') or "").strip().lower()
+            if feature_name in ("flavour", "flavor", "geschmack"):
+                value = (feature.get('feature_value') or "")
+                flavor_terms.extend(
+                    [term.strip().lower()
+                     for term in value.split(",") if term.strip()]
+                )
+
+        candidate_lines = []
         for line in combined_brief.splitlines():
             stripped = line.strip()
             if not stripped:
@@ -699,8 +709,17 @@ Provide your response as a JSON object following the specified format.
             lower = stripped.lower()
             if any(lower.startswith(prefix) for prefix in skip_prefixes):
                 continue
-            name_line = stripped
-            break
+            candidate_lines.append(stripped)
+
+        name_line = ""
+        if flavor_terms:
+            for line in candidate_lines:
+                lower_line = line.lower()
+                if any(term in lower_line for term in flavor_terms):
+                    name_line = line
+                    break
+        if not name_line and candidate_lines:
+            name_line = candidate_lines[0]
         if name_line:
             description_parts.append(f"MaterialMasterShorttext: {name_line}")
 
