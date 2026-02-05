@@ -1444,15 +1444,40 @@ class QdrantRecipeManager:
         # =====================================================================
         query_for_name_match = original_query if original_query else text_description
         if original_query and "\n" in original_query:
-            # Use the first non-empty line for name matching when a full brief is provided.
-            # This prevents multiline constraints from suppressing exact recipe name hits.
-            name_line = next(
-                (line.strip() for line in original_query.splitlines() if line.strip()),
-                ""
-            )
-            if name_line:
-                query_for_name_match = name_line
-        # If we have explicit flavour terms, prefer those for name matching on long/noisy briefs
+            # Prefer the best-looking name line (may be partial) when a full brief is provided.
+            # This avoids choosing constraint lines or document headers.
+            candidate_lines = []
+            for line in original_query.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                lower = stripped.lower()
+                if any(marker in lower for marker in ("[documents uploaded", "[extracted from document", "user description")):
+                    continue
+                candidate_lines.append(stripped)
+
+            def _name_line_score(text: str, flavors: list) -> float:
+                lower = text.lower()
+                alpha = sum(1 for c in text if c.isalpha())
+                upper = sum(1 for c in text if c.isupper())
+                upper_ratio = (upper / max(alpha, 1)) if alpha else 0.0
+                flavor_hits = sum(1 for term in flavors if term and term.lower() in lower)
+                # Penalize common constraint lines
+                penalty_terms = ("kein", "ohne", "nicht", "dosage", "frucht", "saccharose", "allergen", "stärke", "pektin")
+                penalty = 1.0 if any(term in lower for term in penalty_terms) else 0.0
+                return (alpha / 10.0) + (upper_ratio * 2.0) + (flavor_hits * 2.0) - penalty
+
+            best_line = ""
+            best_score = -1.0
+            for line in candidate_lines:
+                score = _name_line_score(line, flavor_terms)
+                if score > best_score:
+                    best_score = score
+                    best_line = line
+
+            if best_line and best_score >= 2.0:
+                query_for_name_match = best_line
+        # If we have explicit flavour terms, prefer those for name matching only when the name looks noisy
         flavor_terms = []
         if query_features and query_values:
             for feature, value in zip(query_features, query_values):
@@ -1464,9 +1489,9 @@ class QdrantRecipeManager:
                     )
         if flavor_terms:
             noisy_markers = ("[documents uploaded", "[extracted from document", "user description")
-            if (original_query and "\n" in original_query) or \
-               any(marker in query_for_name_match.lower() for marker in noisy_markers) or \
-               len(query_for_name_match) > 80:
+            looks_like_name = bool(re.match(r"^[A-Z]{1,3}\b", query_for_name_match)) and len(query_for_name_match) <= 80
+            has_noise = any(marker in query_for_name_match.lower() for marker in noisy_markers)
+            if (not query_for_name_match) or has_noise or (not looks_like_name):
                 query_for_name_match = flavor_terms[0]
         name_matches = self._check_exact_recipe_name_match(
             query_for_name_match, country_filter, version_filter)
