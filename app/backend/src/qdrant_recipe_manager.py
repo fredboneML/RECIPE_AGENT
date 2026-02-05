@@ -2028,8 +2028,8 @@ class QdrantRecipeManager:
                 feature_refinement_weight = 0.20
                 weight_scheme = "balanced"
             else:
-                text_weight = 0.15
-                feature_search_weight = 0.65
+                text_weight = 0.35
+                feature_search_weight = 0.45
                 feature_refinement_weight = 0.20
                 weight_scheme = "feature-heavy"
 
@@ -2141,8 +2141,8 @@ class QdrantRecipeManager:
                     filter_penalty += 0.10 * unknown_count
 
                 if filter_penalty > 0:
-                    FILTER_PENALTY_WEIGHT = 0.10
-                    filter_penalty = min(filter_penalty, 2.5)
+                    FILTER_PENALTY_WEIGHT = 0.06
+                    filter_penalty = min(filter_penalty, 1.5)
                     combined_score = max(
                         0.0, combined_score - filter_penalty * FILTER_PENALTY_WEIGHT)
 
