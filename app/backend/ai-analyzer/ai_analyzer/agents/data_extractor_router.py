@@ -56,7 +56,7 @@ class DataExtractorRouterAgent:
 
     def __init__(self, model_provider: str = "openai", model_name: str = "gpt-4o-mini", api_key: Optional[str] = None):
         """Initialize the Data Extractor & Router Agent
-        
+
         Default model is gpt-4o-mini which:
         - Supports temperature=0.0 for deterministic output
         - Has strong JSON instruction following
@@ -76,13 +76,14 @@ class DataExtractorRouterAgent:
         # Create OpenAI client directly for deterministic extraction
         # Using direct API to ensure temperature=0.0 is properly respected
         self.client = OpenAI(api_key=self.api_key)
-        
+
         # Store system prompt from instructions
         self.system_prompt = "\n".join(self.instructions)
 
         logger.info(
             f"DataExtractorRouterAgent initialized with {len(self.feature_mappings.get('feature_name_mappings', {}))} feature name mappings")
-        logger.info(f"Using OpenAI API directly with temperature=0.0 for deterministic extraction")
+        logger.info(
+            f"Using OpenAI API directly with temperature=0.0 for deterministic extraction")
 
     def _load_feature_mappings(self) -> Dict[str, Any]:
         """Load feature mappings for intelligent extraction"""
@@ -454,10 +455,12 @@ EXTRACTED DOCUMENT CONTENT:
                 combined_brief = supplier_brief
 
             # Detect if this is a short query (likely just a recipe name)
-            is_short_query = len(combined_brief.strip()) < 50 and len(combined_brief.split()) < 10
-            
+            is_short_query = len(combined_brief.strip()) < 50 and len(
+                combined_brief.split()) < 10
+
             if is_short_query:
-                logger.info(f"Detected SHORT QUERY (length={len(combined_brief)}, words={len(combined_brief.split())})")
+                logger.info(
+                    f"Detected SHORT QUERY (length={len(combined_brief)}, words={len(combined_brief.split())})")
                 short_query_instruction = """
 ⚠️  SPECIAL MODE: SHORT QUERY DETECTED
 This is likely just a recipe name or simple search term.
@@ -483,7 +486,8 @@ Provide your response as a JSON object following the specified format.
 
             # Get response from OpenAI API directly with temperature=0.0 + seed for full determinism
             logger.info("Extracting information from supplier brief...")
-            logger.info(f"Using model: {self.model_name} with temperature=0.0 and seed=42 for fully deterministic extraction")
+            logger.info(
+                f"Using model: {self.model_name} with temperature=0.0 and seed=42 for fully deterministic extraction")
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
@@ -491,7 +495,8 @@ Provide your response as a JSON object following the specified format.
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.0,  # Deterministic extraction
-                seed=42,  # Fixed seed for reproducible results (required for full determinism)
+                # Fixed seed for reproducible results (required for full determinism)
+                seed=42,
                 max_tokens=4000
                 # Note: response_format json_object only works with gpt-4o, gpt-4-turbo, gpt-3.5-turbo-0125+
                 # We rely on explicit prompt instructions for JSON format instead
@@ -512,61 +517,80 @@ Provide your response as a JSON object following the specified format.
                 result['features_df'] = features_df
             else:
                 result['features_df'] = None
-            
+
             # ============================================================
             # NUMERICAL CONSTRAINTS: Parse and convert to Qdrant filters
             # ============================================================
             numerical_filters = {}
-            
+
             if NUMERICAL_PARSER_AVAILABLE:
                 # Method 1: Parse from raw brief text (catches structured tables)
                 try:
-                    text_constraints = parse_numerical_constraints_from_brief(combined_brief)
+                    text_constraints = parse_numerical_constraints_from_brief(
+                        combined_brief)
                     if text_constraints:
-                        numerical_filters.update(constraints_to_qdrant_filters(text_constraints))
-                        logger.info(f"Extracted {len(text_constraints)} numerical constraints from brief text")
+                        numerical_filters.update(
+                            constraints_to_qdrant_filters(text_constraints))
+                        logger.info(
+                            f"Extracted {len(text_constraints)} numerical constraints from brief text")
                 except Exception as e:
-                    logger.warning(f"Error parsing numerical constraints from text: {e}")
-                
+                    logger.warning(
+                        f"Error parsing numerical constraints from text: {e}")
+
                 # Method 2: Parse from LLM-extracted numerical_constraints
                 llm_constraints = result.get('numerical_constraints', [])
                 if llm_constraints:
                     try:
-                        parsed_llm = self._parse_llm_numerical_constraints(llm_constraints)
+                        parsed_llm = self._parse_llm_numerical_constraints(
+                            llm_constraints)
                         numerical_filters.update(parsed_llm)
-                        logger.info(f"Parsed {len(parsed_llm)} numerical constraints from LLM output")
+                        logger.info(
+                            f"Parsed {len(parsed_llm)} numerical constraints from LLM output")
                     except Exception as e:
-                        logger.warning(f"Error parsing LLM numerical constraints: {e}")
-            
+                        logger.warning(
+                            f"Error parsing LLM numerical constraints: {e}")
+
             result['numerical_filters'] = numerical_filters
 
             # ============================================================
             # CATEGORICAL CONSTRAINTS: Parse and convert to Qdrant filters
             # ============================================================
             categorical_filters = {}
-            
+
             if CATEGORICAL_PARSER_AVAILABLE:
                 # Method 1: Parse from raw brief text (keyword matching)
                 try:
-                    text_categorical = extract_categorical_from_brief_text(combined_brief)
+                    text_categorical = extract_categorical_from_brief_text(
+                        combined_brief)
                     if text_categorical:
-                        categorical_filters.update(categorical_to_qdrant_filters(text_categorical))
-                        logger.info(f"Extracted {len(text_categorical)} categorical constraints from brief text")
+                        categorical_filters.update(
+                            categorical_to_qdrant_filters(text_categorical))
+                        logger.info(
+                            f"Extracted {len(text_categorical)} categorical constraints from brief text")
                 except Exception as e:
-                    logger.warning(f"Error parsing categorical constraints from text: {e}")
-                
+                    logger.warning(
+                        f"Error parsing categorical constraints from text: {e}")
+
                 # Method 2: Parse from LLM-extracted categorical_constraints
                 llm_categorical = result.get('categorical_constraints', [])
                 if llm_categorical:
                     try:
-                        parsed_llm_cat = parse_llm_categorical_constraints(llm_categorical)
+                        parsed_llm_cat = parse_llm_categorical_constraints(
+                            llm_categorical)
                         # LLM extraction takes priority (more accurate)
                         categorical_filters.update(parsed_llm_cat)
-                        logger.info(f"Parsed {len(parsed_llm_cat)} categorical constraints from LLM output")
+                        logger.info(
+                            f"Parsed {len(parsed_llm_cat)} categorical constraints from LLM output")
                     except Exception as e:
-                        logger.warning(f"Error parsing LLM categorical constraints: {e}")
-            
+                        logger.warning(
+                            f"Error parsing LLM categorical constraints: {e}")
+
             result['categorical_filters'] = categorical_filters
+            result['text_description'] = self._enhance_text_description(
+                result.get('text_description', ''),
+                result.get('features', []),
+                combined_brief
+            )
 
             logger.info(
                 f"Extraction completed. Search type: {result['search_type']}")
@@ -614,9 +638,10 @@ Provide your response as a JSON object following the specified format.
             else:
                 logger.info("  No numerical constraints extracted")
             logger.info("-" * 40)
-            
+
             # Log categorical constraints
-            logger.info("CATEGORICAL CONSTRAINTS (for Qdrant exact-match filtering):")
+            logger.info(
+                "CATEGORICAL CONSTRAINTS (for Qdrant exact-match filtering):")
             logger.info("-" * 40)
             if result.get('categorical_filters'):
                 for field_code, qdrant_filter in result['categorical_filters'].items():
@@ -624,7 +649,7 @@ Provide your response as a JSON object following the specified format.
             else:
                 logger.info("  No categorical constraints extracted")
             logger.info("-" * 40)
-            
+
             # Log reasoning
             logger.info("EXTRACTION REASONING:")
             logger.info("-" * 40)
@@ -646,36 +671,98 @@ Provide your response as a JSON object following the specified format.
                 'reasoning': f'Error in extraction: {str(e)}. Falling back to two-step search with text only.'
             }
 
+    def _enhance_text_description(
+        self,
+        text_description: str,
+        features: List[Dict[str, str]],
+        combined_brief: str
+    ) -> str:
+        """
+        Align text_description with indexed recipe descriptions by adding
+        key searchable terms (e.g., MaterialMasterShorttext, Flavour, Segment).
+        """
+        description_parts = [
+            text_description.strip()] if text_description else []
+
+        # Add first non-empty line as MaterialMasterShorttext when it looks like a recipe name
+        skip_prefixes = (
+            "user description:",
+            "extracted document content:",
+            "[documents uploaded:",
+            "[extracted from document:"
+        )
+        name_line = ""
+        for line in combined_brief.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            lower = stripped.lower()
+            if any(lower.startswith(prefix) for prefix in skip_prefixes):
+                continue
+            name_line = stripped
+            break
+        if name_line:
+            description_parts.append(f"MaterialMasterShorttext: {name_line}")
+
+        # Append key feature/value pairs if not already present
+        for feature in features or []:
+            feature_name = (feature.get('feature_name') or "").strip()
+            feature_value = (feature.get('feature_value') or "").strip()
+            if not feature_name or not feature_value:
+                continue
+
+            lower_name = feature_name.lower()
+            if lower_name in ("flavour", "flavor", "geschmack"):
+                candidate = f"Flavour: {feature_value}"
+            elif lower_name == "produktsegment (sd reporting)":
+                candidate = f"Produktsegment (SD Reporting): {feature_value}"
+            else:
+                continue
+
+            if candidate.lower() not in " ".join(description_parts).lower():
+                description_parts.append(candidate)
+
+        # De-duplicate while preserving order
+        seen = set()
+        deduped = []
+        for part in description_parts:
+            normalized = part.strip().lower()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                deduped.append(part.strip())
+
+        return ", ".join(deduped)
+
     def _parse_llm_numerical_constraints(self, llm_constraints: List[Dict[str, str]]) -> Dict[str, Dict[str, Any]]:
         """
         Parse numerical constraints from LLM output format to Qdrant filter format.
-        
+
         LLM output format:
             [{"field": "Brix", "constraint": ">40"}, ...]
-        
+
         Returns:
             Dict mapping field_code to Qdrant range filter
             {"Z_BRIX": {"gt": 40}, ...}
         """
         if not NUMERICAL_PARSER_AVAILABLE:
             return {}
-        
+
         from ai_analyzer.utils.numerical_constraint_parser import (
             parse_constraint_text,
             BRIEF_FIELD_TO_CODE,
             NumericalConstraint,
             FIELD_CODE_INFO
         )
-        
+
         filters = {}
-        
+
         for item in llm_constraints:
             field_name = item.get('field', '').lower().strip()
             constraint_text = item.get('constraint', '')
-            
+
             if not field_name or not constraint_text:
                 continue
-            
+
             # Early validation: constraint must contain at least one digit
             # This catches LLM hallucinations like "any fruit possible except those already included"
             if not any(char.isdigit() for char in constraint_text):
@@ -684,17 +771,17 @@ Provide your response as a JSON object following the specified format.
                     f"(constraint must contain numbers like '5%', 'max 10', '>30')"
                 )
                 continue
-            
+
             # Map field name to Z_* code
             field_code = BRIEF_FIELD_TO_CODE.get(field_name)
-            
+
             # Try partial matching if exact match not found
             if not field_code:
                 for brief_name, code in BRIEF_FIELD_TO_CODE.items():
                     if brief_name in field_name or field_name in brief_name:
                         field_code = code
                         break
-            
+
             if not field_code:
                 # Common unmapped fields with explanations
                 unmapped_explanations = {
@@ -706,18 +793,21 @@ Provide your response as a JSON object following the specified format.
                 }
                 explanation = unmapped_explanations.get(field_name, None)
                 if explanation:
-                    logger.info(f"Field '{field_name}' cannot be used for numerical filtering: {explanation}")
+                    logger.info(
+                        f"Field '{field_name}' cannot be used for numerical filtering: {explanation}")
                 else:
-                    logger.warning(f"Could not map field '{field_name}' to Z_* code")
+                    logger.warning(
+                        f"Could not map field '{field_name}' to Z_* code")
                 continue
-            
+
             # Parse the constraint
             operator, val1, val2 = parse_constraint_text(constraint_text)
-            
+
             if operator == 'unknown':
-                logger.warning(f"Could not parse constraint '{constraint_text}' for field '{field_name}'")
+                logger.warning(
+                    f"Could not parse constraint '{constraint_text}' for field '{field_name}'")
                 continue
-            
+
             # Build Qdrant filter
             if operator == 'gt':
                 filters[field_code] = {"gt": val1}
@@ -732,9 +822,10 @@ Provide your response as a JSON object following the specified format.
             elif operator == 'eq':
                 # For exact match, use small range
                 filters[field_code] = {"gte": val1 - 0.01, "lte": val1 + 0.01}
-            
-            logger.info(f"Parsed constraint: {field_name} ({field_code}) {constraint_text} → {filters[field_code]}")
-        
+
+            logger.info(
+                f"Parsed constraint: {field_name} ({field_code}) {constraint_text} → {filters[field_code]}")
+
         return filters
 
     def _parse_agent_response(self, response_text: str) -> Dict[str, Any]:
