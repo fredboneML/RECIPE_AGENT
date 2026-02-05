@@ -1452,6 +1452,22 @@ class QdrantRecipeManager:
             )
             if name_line:
                 query_for_name_match = name_line
+        # If we have explicit flavour terms, prefer those for name matching on long/noisy briefs
+        flavor_terms = []
+        if query_features and query_values:
+            for feature, value in zip(query_features, query_values):
+                if not feature or not value:
+                    continue
+                if str(feature).strip().lower() in ("flavour", "flavor", "geschmack"):
+                    flavor_terms.extend(
+                        [term.strip() for term in str(value).split(",") if term.strip()]
+                    )
+        if flavor_terms:
+            noisy_markers = ("[documents uploaded", "[extracted from document", "user description")
+            if (original_query and "\n" in original_query) or \
+               any(marker in query_for_name_match.lower() for marker in noisy_markers) or \
+               len(query_for_name_match) > 80:
+                query_for_name_match = flavor_terms[0]
         name_matches = self._check_exact_recipe_name_match(
             query_for_name_match, country_filter, version_filter)
 
