@@ -1443,6 +1443,17 @@ class QdrantRecipeManager:
         # Step 0: Check for exact/partial recipe name matches (UNCHANGED)
         # =====================================================================
         query_for_name_match = original_query if original_query else text_description
+        # If we have explicit flavour terms, prefer those for name matching only when the name looks noisy
+        flavor_terms = []
+        if query_features and query_values:
+            for feature, value in zip(query_features, query_values):
+                if not feature or not value:
+                    continue
+                if str(feature).strip().lower() in ("flavour", "flavor", "geschmack"):
+                    flavor_terms.extend(
+                        [term.strip() for term in str(value).split(",") if term.strip()]
+                    )
+
         if original_query and "\n" in original_query:
             # Prefer the best-looking name line (may be partial) when a full brief is provided.
             # This avoids choosing constraint lines or document headers.
@@ -1477,16 +1488,6 @@ class QdrantRecipeManager:
 
             if best_line and best_score >= 2.0:
                 query_for_name_match = best_line
-        # If we have explicit flavour terms, prefer those for name matching only when the name looks noisy
-        flavor_terms = []
-        if query_features and query_values:
-            for feature, value in zip(query_features, query_values):
-                if not feature or not value:
-                    continue
-                if str(feature).strip().lower() in ("flavour", "flavor", "geschmack"):
-                    flavor_terms.extend(
-                        [term.strip() for term in str(value).split(",") if term.strip()]
-                    )
         if flavor_terms:
             noisy_markers = ("[documents uploaded", "[extracted from document", "user description")
             looks_like_name = bool(re.match(r"^[A-Z]{1,3}\b", query_for_name_match)) and len(query_for_name_match) <= 80
