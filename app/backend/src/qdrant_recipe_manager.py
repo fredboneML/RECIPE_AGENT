@@ -1467,7 +1467,7 @@ class QdrantRecipeManager:
                     continue
                 candidate_lines.append(stripped)
 
-            def _name_line_score(text: str, flavors: list) -> float:
+            def _name_line_score(text: str, flavors: list) -> tuple:
                 lower = text.lower()
                 alpha = sum(1 for c in text if c.isalpha())
                 upper = sum(1 for c in text if c.isupper())
@@ -1476,24 +1476,30 @@ class QdrantRecipeManager:
                 # Penalize common constraint lines
                 penalty_terms = ("kein", "ohne", "nicht", "dosage", "frucht", "saccharose", "allergen", "stärke", "pektin")
                 penalty = 1.0 if any(term in lower for term in penalty_terms) else 0.0
-                return (alpha / 10.0) + (upper_ratio * 2.0) + (flavor_hits * 2.0) - penalty
+                score = (alpha / 10.0) + (upper_ratio * 2.0) + (flavor_hits * 2.0) - penalty
+                return score, flavor_hits, penalty
 
             best_line = ""
             best_score = -1.0
+            best_flavor_hits = 0
+            best_penalty = 0.0
             for line in candidate_lines:
-                score = _name_line_score(line, flavor_terms)
+                score, hits, penalty = _name_line_score(line, flavor_terms)
                 if score > best_score:
                     best_score = score
                     best_line = line
+                    best_flavor_hits = hits
+                    best_penalty = penalty
 
-            if best_line and best_score >= 2.0:
+            if best_line and (best_score >= 2.0 or (best_flavor_hits >= 1 and best_penalty == 0.0)):
                 query_for_name_match = best_line
         if flavor_terms:
             noisy_markers = ("[documents uploaded", "[extracted from document", "user description")
             looks_like_name = bool(re.match(r"^[A-Z]{1,3}\b", query_for_name_match)) and len(query_for_name_match) <= 80
             has_noise = any(marker in query_for_name_match.lower() for marker in noisy_markers)
             if (not query_for_name_match) or has_noise or (not looks_like_name):
-                query_for_name_match = flavor_terms[0]
+                # Use all extracted flavors to keep multi-flavor names searchable
+                query_for_name_match = ", ".join(flavor_terms)
         name_matches = self._check_exact_recipe_name_match(
             query_for_name_match, country_filter, version_filter)
 
