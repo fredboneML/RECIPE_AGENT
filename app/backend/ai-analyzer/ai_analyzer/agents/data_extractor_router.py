@@ -693,8 +693,8 @@ Provide your response as a JSON object following the specified format.
         Align text_description with indexed recipe descriptions by adding
         key searchable terms (e.g., MaterialMasterShorttext, Flavour, Segment).
         """
-        description_parts = [
-            text_description.strip()] if text_description else []
+        description_parts = []
+        structured_parts = []
 
         # Add best candidate line as MaterialMasterShorttext (prefer flavor mentions)
         skip_prefixes = (
@@ -733,7 +733,25 @@ Provide your response as a JSON object following the specified format.
         if not name_line and candidate_lines:
             name_line = candidate_lines[0]
         if name_line:
-            description_parts.append(f"MaterialMasterShorttext: {name_line}")
+            structured_parts.append(f"MaterialMasterShorttext: {name_line}")
+
+        # Detect explicit product segment mentions to align with indexed descriptions
+        segment_override = ""
+        segment_map = {
+            "trinkjoghurt": "Trinkjoghurt",
+            "rührjoghurt": "Rührjoghurt",
+            "quark": "Quark/Topfen",
+            "topfen": "Quark/Topfen",
+            "milchgetränk": "Milchgetränke",
+        }
+        for line in candidate_lines:
+            lower_line = line.lower()
+            for token, normalized in segment_map.items():
+                if token in lower_line:
+                    segment_override = normalized
+                    break
+            if segment_override:
+                break
 
         # Append key feature/value pairs if not already present
         for feature in features or []:
@@ -746,12 +764,24 @@ Provide your response as a JSON object following the specified format.
             if lower_name in ("flavour", "flavor", "geschmack"):
                 candidate = f"Flavour: {feature_value}"
             elif lower_name == "produktsegment (sd reporting)":
-                candidate = f"Produktsegment (SD Reporting): {feature_value}"
+                segment_value = feature_value
+                if segment_override and segment_override.lower() not in segment_value.lower():
+                    segment_value = segment_override
+                candidate = f"Produktsegment (SD Reporting): {segment_value}"
             else:
                 continue
 
-            if candidate.lower() not in " ".join(description_parts).lower():
-                description_parts.append(candidate)
+            if candidate.lower() not in " ".join(structured_parts).lower():
+                structured_parts.append(candidate)
+
+        # Add market segment if explicitly stated in the brief
+        if any("fruchtzubereitung" in line.lower() for line in candidate_lines):
+            structured_parts.append("Market segments: Fruchtzubereitung")
+
+        if structured_parts:
+            description_parts.extend(structured_parts)
+        if text_description:
+            description_parts.append(text_description.strip())
 
         # De-duplicate while preserving order
         seen = set()
