@@ -1423,6 +1423,13 @@ class QdrantRecipeManager:
         logger.info("SEARCH ARCHITECTURE: Text-First (Semantic → Filter)")
         logger.info("=" * 80)
 
+        def _log_search_text(step_label: str, text: Optional[str]) -> None:
+            if text is None:
+                logger.info(f"{step_label} search text: <none>")
+                return
+            cleaned = text.replace("\n", "\\n").strip()
+            logger.info(f"{step_label} search text: '{cleaned}'")
+
         # Log filters that will be applied AFTER text search
         has_filters = bool(numerical_filters) or bool(categorical_filters)
         if numerical_filters:
@@ -1512,6 +1519,7 @@ class QdrantRecipeManager:
             if (not selected_name_line) and ((not query_for_name_match) or has_noise or (not looks_like_name)):
                 # Use all extracted flavors to keep multi-flavor names searchable
                 query_for_name_match = ", ".join(flavor_terms)
+        _log_search_text("Step 0 (name match)", query_for_name_match)
         name_matches = self._check_exact_recipe_name_match(
             query_for_name_match, country_filter, version_filter)
 
@@ -1520,7 +1528,7 @@ class QdrantRecipeManager:
         # NOTE: NO numerical/categorical filters here - only country/version
         # =====================================================================
         logger.info(f"Step 1a: Text-based semantic search (top {TEXT_SEARCH_K}) - NO feature filters")
-        logger.info(f"  Query: '{text_description[:80]}...'")
+        _log_search_text("Step 1a", text_description)
 
         text_search_result = self.search_by_text_description(
             text_description,
@@ -1544,7 +1552,7 @@ class QdrantRecipeManager:
         if query_for_name_match and query_for_name_match.strip() and query_for_name_match != text_description:
             try:
                 logger.info("Step 1a-: Name-line semantic search (top 50)")
-                logger.info(f"  Query: '{query_for_name_match[:80]}...'")
+                _log_search_text("Step 1a-", query_for_name_match)
                 name_line_candidates = self.search_by_text_description(
                     query_for_name_match,
                     top_k=min(50, TEXT_SEARCH_K),
@@ -1585,7 +1593,7 @@ class QdrantRecipeManager:
         # Also search with original query if different (for German product names)
         if original_query and original_query.strip().lower() != text_description.strip().lower():
             logger.info(f"Step 1a+: Additional semantic search using original query")
-            logger.info(f"  Query: '{original_query[:60]}...'")
+            _log_search_text("Step 1a+", original_query)
 
             original_query_results = self.search_by_text_description(
                 original_query,
@@ -1739,6 +1747,7 @@ class QdrantRecipeManager:
                 skipped_already_in_pool = 0
 
                 # Vector search for flavor - NO FILTERS (consistent with text-first architecture)
+                _log_search_text("Flavor safeguard", query_flavor)
                 logger.info(f"Flavor safeguard: Searching for '{query_flavor}' (NO filters)")
                 vector_flavor_results = self.search_by_text_description(
                     query_flavor,
