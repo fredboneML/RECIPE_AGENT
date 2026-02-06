@@ -1539,6 +1539,32 @@ class QdrantRecipeManager:
             text_candidates = text_search_result
             cached_query_embedding = None
 
+        # Step 1a-: Optional name-line semantic search to recover misspellings/partials
+        name_line_candidates = []
+        if query_for_name_match and query_for_name_match.strip() and query_for_name_match != text_description:
+            try:
+                logger.info("Step 1a-: Name-line semantic search (top 50)")
+                logger.info(f"  Query: '{query_for_name_match[:80]}...'")
+                name_line_candidates = self.search_by_text_description(
+                    query_for_name_match,
+                    top_k=min(50, TEXT_SEARCH_K),
+                    country_filter=country_filter,
+                    version_filter=version_filter,
+                    numerical_filters=None,
+                    categorical_filters=None,
+                    return_embedding=False
+                )
+                if isinstance(name_line_candidates, tuple):
+                    name_line_candidates = name_line_candidates[0]
+                for cand in name_line_candidates:
+                    cand["search_source"] = "name_line"
+                if name_line_candidates:
+                    logger.info(
+                        f"  Added {len(name_line_candidates)} name-line candidates"
+                    )
+            except Exception as e:
+                logger.warning(f"Name-line semantic search failed: {e}")
+
         # Merge name matches with text candidates (name matches go first)
         if name_matches:
             name_match_ids = {nm.get("id") for nm in name_matches}
@@ -1548,6 +1574,13 @@ class QdrantRecipeManager:
             ]
             text_candidates = name_matches + text_candidates
             logger.info(f"  ✓ Found {len(name_matches)} recipe name match(es) for original query")
+
+        # Merge name-line candidates (avoid duplicates)
+        if name_line_candidates:
+            existing_ids = {c.get("id") for c in text_candidates if c.get("id")}
+            extra = [c for c in name_line_candidates if c.get("id") not in existing_ids]
+            if extra:
+                text_candidates.extend(extra)
 
         # Also search with original query if different (for German product names)
         if original_query and original_query.strip().lower() != text_description.strip().lower():
