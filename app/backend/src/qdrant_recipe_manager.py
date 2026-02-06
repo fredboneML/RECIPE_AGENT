@@ -948,8 +948,18 @@ class QdrantRecipeManager:
                     if query_norm > 0 and recipe_norm > 0:
                         similarity = dot_product / (query_norm * recipe_norm)
                         candidate["feature_search_score"] = float(similarity)
+                        mst_part = ""
+                        cand_desc = candidate.get("description", "")
+                        if "MaterialMasterShorttext:" in cand_desc:
+                            try:
+                                mst_part = cand_desc.split("MaterialMasterShorttext:")[1].split(",")[0].strip()
+                            except Exception:
+                                mst_part = ""
+                        display_name = candidate.get('recipe_name', 'Unknown')[:50]
+                        if mst_part:
+                            display_name = f"{display_name} | MST: {mst_part[:60]}"
                         logger.info(
-                            f"  Calculated feature score for {candidate.get('recipe_name', 'Unknown')[:50]}: {similarity:.4f}"
+                            f"  Calculated feature score for {display_name}: {similarity:.4f}"
                         )
                     else:
                         candidate["feature_search_score"] = 0.0
