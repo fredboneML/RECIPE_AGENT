@@ -1779,6 +1779,7 @@ class QdrantRecipeManager:
             final_results = self._refine_by_features(
                 all_candidates, query_features, query_values, final_top_k,
                 original_query=original_query,
+                name_match_query=query_for_name_match,
                 numerical_filters=numerical_filters
             )
             search_metadata["refinement_completed"] = True
@@ -1848,6 +1849,7 @@ class QdrantRecipeManager:
                             query_values: List[Any],
                             top_k: int,
                             original_query: Optional[str] = None,
+                            name_match_query: Optional[str] = None,
                             numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """
         Refine candidates using feature-based similarity with language-independent scoring.
@@ -1901,6 +1903,12 @@ class QdrantRecipeManager:
             generic_feature_names = {'flavour', 'flavor', 'produktsegment', 'produktsegment (sd reporting)'}
             specific_features = [f for f in query_features if f.lower() not in generic_feature_names]
             has_specific_features = len(specific_features) > 0
+
+            name_similarity_query = None
+            if name_match_query:
+                cleaned_name_query = name_match_query.strip()
+                if 3 <= len(cleaned_name_query) <= 80:
+                    name_similarity_query = cleaned_name_query
             
             if original_query:
                 query_clean = original_query.strip()
@@ -2021,6 +2029,78 @@ class QdrantRecipeManager:
                         f"Short query ({query_len} chars) but has {', '.join(reason)} "
                         f"- using normal feature-based search"
                     )
+                elif name_similarity_query and not has_specific_features and not has_numerical_filters:
+                    # Long brief but a concise name-like line is available; apply name similarity boosts
+                    logger.info(
+                        f"Name-like line detected for similarity matching: '{name_similarity_query}'"
+                    )
+                    name_boost_scale = 0.6
+
+                    def calculate_name_similarity(query: str, candidate_name: str) -> float:
+                        if not candidate_name:
+                            return 0.0
+                        q = query.lower()
+                        c = candidate_name.lower()
+                        if q == c:
+                            return 1.0
+                        if q in c:
+                            return 0.85 + (len(q) / len(c)) * 0.15
+                        if c in q:
+                            return 0.80 + (len(c) / len(q)) * 0.15
+                        q_words = set(q.replace('-', ' ').replace('_', ' ').split())
+                        c_words = set(c.replace('-', ' ').replace('_', ' ').split())
+                        if q_words and c_words:
+                            common_words = q_words & c_words
+                            if common_words:
+                                word_similarity = len(common_words) / max(len(q_words), len(c_words))
+                                q_common = ' '.join(sorted(common_words))
+                                c_common = ' '.join(
+                                    w for w in c.split() if w in common_words or any(cw in w for cw in common_words)
+                                )
+                                char_similarity = len(q_common) / max(len(q), len(c)) if max(len(q), len(c)) > 0 else 0
+                                return 0.5 + word_similarity * 0.3 + char_similarity * 0.2
+                        return 0.0
+
+                    for candidate in candidates:
+                        cand_id = candidate.get("id", "")
+                        cand_name = candidate.get("recipe_name", "")
+                        cand_desc = candidate.get("description", "")
+
+                        mst_part = ""
+                        if "MaterialMasterShorttext:" in cand_desc:
+                            try:
+                                mst_part = cand_desc.split("MaterialMasterShorttext:")[1].split(",")[0].strip()
+                            except Exception:
+                                mst_part = ""
+
+                        sim_name = calculate_name_similarity(name_similarity_query, cand_name)
+                        sim_mst = calculate_name_similarity(name_similarity_query, mst_part)
+                        best_sim = max(sim_name, sim_mst)
+
+                        if best_sim >= 0.95:
+                            boost = RECIPE_NAME_EXACT_BOOST * name_boost_scale
+                            match_type = "exact"
+                        elif best_sim >= 0.7:
+                            boost = RECIPE_NAME_PARTIAL_BOOST * (best_sim / 0.95) * name_boost_scale
+                            match_type = "partial"
+                        elif best_sim >= 0.5:
+                            boost = RECIPE_NAME_PARTIAL_BOOST * 0.5 * (best_sim / 0.7) * name_boost_scale
+                            match_type = "weak"
+                        else:
+                            continue
+
+                        recipe_name_matches[cand_id] = (match_type, boost, best_sim)
+
+                    if recipe_name_matches:
+                        top_matches = sorted(recipe_name_matches.items(), key=lambda x: x[1][2], reverse=True)[:5]
+                        logger.info(f"Found {len(recipe_name_matches)} recipe name matches for name-like line. Top 5:")
+                        for cid, (mtype, boost, sim) in top_matches:
+                            cand = next((c for c in candidates if c.get("id") == cid), None)
+                            if cand:
+                                logger.info(
+                                    f"    {mtype}: {cand.get('recipe_name', 'Unknown')[:50]} "
+                                    f"(sim={sim:.2f}, boost=+{boost:.2f})"
+                                )
 
             # Extract query flavor value for boosting
             query_flavor = None
