@@ -1,0 +1,23 @@
+# Customer Brief - Cherry Vanilla Drinking Yogurt
+# Target: Should match FP Cherry Vanilla Drink (Poland)
+
+## Flavor Concept
+Cherry Vanilla blend for drinking yogurt application.
+
+## Fruit Preparation Properties
+- Fruit content: >60%
+- pH: 3.6-3.8
+- Brix: 47-51°
+- Viscosity (60s): 7-9 cm
+- Puree texture
+- Dosage: 5%
+
+## Key Requirements
+- No preservatives
+- Color allowed
+- Natural flavors
+- Contains Saccharose
+- Starch and Pectin stabilizers
+
+## Target Market
+Poland, Eastern Europe

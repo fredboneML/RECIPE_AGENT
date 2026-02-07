@@ -1,0 +1,21 @@
+# Customer Brief - Tropical Fruit Yogurt
+# Target: Should match TROPICAL 140G recipe
+
+## Flavor Concept
+Tropical fruit blend for spoonable yogurt application.
+
+## Fruit Preparation Properties
+- pH: 3.7-3.9
+- Brix: 42-46°
+- Viscosity (60s): 5-7 cm
+- Puree texture (no pieces)
+
+## Key Requirements
+- No preservatives
+- No artificial colors
+- Natural flavors preferred
+- Pectin and LBG stabilizers allowed
+
+## Religious Certification
+Halal certified required
+Kosher certified required

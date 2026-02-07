@@ -1,0 +1,22 @@
+# Customer Brief - Banana Fit Yogurt
+# Target: Should match BANANA FIT recipes (521082, 521173)
+
+## Flavor Concept
+Banana flavor for fit/healthy yogurt line with high fruit content.
+
+## Fruit Preparation Properties
+- Fruit content: >45%
+- pH: 3.8-4.0
+- Brix: 15-20°
+- Viscosity (60s): 5-10 cm
+- Puree texture
+
+## Key Requirements
+- No preservatives
+- Color allowed
+- Contains sweetener
+- Starch, Pectin, and LBG stabilizers
+
+## Religious Certification
+Kosher required
+Halal preferred

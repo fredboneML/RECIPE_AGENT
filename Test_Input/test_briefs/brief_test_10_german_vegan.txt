@@ -1,0 +1,28 @@
+# Customer Brief - Vegan Cheese Alternative
+# Target: Should match GYROS OVCHEES recipe (Germany)
+
+## Flavor Concept
+Gyros-style preparation for vegan baked cheese alternative.
+Gluten-free required.
+
+## Fruit Preparation Properties
+- pH: 4.2-4.4
+- Brix: 12-14°
+- Viscosity (60s): 2-3 cm
+- Dosage: 10%
+
+## Key Requirements
+- No preservatives
+- No color
+- No artificial colors
+- Natural flavors
+- No Saccharose
+- Starch stabilizer
+- GMO-free (Genfrei)
+- Allergen-containing (dairy/vegan alternative)
+
+## Target Market
+Germany
+
+## Religious Certification
+Halal required

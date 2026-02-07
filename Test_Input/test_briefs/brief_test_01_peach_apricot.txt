@@ -1,0 +1,23 @@
+# Customer Brief - Peach Apricot Yogurt Preparation
+# Target: Should match Austrian Peach Apricot recipe (PFIRSICH APRIKOSE)
+
+## Flavor Concept
+Peach Apricot - A balanced blend of peach and apricot puree for milk drinks.
+
+## Fruit Preparation Properties
+- Fruit content: >30%
+- pH: 3.9-4.1
+- Brix: 43-47°
+- Viscosity (30s): around 100 cm
+
+## Key Requirements
+- No preservatives
+- No artificial colors
+- Natural flavors only
+- Contains starch as stabilizer
+
+## Target Market
+Austria, Germany
+
+## Religious Certification
+Not required

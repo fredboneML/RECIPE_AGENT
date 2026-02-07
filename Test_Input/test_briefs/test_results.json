@@ -1,0 +1,252 @@
+[
+  {
+    "brief_name": "brief_test_01_peach_apricot.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['PFIRSICH', 'APRIKOSE', 'PEACH'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query! Unfortunately, I was unable to find any similar recipes that match your criteria of a Peach Apricot yogurt preparation with over 30% fruit content, natural flavors, no preservatives, and containing starch as a stabilizer. \n\n**Number of similar recipes found: 0**\n\nIf you hav...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_02_tropical_halal.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['TROPICAL'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query! Unfortunately, I was unable to find any similar recipes that match your specifications for a tropical fruit blend suitable for spoonable yogurt applications. \n\n**Number of similar recipes found: 0**\n\nWhile there are currently no recipes available that fit your criteria of a...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_03_banana_high_fruit.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['BANANA'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query regarding banana-flavored yogurt options with a high fruit content. Unfortunately, we were unable to find any similar recipes that match your specific criteria. \n\n**Number of Similar Recipes Found: 0**\n\nWhile there are no recipes available at this time, I recommend consideri...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_04_strawberry_high_fruit.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['STRAWBERRY'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query! Unfortunately, we found **0 similar recipes** that meet the criteria for a strawberry preparation with very high fruit content for premium yogurt, containing fruit pieces, and free from preservatives and artificial colors.\n\nIf you have any other specific requirements or wou...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_05_matcha_quark.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['MATCHA', 'SIGGIS'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query! Unfortunately, we did not find any similar recipes in our database that match your request for a matcha preparation suitable for Quark/Topfen applications with fruit pieces, containing no preservatives or artificial colors, and featuring natural flavors along with saccharos...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_06_cherry_drink.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['Cherry', 'Vanilla', 'Drink'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query regarding a Cherry Vanilla blend for drinking yogurt applications. Unfortunately, we were unable to find any similar recipes in our database that match your specific criteria. \n\n**Number of similar recipes found: 0**\n\nSince there are no matching recipes, we recommend conside...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_07_passionfruit_fit.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['PASSIONFRUIT'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query regarding passionfruit preparation for fit and healthy yogurt. Unfortunately, I found **0 similar recipes** that match your specific requirements. \n\nIf you're looking for yogurt recipes that contain 40-50% fruit content, have a pH of 3.5-3.7, Brix of 12-15\u00b0, and are free fro...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_08_peach_pouch.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['PEACH'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query regarding peach preparation for yogurt in a pouch or squeeze format. After searching our database, we unfortunately found **0 similar recipes** that match your specific criteria, including the desired fruit content, pH level, Brix measurement, texture, and other characterist...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_09_apple_pear_seasonal.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['APPLE', 'PEAR', 'CAULDRON'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your query regarding a Sour Apple and Pear fruit preparation for Halloween. Unfortunately, I found **0 similar recipes** in the database that match your specific request. \n\nPlease feel free to refine your search criteria or provide more details about the type of recipes you are looking...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  },
+  {
+    "brief_name": "brief_test_10_german_vegan.txt",
+    "success": false,
+    "issues": [
+      "Expected recipes containing ['GYROS', 'OVCHEES', 'VEGAN'] not found in top 5. Got: []",
+      "No search results returned"
+    ],
+    "extraction_details": {
+      "response_preview": "Thank you for your inquiry regarding a gyros-style vegan cheese alternative. Unfortunately, I found **0 similar recipes** that meet your specific criteria of being gluten-free, containing natural flavors, and lacking preservatives, artificial colors, and sucrose.\n\nIf you have any other preferences o...",
+      "numerical_filters": {},
+      "categorical_filters": {},
+      "features": {},
+      "num_search_results": 0,
+      "top_recipes": [],
+      "top_scores": []
+    },
+    "raw_response_keys": [
+      "response",
+      "conversation_id",
+      "followup_questions",
+      "search_results",
+      "metadata",
+      "comparison_table"
+    ]
+  }
+]

@@ -60,7 +60,39 @@ The Recipe Search Agent is a production-ready system that:
 ### Flow Diagram
 
 ```
-User Uploads Brief → Data Extractor Router Agent → Recipe Search Agent → Qdrant → Results → UI
+User Uploads Brief
+       ↓
+┌──────────────────────────────────────────────────────────────┐
+│  Data Extractor Router Agent (gpt-4o-mini)                   │
+│  ├─ Extract text description                                 │
+│  ├─ Extract features & values                                │
+│  ├─ Parse numerical constraints → numerical_filters          │
+│  └─ Parse categorical constraints → categorical_filters      │
+└──────────────────────────────────────────────────────────────┘
+       ↓
+┌──────────────────────────────────────────────────────────────┐
+│  Recipe Search Agent (Text-First Architecture)               │
+│  ├─ Step 0: Recipe name matching (exact/partial/fuzzy)       │
+│  │   └─ Hyphen/space normalization + fuzzy word-overlap      │
+│  ├─ Step 1a: Text-based semantic search (100 candidates)     │
+│  ├─ Step 1a-: Name-line semantic search (200 candidates)     │
+│  ├─ Step 1a-f: Flavor + MST-format variant searches          │
+│  │   └─ German translations, FP/FZ prefixes, hyphen variants │
+│  ├─ Step 1a+: Original query text search (100 candidates)    │
+│  ├─ Flavor Safeguard (English + German flavor search)        │
+│  ├─ Step 1b: Apply filters IN-MEMORY on candidates           │
+│  │   └─ Progressive relaxation (strict → 10% → 20% → skip)  │
+│  └─ Step 2: Feature scoring + ranking → Top 3                │
+└──────────────────────────────────────────────────────────────┘
+       ↓
+┌──────────────────────────────────────────────────────────────┐
+│  Qdrant Vector Database                                      │
+│  ├─ Named vectors: text (384d) + features (484d)             │
+│  ├─ Payload indexes: numerical.Z_*, spec_fields.Z_*          │
+│  └─ Filter: Range (numerical) + MatchValue (categorical)     │
+└──────────────────────────────────────────────────────────────┘
+       ↓
+   Top 3 Results + Comparison Table (60 fields) → UI
 ```
 
 ### 1. **Data Extractor Router Agent** (`data_extractor_router.py`)
@@ -77,7 +109,7 @@ User Uploads Brief → Data Extractor Router Agent → Recipe Search Agent → Q
    - **Features**: Structured list of product attributes (flavors, colors, stabilizers, etc.)
    - **Feature values**: Corresponding values for each feature
    - **Numerical constraints**: Range queries (e.g., "Brix >40", "pH <4.1", "fruit content 30-40%")
-   - **Binary fields**: Yes/No attributes (preservatives, artificial colors, GMO, etc.)
+   - **Categorical constraints**: Yes/No attributes for filtering (preservatives, artificial colors, allergen-free, etc.)
 
 2. Normalizes multilingual features to English using `feature_normalizer.py`
 
@@ -86,6 +118,13 @@ User Uploads Brief → Data Extractor Router Agent → Recipe Search Agent → Q
    - `<4.1` → `{"lt": 4.1}`
    - `30+/-5°` → `{"gte": 25.0, "lte": 35.0}`
    - `6-9 +/- 2` → `{"gte": 7.0, "lte": 11.0}`
+
+4. Parses categorical constraints using `categorical_constraint_parser.py`:
+   - Maps brief field names to Z_* codes (e.g., "Preserved" → "Z_INH04")
+   - Normalizes multilingual values to "Yes"/"No":
+     - German: "Ja"/"Nein", "ohne"/"mit", "frei von" → "Yes"/"No"
+     - French: "Oui"/"Non", "sans"/"avec" → "Yes"/"No"
+   - Handles special values: "Saccharose", "Stückig", "homogen", etc.
 
 **Output**:
 ```python
@@ -100,14 +139,38 @@ User Uploads Brief → Data Extractor Router Agent → Recipe Search Agent → Q
         "Z_BRIX": {"gte": 25.0, "lte": 35.0},
         "Z_VISK20S": {"gte": 7.0, "lte": 11.0}
     },
-    "binary_filters": {
-        "Z_INH04": "No",  # No preservatives
-        "Z_INH05": "No",  # No artificial colors
-        "Z_INH09": "Yes"  # Natural flavors
+    "categorical_filters": {
+        "Z_INH04": {"value": "No"},   # No preservatives (Preserved = No)
+        "Z_INH05": {"value": "No"},   # No artificial colors
+        "Z_INH09": {"value": "Yes"},  # Natural flavors
+        "Z_INH12": {"value": "Yes"},  # Allergen-free
+        "Z_INH01": {"value": "Saccharose"}  # Sugar type
     },
     "reasoning": "Extracted flavors, product segment..."
 }
 ```
+
+**Supported Categorical Fields** (18 fields):
+| Field Code | Field Name | Possible Values |
+|------------|------------|-----------------|
+| Z_INH01 | Sugar type | Saccharose, Fructose, Glucose, No sugar, etc. |
+| Z_INH04 | Preserved | Yes, No |
+| Z_INH05 | Artificial colors | Yes, No |
+| Z_INH06 | Artificial flavors | Yes, No |
+| Z_INH09 | Natural flavor | Yes, No |
+| Z_INH10 | GMO | positive, negative, neutral |
+| Z_INH12 | Allergen-free | Yes (allergen-free), No (contains allergens) |
+| Z_INH13 | Sweetener | Yes, No |
+| Z_INH14 | Starch | Yes, No |
+| Z_INH15 | Halal | Yes, No |
+| Z_INH16 | Kosher | Yes, No |
+| Z_KON | Consistency | Stückig (chunky), homogen (homogeneous) |
+| Z_BIOPRO | Organic | Yes, No |
+| Z_FAIR | Fair Trade | Yes, No |
+| Z_VEGAN | Vegan | Yes, No |
+| Z_VEGET | Vegetarian | Yes, No |
+| Z_LMFRREI | Lactose-free | Yes, No |
+| Z_GLUTFR | Gluten-free | Yes, No |
 
 ### 2. **Recipe Search Agent** (`recipe_search_agent.py`)
 
@@ -117,51 +180,84 @@ User Uploads Brief → Data Extractor Router Agent → Recipe Search Agent → Q
 
 **Processing**:
 
-1. **Two-Step Hybrid Search** (`qdrant_recipe_manager.py`):
+1. **Text-First Hybrid Search** (`qdrant_recipe_manager.py`):
+
+   The search uses a **Text-First** architecture: semantic search finds a broad candidate pool first (no filters), then filters are applied in-memory with progressive relaxation.
 
    - **Step 0: Recipe Name Matching** (using original query)
-     - Searches for exact and partial matches on MaterialMasterShorttext
+     - Searches for exact and partial matches on MaterialMasterShorttext using Qdrant `MatchText`
+     - **Hyphen/space normalization**: Treats hyphens and spaces equivalently so "ALOE VERA PASSIONFRUCHT" matches "FP ALOE VERA-PASSIONFRUCHT TJ"
      - Example: Query "FZ Orange Mango Grüner Tee" finds "FZ Orange Mango Grüner Tee Smoothie"
      - **Exact match**: Score 0.95 (query == recipe name)
      - **Partial match**: Score 0.92 (query contained in recipe name)
      - **Prefix match**: Score 0.90 (recipe name starts with query)
+     - **Fuzzy fallback**: If exact/partial matching fails, falls back to word-overlap matching using individual word `MatchText` queries plus LLM-corrected flavor terms (handles typos like "passionfruch" → "Passionfruit")
      - Uses original query text (before LLM translation) for German/French product names
 
-   - **Step 1a: Text-based semantic search** (15 candidates)
+   - **Step 1a: Text-based semantic search** (100 candidates, NO filters)
      - Uses `paraphrase-multilingual-MiniLM-L12-v2` embeddings
-     - Searches with LLM-translated description (e.g., "Frozen orange mango green tea")
+     - Searches with LLM-generated description stripped of constraint language
+     - Description format: `MaterialMasterShorttext: FP ALOE VERA-PASSIONFRUCHT, Flavour: Aloe Vera, Passionfruit, Produktsegment: Trinkjoghurt`
+     - Only country/version filters applied; no numerical/categorical filters
 
-   - **Step 1a+: Original query text search** (if different from translated)
-     - Searches with original query (e.g., "FZ Orange Mango Grüner Tee")
+   - **Step 1a-: Name-line semantic search** (200 candidates)
+     - Searches with just the best product name line from the original query
+     - Catches recipes missed by the full description search due to noise from constraint text
+
+   - **Step 1a-f: Flavor + MST-format variant searches** (50 candidates each)
+     - Uses LLM-extracted flavor terms (which correct user typos) to build multiple search variants:
+       - Plain flavor terms (e.g., "Aloe Vera Passionfruit")
+       - MST-format with product prefixes (e.g., "FP ALOE VERA PASSIONFRUIT", "FZ ALOE VERA-PASSIONFRUIT")
+       - German translations (e.g., "Aloe Vera Passionfrucht") using a built-in English→German flavor dictionary
+       - German MST-format variants (e.g., "FP ALOE VERA-PASSIONFRUCHT")
+     - Bridges the language gap between English queries and German-indexed recipes
+
+   - **Step 1a+: Original query text search** (100 candidates, if different from translated)
+     - Searches with original user query (e.g., "FZ Orange Mango Grüner Tee")
      - Finds German/French recipe names that semantic search might miss
      - Merges additional candidates with deduplication
 
-   - **Step 1b: Feature-based search** (15 candidates)
-     - Uses 484-dimensional feature vectors
-     - Applies country and version filters
-
-   - **Flavor Safeguard**: 
-     - Vector search for flavor keywords
-     - Full-text search for exact keyword matches in description/recipe_name
+   - **Flavor Safeguard**:
+     - Additional vector search for extracted flavor terms (100 candidates)
+     - Includes German translations of flavor keywords (e.g., "Passionfruit" → "Passionfrucht")
      - Ensures flavor-specific recipes aren't missed by embedding similarity
 
-   - **Step 2: Merge and refine**
-     - Combines all candidates with deduplication
-     - Calculates combined scores (text + feature)
-     - Applies numerical range filters
+   - **Step 1b: Apply filters IN-MEMORY** on the combined candidate pool
+     - Progressive relaxation if strict filters return too few results:
+       - Level 0: Strict filters (exact match)
+       - Level 1: 10% tolerance on numerical filters
+       - Level 2: 20% tolerance on numerical filters
+       - Level 3: Skip numerical filters entirely (categorical only)
+       - Level 4: No filters at all (returns unfiltered results with warning)
+
+   - **Step 2: Feature scoring and ranking**
+     - Calculates feature similarity scores for all candidates using feature encoder
+     - Combines text similarity + feature scores
      - Returns top N results
 
-2. **Filtering**:
-   - **Version filter**: P (Production) or L (Legacy)
-   - **Country filter**: Optional country-specific filtering
-   - **Numerical range filters**: Applied to `numerical.Z_BRIX`, `numerical.Z_PH`, etc.
-   - **Binary filters**: Applied to `spec_fields.Z_INH04`, `spec_fields.Z_INH05`, etc.
+2. **Filtering** (applied in-memory on text search candidates):
+   - **Version filter**: P (Production) or L (Legacy) — applied during Qdrant search
+   - **Country filter**: Single country or multi-country selection (uses `MatchAny`) — applied during Qdrant search
+   - **Numerical range filters**: Applied in-memory on candidates (with progressive tolerance)
+     - Uses `gt`, `gte`, `lt`, `lte` operators on fields like `Z_BRIX`, `Z_PH`, `Z_FRUCHTG`
+   - **Categorical filters**: Applied in-memory on candidates (soft matching, missing = unknown)
+     - Matches fields like `Z_INH04`, `Z_INH05`, `Z_INH12` against "Yes"/"No"/"Saccharose"
+
+   **Filter Example** (Qdrant query):
+   ```python
+   # Brief: "Brix >40, no preservatives, allergen-free"
+   filter_conditions = [
+       FieldCondition(key="numerical.Z_BRIX", range=Range(gt=40.0)),
+       FieldCondition(key="spec_fields.Z_INH04", match=MatchValue(value="No")),
+       FieldCondition(key="spec_fields.Z_INH12", match=MatchValue(value="Yes")),
+   ]
+   ```
 
 3. **Scoring**:
-   - Text similarity score (15% weight)
-   - Feature search score (65% weight)
-   - Feature match score (20% weight)
-   - Flavor boost (+0.25 for flavor matches)
+   - Text similarity score (from semantic search)
+   - Feature search score (from feature encoder)
+   - Flavor boost for flavor keyword matches
+   - Name match boost (0.90–0.95 for exact/partial name matches)
 
 4. **Translation**:
    - Detects query language (EN, DE, FR, etc.)
@@ -354,6 +450,16 @@ curl http://localhost:6333/collections/food_recipes_two_step | jq '{points: .res
 
 **IMPORTANT**: Indexing 600K recipes can take several hours. Run this in a screen/tmux session.
 
+#### Indexing Tools & Models
+
+| Component | Tool/Model | Purpose |
+|-----------|------------|---------|
+| **Script** | `init_vector_index_qdrant.py` | Main indexing script |
+| **Vector DB** | Qdrant | Stores vectors and payload for semantic search |
+| **Embedding Model** | `paraphrase-multilingual-MiniLM-L12-v2` | 384-dim multilingual text embeddings |
+| **Feature Normalizer** | `feature_normalizer.py` | Multilingual → English normalization |
+| **Recipe Manager** | `EnhancedTwoStepRecipeManager` | Handles encoding and upserts |
+
 #### Recipe Encoding Process
 
 Before indexing, recipes undergo sophisticated encoding to ensure accurate search matching:
@@ -499,7 +605,7 @@ docker-compose -f infrastructure-compose.yml logs -f vector_index_init
 
 ### Step 5: Create Payload Indexes
 
-**CRITICAL**: Without payload indexes, searches with numerical filters will timeout on large databases!
+**CRITICAL**: Without payload indexes, searches with numerical and categorical filters will timeout on large databases!
 
 After indexing a significant portion of recipes (e.g., 200K+), create indexes:
 
@@ -508,19 +614,60 @@ cd app/backend
 python3 create_payload_indexes.py localhost 6333
 ```
 
-**What it creates**:
-- **FLOAT indexes** for numerical fields:
-  - `numerical.Z_BRIX`, `numerical.Z_PH`, `numerical.Z_FRUCHTG`, etc.
-  - Enables fast range queries (`>30`, `<4.1`, `25-35`, etc.)
-- **KEYWORD indexes** for spec_fields:
-  - `spec_fields.Z_INH01`, `spec_fields.Z_INH04`, etc.
-  - Enables fast exact match filtering
-- **Metadata indexes**:
-  - `version`, `country`, `recipe_name`
-- **TEXT index**:
-  - `description` for full-text search
+#### Indexes Created
 
-**Verify indexes**:
+The script creates **3 types of payload indexes** in Qdrant:
+
+**1. FLOAT Indexes (for numerical range queries)**
+
+| Index Path | Field | Purpose |
+|------------|-------|---------|
+| `numerical.Z_BRIX` | Brix | Sugar content filtering (e.g., >40, 25-35) |
+| `numerical.Z_PH` | pH | Acidity filtering (e.g., <4.1) |
+| `numerical.Z_FRUCHTG` | Fruit content % | Fruit percentage filtering |
+| `numerical.Z_VISK20S` | Viscosity 20°C/s⁻¹ | Viscosity filtering |
+| `numerical.Z_VISK4S` | Viscosity 4°C/s⁻¹ | Cold viscosity filtering |
+| `numerical.Z_VISK60S` | Viscosity 60°C/s⁻¹ | Hot viscosity filtering |
+| `numerical.Z_VISK70S` | Viscosity 70°C/s⁻¹ | Hot viscosity filtering |
+| `numerical.Z_VERHAN` | Dilution | Dilution ratio filtering |
+| `numerical.Z_TRMA` | Dry matter % | Dry matter filtering |
+| `numerical.Z_PAST` | Pasteurization temp | Temperature filtering |
+| `numerical.Z_HALTB` | Shelf life (months) | Shelf life filtering |
+
+**2. KEYWORD Indexes (for categorical exact-match queries)**
+
+| Index Path | Field | Typical Values |
+|------------|-------|----------------|
+| `spec_fields.Z_INH01` | Sugar type | Saccharose, Fructose, No sugar |
+| `spec_fields.Z_INH04` | Preserved | Yes, No |
+| `spec_fields.Z_INH05` | Artificial colors | Yes, No |
+| `spec_fields.Z_INH06` | Artificial flavors | Yes, No |
+| `spec_fields.Z_INH09` | Natural flavor | Yes, No |
+| `spec_fields.Z_INH10` | GMO | positive, negative, neutral |
+| `spec_fields.Z_INH12` | Allergen-free | Yes, No |
+| `spec_fields.Z_INH13` | Sweetener | Yes, No |
+| `spec_fields.Z_INH14` | Starch | Yes, No |
+| `spec_fields.Z_INH15` | Halal | Yes, No |
+| `spec_fields.Z_INH16` | Kosher | Yes, No |
+| `spec_fields.Z_KON` | Consistency | Stückig, homogen |
+| `spec_fields.Z_BIOPRO` | Organic | Yes, No |
+| `spec_fields.Z_FAIR` | Fair Trade | Yes, No |
+| `spec_fields.Z_VEGAN` | Vegan | Yes, No |
+| `spec_fields.Z_VEGET` | Vegetarian | Yes, No |
+| `spec_fields.Z_LMFRREI` | Lactose-free | Yes, No |
+| `spec_fields.Z_GLUTFR` | Gluten-free | Yes, No |
+| `version` | Recipe version | P (Production), L (Legacy) |
+| `country` | Country code | DE, FR, PL, AT, etc. |
+| `recipe_name` | Full recipe name | For exact name matching |
+
+**3. TEXT Index (for full-text search)**
+
+| Index Path | Purpose |
+|------------|---------|
+| `description` | Full-text search on recipe descriptions |
+
+#### Verify Indexes
+
 ```bash
 curl -s http://localhost:6333/collections/food_recipes_two_step | jq '.result.payload_schema'
 ```
@@ -528,13 +675,16 @@ curl -s http://localhost:6333/collections/food_recipes_two_step | jq '.result.pa
 You should see entries like:
 ```json
 {
-  "numerical.Z_BRIX": {"data_type": "Float", ...},
+  "numerical.Z_BRIX": {"data_type": "Float", "params": {"type": "float", "is_tenant": false, ...}},
   "numerical.Z_PH": {"data_type": "Float", ...},
-  ...
+  "spec_fields.Z_INH04": {"data_type": "Keyword", ...},
+  "spec_fields.Z_INH12": {"data_type": "Keyword", ...},
+  "version": {"data_type": "Keyword", ...},
+  "description": {"data_type": "Text", ...}
 }
 ```
 
-**Note**: Index creation can take time for large collections. The script will wait for each index to be created.
+**Note**: Index creation can take time for large collections (5-15 minutes for 600K+ recipes). The script will wait for each index to be created.
 
 ---
 
@@ -1024,35 +1174,39 @@ python3 create_payload_indexes.py localhost 6333
 
 ### Product Name Search Not Finding Expected Recipe
 
-**Problem**: Searching for "FZ Orange Mango Grüner Tee" doesn't find "FZ Orange Mango Grüner Tee Smoothie"
+**Problem**: Searching for a recipe name doesn't find the expected result (e.g., "ALOE VERA PASSIONFRUCHT" not finding "FP ALOE VERA-PASSIONFRUCHT TJ")
 
 **Possible Causes**:
-1. Recipe might use different spelling (e.g., "Grüntee" vs "Grüner Tee")
-2. Recipe might be in a different country/version than filtered
-3. Recipe might not be indexed yet
+1. **Hyphen/space mismatch**: Indexed name uses hyphens (e.g., "VERA-PASSIONFRUCHT") but query uses spaces — now handled by normalization
+2. **Language gap**: Query uses English ("Passionfruit") but index uses German ("Passionfrucht") — now handled by German translation variants in Step 1a-f
+3. **Typos/truncations**: User typed "passionfruch" instead of "Passionfrucht" — now handled by fuzzy matching in Step 0 and LLM-corrected flavor terms in Step 1a-f
+4. **Missing product prefix**: User typed "ALOE VERA" but index has "FP ALOE VERA" — now handled by MST-format variant searches with FP/FZ prefixes
+5. Recipe might be in a different country/version than filtered
+6. Recipe might not be indexed yet
 
 **Solution**:
 1. Verify recipe exists in Qdrant:
    ```bash
    curl -X POST "http://localhost:6333/collections/food_recipes_two_step/points/scroll" \
      -H "Content-Type: application/json" \
-     -d '{"filter":{"must":[{"key":"description","match":{"text":"Orange Mango Grüner Tee"}}]},"limit":10,"with_payload":true}'
+     -d '{"filter":{"must":[{"key":"description","match":{"text":"ALOE VERA"}}]},"limit":10,"with_payload":true}'
    ```
 
-2. Try alternative spellings:
-   - "Grüntee" instead of "Grüner Tee"
-   - Without special characters: "Gruner Tee"
+2. Check country filter — the recipe might be indexed under a different country
 
-3. Check country filter - the recipe might be indexed under a different country
-
-4. Check logs for search flow:
+3. Check logs for the full search flow:
    ```
-   Step 0: Recipe name matching (exact/partial)
-   Step 1a: Text-based search (translated query)
+   Step 0 (name match): Exact/partial/fuzzy name matching
+   Step 0 fuzzy: Word-overlap fallback with LLM-corrected flavors
+   Step 1a: Text-based semantic search (100 candidates)
+   Step 1a-: Name-line semantic search (200 candidates)
+   Step 1a-f: Flavor + MST-format variant searches (German translations, FP/FZ prefixes)
    Step 1a+: Original query search (untranslated)
+   Flavor safeguard: Additional flavor keyword search (English + German)
+   Step 1b: Filter application with progressive relaxation
    ```
 
-**Note**: The search now includes Step 1a+ which searches using the original query text (before LLM translation), improving matches for German/French product names.
+**Note**: The search architecture includes multiple redundant search paths to handle typos, language gaps, hyphen/space differences, and missing product prefixes. If a recipe still isn't found, check the backend logs for each step to see which variants were searched and what scores the target recipe received.
 
 ---
 

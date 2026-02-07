@@ -1,0 +1,23 @@
+# Customer Brief - Matcha for Quark/Topfen
+# Target: Should match MATCHA SIGGIS recipes (Austria)
+
+## Flavor Concept
+Matcha preparation for Quark/Topfen application with fruit pieces.
+
+## Fruit Preparation Properties
+- pH: 3.3-4.3
+- Brix: 40-57°
+- Viscosity (60s): 7-10 cm
+- With pieces (Stückig)
+- Fat level: around 2%
+- Dosage: 10%
+
+## Key Requirements
+- No preservatives
+- No artificial colors
+- Natural flavors
+- Contains Saccharose
+- Starch stabilizer
+
+## Target Market
+Austria
