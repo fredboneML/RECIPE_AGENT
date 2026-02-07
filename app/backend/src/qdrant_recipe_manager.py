@@ -1068,6 +1068,9 @@ class QdrantRecipeManager:
             if scroll_results and len(scroll_results) > 0:
                 # Find best matches - prioritize exact matches, then partial matches
                 query_lower = query_clean.lower()
+                # Normalize hyphens/spaces for comparison so that
+                # "aloe vera passionfrucht" matches "FP ALOE VERA-PASSIONFRUCHT TJ"
+                query_normalized = query_lower.replace('-', ' ')
                 exact_matches = []
                 partial_matches = []
 
@@ -1083,13 +1086,17 @@ class QdrantRecipeManager:
                         mst_part = description.split("MaterialMasterShorttext:")[
                             1].split(",")[0].strip()
                         
-                        if query_lower == mst_part.lower():
+                        mst_lower = mst_part.lower()
+                        # Normalize hyphens→spaces so "VERA-PASSIONFRUCHT" matches "VERA PASSIONFRUCHT"
+                        mst_normalized = mst_lower.replace('-', ' ')
+                        
+                        if query_normalized == mst_normalized:
                             # Exact match - highest priority
                             exact_matches.append((point, 0.95))
-                        elif query_lower in mst_part.lower():
+                        elif query_normalized in mst_normalized:
                             # Partial match - query is contained in recipe name
                             partial_matches.append((point, 0.92))
-                        elif mst_part.lower().startswith(query_lower):
+                        elif mst_normalized.startswith(query_normalized):
                             # Prefix match - recipe name starts with query
                             partial_matches.append((point, 0.90))
                 
@@ -1924,21 +1931,6 @@ class QdrantRecipeManager:
             description = candidate.get('description', '')[:60]
             logger.info(f"  {i}. {recipe_name} | Score: {text_score:.4f} | {description}...")
 
-        # Log ALL candidates with recipe name, MST, and source for debugging
-        logger.info(f"--- ALL {len(text_candidates)} candidates (recipe_name | source | score | MST) ---")
-        for i, candidate in enumerate(text_candidates, 1):
-            recipe_name = candidate.get('recipe_name', 'Unknown')
-            text_score = candidate.get('text_score', 0.0)
-            source = candidate.get('search_source', 'text')
-            # Extract MaterialMasterShorttext from description
-            desc = candidate.get('description', '')
-            mst = ''
-            if 'MaterialMasterShorttext:' in desc:
-                mst = desc.split('MaterialMasterShorttext:')[1].split(',')[0].strip()
-            elif desc:
-                mst = desc[:50]
-            logger.info(f"  [{i:3d}] {recipe_name} | src={source} | score={text_score:.4f} | MST: {mst}")
-        logger.info(f"--- END ALL candidates ---")
 
         # =====================================================================
         # Step 1b: Apply numerical/categorical filters ON the text candidates
