@@ -1137,6 +1137,155 @@ class QdrantRecipeManager:
             logger.debug(f"Recipe name match check failed: {e}")
             return []
 
+    def _check_fuzzy_recipe_name_match(self,
+                                      query: str,
+                                      flavor_terms: Optional[List[str]] = None,
+                                      country_filter: Optional[Union[str, List[str]]] = None,
+                                      version_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Fuzzy fallback for recipe name matching when exact MatchText fails.
+
+        Handles:
+        - Typos/truncations (e.g., "passionfruch" → "PASSIONFRUCHT")
+        - Missing prefixes (e.g., "aloe vera" → "FP ALOE VERA...")
+        - Case differences
+
+        Strategy:
+        1. Split query into individual words
+        2. Add correctly-spelled flavor terms (LLM may have fixed typos)
+        3. Use Qdrant should (OR) filter to find recipes matching ANY word
+        4. Score locally by word overlap in MaterialMasterShorttext
+        """
+        query_clean = query.strip()
+        if len(query_clean) > 150 or len(query_clean) < 3:
+            return []
+
+        # Extract significant words from query (>= 3 chars)
+        query_words = [w.lower() for w in re.split(r'[\s\-/,]+', query_clean) if len(w) >= 3]
+
+        # Also add correctly-spelled flavor terms (the LLM normalizes typos)
+        flavor_words = set()
+        if flavor_terms:
+            for term in flavor_terms:
+                for word in re.split(r'[\s\-/,]+', term):
+                    if len(word) >= 3:
+                        flavor_words.add(word.lower())
+
+        # Combine all search words (deduped)
+        all_words = list(set(query_words) | flavor_words)
+        if len(all_words) < 2:
+            return []
+
+        logger.info(f"  Fuzzy name match: query words={query_words}, flavor words={list(flavor_words)}, combined={all_words}")
+
+        # Build OR filter: find recipes whose description contains ANY of these words
+        text_conditions = []
+        for word in all_words:
+            text_conditions.append(
+                FieldCondition(key="description", match=MatchText(text=word))
+            )
+
+        # Build country/version must conditions
+        must_conditions = []
+        if country_filter and country_filter != "All":
+            if isinstance(country_filter, list) and len(country_filter) > 0:
+                must_conditions.append(
+                    FieldCondition(key="country", match=MatchAny(any=country_filter))
+                )
+            elif isinstance(country_filter, str):
+                must_conditions.append(
+                    FieldCondition(key="country", match=MatchValue(value=country_filter))
+                )
+        if version_filter and version_filter != "All":
+            must_conditions.append(
+                FieldCondition(key="version", match=MatchValue(value=version_filter))
+            )
+
+        # Combine: must match country/version AND at least one word
+        query_filter = Filter(
+            must=must_conditions if must_conditions else None,
+            should=text_conditions
+        )
+
+        try:
+            scroll_results, _ = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=query_filter,
+                limit=30,
+                with_payload=True,
+                with_vectors=False,
+                timeout=60
+            )
+        except Exception as e:
+            logger.warning(f"Fuzzy name match scroll failed: {e}")
+            return []
+
+        if not scroll_results:
+            return []
+
+        # Score results by word overlap in MaterialMasterShorttext
+        matches = []
+        for point in scroll_results:
+            payload = point.payload if point.payload else {}
+            description = payload.get("description", "")
+
+            # Extract MST
+            mst_part = ""
+            if "MaterialMasterShorttext:" in description:
+                mst_part = description.split("MaterialMasterShorttext:")[1].split(",")[0].strip()
+            if not mst_part:
+                continue
+
+            mst_words = set(w.lower() for w in re.split(r'[\s\-/,]+', mst_part) if len(w) >= 2)
+
+            # Score: count word matches (exact + prefix matching for truncated words)
+            word_matches = 0
+            for qw in all_words:
+                if qw in mst_words:
+                    word_matches += 1.0  # Exact word match
+                elif any(mw.startswith(qw) for mw in mst_words):
+                    word_matches += 0.8  # Query word is prefix of MST word (e.g., "passionfruch" → "passionfrucht")
+                elif any(qw.startswith(mw) for mw in mst_words if len(mw) >= 4):
+                    word_matches += 0.6  # MST word is prefix of query word
+
+            match_ratio = word_matches / len(all_words) if all_words else 0
+
+            # Require at least 50% word overlap
+            if match_ratio >= 0.5:
+                score = min(0.90, 0.70 + match_ratio * 0.25)
+                matches.append((point, score, match_ratio))
+
+        # Sort by match_ratio (best first)
+        matches.sort(key=lambda x: (x[2], x[1]), reverse=True)
+
+        # Convert to recipe data format
+        result = []
+        for point, score, ratio in matches[:10]:
+            payload = point.payload or {}
+            recipe_data = {
+                "id": point.id,
+                "text_score": score,
+                "feature_search_score": 0.0,
+                "recipe_name": payload.get("recipe_name", ""),
+                "description": payload.get("description", ""),
+                "features": payload.get("features", []),
+                "values": payload.get("values", []),
+                "num_features": payload.get("num_features", 0),
+                "metadata": {"recipe_name": payload.get("recipe_name", "")},
+                "search_source": "text",
+                "_name_match": True,
+                "_match_score": score,
+                "_fuzzy_match": True,
+                "payload": payload
+            }
+            result.append(recipe_data)
+            logger.info(
+                f"  ✓ Fuzzy name match (score={score:.2f}, overlap={ratio:.0%}): "
+                f"'{query_clean}' → {payload.get('recipe_name', '')[:60]}"
+            )
+
+        return result
+
     def _apply_filters_to_candidates(self,
                                       candidates: List[Dict[str, Any]],
                                       numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -1523,6 +1672,18 @@ class QdrantRecipeManager:
         name_matches = self._check_exact_recipe_name_match(
             query_for_name_match, country_filter, version_filter)
 
+        # Fuzzy fallback if exact name match found nothing
+        if not name_matches and query_for_name_match:
+            logger.info(f"Step 0 fuzzy: No exact name match, trying fuzzy match for '{query_for_name_match}'")
+            name_matches = self._check_fuzzy_recipe_name_match(
+                query_for_name_match,
+                flavor_terms=flavor_terms,
+                country_filter=country_filter,
+                version_filter=version_filter
+            )
+            if name_matches:
+                logger.info(f"Step 0 fuzzy: Found {len(name_matches)} fuzzy name match(es)")
+
         # =====================================================================
         # Step 1a: Text-based semantic search for top 100 candidates
         # NOTE: NO numerical/categorical filters here - only country/version
@@ -1590,6 +1751,51 @@ class QdrantRecipeManager:
             if extra:
                 text_candidates.extend(extra)
 
+        # Step 1a-f: Flavor-focused semantic search using correctly-spelled flavor terms
+        # The LLM normalizes typos (e.g., "passionfruch" → "Passionfruit"), so
+        # searching with the correct flavor terms catches recipes that the raw query misses.
+        if flavor_terms:
+            flavor_search_text = " ".join(flavor_terms)
+            # Only search if flavor text is substantially different from existing search texts
+            flavor_search_lower = flavor_search_text.lower().strip()
+            already_searched = (
+                flavor_search_lower in text_description.lower()
+                or flavor_search_lower == (query_for_name_match or "").lower().strip()
+            )
+            if not already_searched and len(flavor_search_text) >= 5:
+                try:
+                    logger.info("Step 1a-f: Flavor-focused semantic search (top 50)")
+                    _log_search_text("Step 1a-f", flavor_search_text)
+
+                    flavor_focus_candidates = self.search_by_text_description(
+                        flavor_search_text,
+                        top_k=50,
+                        country_filter=country_filter,
+                        version_filter=version_filter,
+                        numerical_filters=None,
+                        categorical_filters=None,
+                        return_embedding=False
+                    )
+
+                    if isinstance(flavor_focus_candidates, tuple):
+                        flavor_focus_candidates = flavor_focus_candidates[0]
+
+                    existing_ids = {c.get("id") for c in text_candidates if c.get("id")}
+                    added_from_flavor_focus = 0
+                    for cand in flavor_focus_candidates:
+                        if cand.get("id") not in existing_ids:
+                            cand["search_source"] = "flavor_focus"
+                            text_candidates.append(cand)
+                            existing_ids.add(cand.get("id"))
+                            added_from_flavor_focus += 1
+
+                    if added_from_flavor_focus > 0:
+                        logger.info(f"  Added {added_from_flavor_focus} flavor-focused candidates")
+                    else:
+                        logger.info(f"  No new candidates from flavor-focused search (all already in pool)")
+                except Exception as e:
+                    logger.warning(f"Flavor-focused semantic search failed: {e}")
+
         # Also search with original query if different (for German product names)
         if original_query and original_query.strip().lower() != text_description.strip().lower():
             logger.info(f"Step 1a+: Additional semantic search using original query")
@@ -1630,6 +1836,22 @@ class QdrantRecipeManager:
             text_score = candidate.get('text_score', 0.0)
             description = candidate.get('description', '')[:60]
             logger.info(f"  {i}. {recipe_name} | Score: {text_score:.4f} | {description}...")
+
+        # Log ALL candidates with recipe name, MST, and source for debugging
+        logger.info(f"--- ALL {len(text_candidates)} candidates (recipe_name | source | score | MST) ---")
+        for i, candidate in enumerate(text_candidates, 1):
+            recipe_name = candidate.get('recipe_name', 'Unknown')
+            text_score = candidate.get('text_score', 0.0)
+            source = candidate.get('search_source', 'text')
+            # Extract MaterialMasterShorttext from description
+            desc = candidate.get('description', '')
+            mst = ''
+            if 'MaterialMasterShorttext:' in desc:
+                mst = desc.split('MaterialMasterShorttext:')[1].split(',')[0].strip()
+            elif desc:
+                mst = desc[:50]
+            logger.info(f"  [{i:3d}] {recipe_name} | src={source} | score={text_score:.4f} | MST: {mst}")
+        logger.info(f"--- END ALL candidates ---")
 
         # =====================================================================
         # Step 1b: Apply numerical/categorical filters ON the text candidates

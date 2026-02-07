@@ -810,7 +810,22 @@ Provide your response as a JSON object following the specified format.
         if not name_line and candidate_lines:
             name_line = candidate_lines[0]
         if name_line:
-            structured_parts.append(f"MaterialMasterShorttext: {name_line}")
+            # Uppercase name_line to better align with indexed format
+            # Most indexed MaterialMasterShorttext values are uppercase
+            # (e.g., "FP ALOE VERA-PASSIONFRUCHT TJ", "FZ LIMETTE MATCHA SIGGIS o.A.")
+            name_line_upper = name_line.upper()
+            structured_parts.append(
+                f"MaterialMasterShorttext: {name_line_upper}")
+
+            # If flavor terms are available and correctly spelled (LLM normalizes typos),
+            # also add a reconstructed MST from flavor terms to improve semantic matching.
+            # e.g., user types "passionfruch" but LLM extracts "Passionfruit" → add both.
+            if flavor_terms:
+                flavor_mst = " ".join(t.strip().title()
+                                      for t in flavor_terms if t.strip())
+                if flavor_mst and flavor_mst.lower() != name_line.lower():
+                    structured_parts.append(
+                        f"MaterialMasterShorttext: {flavor_mst}")
 
         # Detect explicit product segment mentions to align with indexed descriptions
         segment_override = ""
