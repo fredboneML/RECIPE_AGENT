@@ -1712,11 +1712,12 @@ class QdrantRecipeManager:
         name_line_candidates = []
         if query_for_name_match and query_for_name_match.strip() and query_for_name_match != text_description:
             try:
-                logger.info("Step 1a-: Name-line semantic search (top 50)")
+                NAME_LINE_K = 200  # Increased from 50 to catch typo/language gap cases
+                logger.info(f"Step 1a-: Name-line semantic search (top {NAME_LINE_K})")
                 _log_search_text("Step 1a-", query_for_name_match)
                 name_line_candidates = self.search_by_text_description(
                     query_for_name_match,
-                    top_k=min(50, TEXT_SEARCH_K),
+                    top_k=NAME_LINE_K,
                     country_filter=country_filter,
                     version_filter=version_filter,
                     numerical_filters=None,
@@ -1751,50 +1752,136 @@ class QdrantRecipeManager:
             if extra:
                 text_candidates.extend(extra)
 
-        # Step 1a-f: Flavor-focused semantic search using correctly-spelled flavor terms
+        # Step 1a-f: Flavor-focused + MST-format variant searches
         # The LLM normalizes typos (e.g., "passionfruch" → "Passionfruit"), so
-        # searching with the correct flavor terms catches recipes that the raw query misses.
-        if flavor_terms:
+        # searching with the correct flavor terms AND MST-format variants catches
+        # recipes that the raw query misses due to:
+        # - Typos in the user input
+        # - Language gap (English "Passionfruit" vs German "PASSIONFRUCHT" in index)
+        # - Missing product prefixes (FP, FZ, etc.)
+        if flavor_terms and len(flavor_terms) > 0:
+            existing_ids = {c.get("id") for c in text_candidates if c.get("id")}
+            total_added_from_variants = 0
+
+            # Build a list of search variant queries from the flavor terms
+            variant_searches = []
+
+            # 1. Plain flavor terms (e.g., "Aloe Vera Passionfruit")
             flavor_search_text = " ".join(flavor_terms)
-            # Only search if flavor text is substantially different from existing search texts
-            flavor_search_lower = flavor_search_text.lower().strip()
-            already_searched = (
-                flavor_search_lower in text_description.lower()
-                or flavor_search_lower == (query_for_name_match or "").lower().strip()
-            )
-            if not already_searched and len(flavor_search_text) >= 5:
-                try:
-                    logger.info("Step 1a-f: Flavor-focused semantic search (top 50)")
-                    _log_search_text("Step 1a-f", flavor_search_text)
+            if len(flavor_search_text) >= 5:
+                variant_searches.append(("flavors_plain", flavor_search_text))
 
-                    flavor_focus_candidates = self.search_by_text_description(
-                        flavor_search_text,
-                        top_k=50,
-                        country_filter=country_filter,
-                        version_filter=version_filter,
-                        numerical_filters=None,
-                        categorical_filters=None,
-                        return_embedding=False
-                    )
+            # 2. MST-format variants with common product prefixes
+            # Indexed descriptions look like "MaterialMasterShorttext: FP ALOE VERA-PASSIONFRUCHT TJ"
+            # Constructing similar queries bridges the format gap
+            flavor_name = " ".join(flavor_terms).upper()
+            flavor_name_hyphen = "-".join(flavor_terms).upper()
+            for prefix in ["FP", "FZ"]:
+                variant_searches.append(("mst_prefix", f"{prefix} {flavor_name}"))
+                if len(flavor_terms) >= 2:
+                    variant_searches.append(("mst_prefix_hyphen", f"{prefix} {flavor_name_hyphen}"))
 
-                    if isinstance(flavor_focus_candidates, tuple):
-                        flavor_focus_candidates = flavor_focus_candidates[0]
+            # 3. German language variants for common English flavor words
+            # Many indexed recipes use German: "Passionfruit"→"Passionfrucht", etc.
+            ENGLISH_TO_GERMAN_FLAVOR = {
+                "passionfruit": "Passionfrucht",
+                "passion fruit": "Passionfrucht",
+                "strawberry": "Erdbeere",
+                "raspberry": "Himbeere",
+                "blueberry": "Heidelbeere",
+                "blackberry": "Brombeere",
+                "cherry": "Kirsche",
+                "peach": "Pfirsich",
+                "apricot": "Aprikose",
+                "apple": "Apfel",
+                "pear": "Birne",
+                "lemon": "Zitrone",
+                "lime": "Limette",
+                "orange": "Orange",
+                "mango": "Mango",
+                "banana": "Banane",
+                "coconut": "Kokosnuss",
+                "pineapple": "Ananas",
+                "grape": "Traube",
+                "pomegranate": "Granatapfel",
+                "grapefruit": "Grapefruit",
+                "vanilla": "Vanille",
+                "chocolate": "Schokolade",
+                "caramel": "Karamell",
+                "cinnamon": "Zimt",
+                "ginger": "Ingwer",
+                "mint": "Minze",
+                "matcha": "Matcha",
+            }
+            german_flavor_terms = []
+            for term in flavor_terms:
+                term_lower = term.lower().strip()
+                if term_lower in ENGLISH_TO_GERMAN_FLAVOR:
+                    german_flavor_terms.append(ENGLISH_TO_GERMAN_FLAVOR[term_lower])
+                else:
+                    german_flavor_terms.append(term)
 
-                    existing_ids = {c.get("id") for c in text_candidates if c.get("id")}
-                    added_from_flavor_focus = 0
-                    for cand in flavor_focus_candidates:
-                        if cand.get("id") not in existing_ids:
-                            cand["search_source"] = "flavor_focus"
-                            text_candidates.append(cand)
-                            existing_ids.add(cand.get("id"))
-                            added_from_flavor_focus += 1
+            if german_flavor_terms != flavor_terms:
+                german_flavor_text = " ".join(german_flavor_terms)
+                variant_searches.append(("german_flavors", german_flavor_text))
+                # Also with MST prefix
+                german_name_upper = " ".join(german_flavor_terms).upper()
+                german_name_hyphen = "-".join(german_flavor_terms).upper()
+                for prefix in ["FP", "FZ"]:
+                    variant_searches.append(("german_mst", f"{prefix} {german_name_upper}"))
+                    if len(german_flavor_terms) >= 2:
+                        variant_searches.append(("german_mst_hyphen", f"{prefix} {german_name_hyphen}"))
 
-                    if added_from_flavor_focus > 0:
-                        logger.info(f"  Added {added_from_flavor_focus} flavor-focused candidates")
-                    else:
-                        logger.info(f"  No new candidates from flavor-focused search (all already in pool)")
-                except Exception as e:
-                    logger.warning(f"Flavor-focused semantic search failed: {e}")
+            # Deduplicate variants and remove any that are identical to existing search texts
+            name_match_lower = (query_for_name_match or "").lower().strip()
+            seen_variants = set()
+            unique_variants = []
+            for label, text in variant_searches:
+                text_lower = text.lower().strip()
+                # Skip if this exact text was already used as a search query
+                if text_lower == name_match_lower:
+                    continue
+                if text_lower in seen_variants:
+                    continue
+                seen_variants.add(text_lower)
+                unique_variants.append((label, text))
+
+            if unique_variants:
+                logger.info(f"Step 1a-f: Flavor + MST-format variant searches ({len(unique_variants)} variants)")
+                for label, search_text in unique_variants:
+                    try:
+                        _log_search_text(f"Step 1a-f ({label})", search_text)
+
+                        variant_candidates = self.search_by_text_description(
+                            search_text,
+                            top_k=50,
+                            country_filter=country_filter,
+                            version_filter=version_filter,
+                            numerical_filters=None,
+                            categorical_filters=None,
+                            return_embedding=False
+                        )
+
+                        if isinstance(variant_candidates, tuple):
+                            variant_candidates = variant_candidates[0]
+
+                        added = 0
+                        for cand in variant_candidates:
+                            if cand.get("id") not in existing_ids:
+                                cand["search_source"] = "flavor_focus"
+                                text_candidates.append(cand)
+                                existing_ids.add(cand.get("id"))
+                                added += 1
+                                total_added_from_variants += 1
+
+                        if added > 0:
+                            logger.info(f"    Added {added} new candidates from '{label}' variant")
+                    except Exception as e:
+                        logger.warning(f"Flavor variant search '{label}' failed: {e}")
+
+                logger.info(f"  Step 1a-f total: {total_added_from_variants} new candidates from {len(unique_variants)} variant searches")
+            else:
+                logger.info("Step 1a-f: Skipped (all flavor variants already covered by existing searches)")
 
         # Also search with original query if different (for German product names)
         if original_query and original_query.strip().lower() != text_description.strip().lower():
@@ -1969,26 +2056,52 @@ class QdrantRecipeManager:
                 skipped_already_in_pool = 0
 
                 # Vector search for flavor - NO FILTERS (consistent with text-first architecture)
-                _log_search_text("Flavor safeguard", query_flavor)
-                logger.info(f"Flavor safeguard: Searching for '{query_flavor}' (NO filters)")
-                vector_flavor_results = self.search_by_text_description(
-                    query_flavor,
-                    top_k=50,
-                    country_filter=country_filter,
-                    version_filter=version_filter,
-                    numerical_filters=None,  # NO filters in vector search
-                    categorical_filters=None   # NO filters in vector search
-                )
+                # Also search with German variants to bridge language gap in index
+                ENGLISH_TO_GERMAN = {
+                    "passionfruit": "Passionfrucht", "passion fruit": "Passionfrucht",
+                    "strawberry": "Erdbeere", "raspberry": "Himbeere",
+                    "blueberry": "Heidelbeere", "cherry": "Kirsche",
+                    "peach": "Pfirsich", "apricot": "Aprikose",
+                    "apple": "Apfel", "pear": "Birne",
+                    "lemon": "Zitrone", "lime": "Limette",
+                    "pineapple": "Ananas", "grape": "Traube",
+                    "pomegranate": "Granatapfel", "vanilla": "Vanille",
+                }
 
-                logger.info(f"  Found {len(vector_flavor_results)} flavor candidates")
+                flavor_safeguard_queries = [query_flavor]
+                # Build German variant of the flavor query
+                german_parts = []
+                for flavor_phrase in query_flavor.split(','):
+                    fp = flavor_phrase.strip().lower()
+                    if fp in ENGLISH_TO_GERMAN:
+                        german_parts.append(ENGLISH_TO_GERMAN[fp])
+                    else:
+                        german_parts.append(flavor_phrase.strip())
+                german_query = ", ".join(german_parts)
+                if german_query.lower() != query_flavor.lower():
+                    flavor_safeguard_queries.append(german_query)
 
-                # Add to pool (will be filtered later in refinement)
-                for candidate in vector_flavor_results:
-                    if candidate.get("id") in existing_ids:
-                        skipped_already_in_pool += 1
-                        continue
-                    flavor_matched_candidates.append(candidate)
-                    existing_ids.add(candidate.get("id"))
+                for safeguard_query in flavor_safeguard_queries:
+                    _log_search_text("Flavor safeguard", safeguard_query)
+                    logger.info(f"Flavor safeguard: Searching for '{safeguard_query}' (NO filters)")
+                    vector_flavor_results = self.search_by_text_description(
+                        safeguard_query,
+                        top_k=100,  # Increased from 50 to catch cross-language matches
+                        country_filter=country_filter,
+                        version_filter=version_filter,
+                        numerical_filters=None,  # NO filters in vector search
+                        categorical_filters=None   # NO filters in vector search
+                    )
+
+                    logger.info(f"  Found {len(vector_flavor_results)} flavor candidates for '{safeguard_query[:40]}'")
+
+                    # Add to pool (will be filtered later in refinement)
+                    for candidate in vector_flavor_results:
+                        if candidate.get("id") in existing_ids:
+                            skipped_already_in_pool += 1
+                            continue
+                        flavor_matched_candidates.append(candidate)
+                        existing_ids.add(candidate.get("id"))
 
                 # Apply filters to flavor candidates if filters are present
                 if has_filters and flavor_matched_candidates:
