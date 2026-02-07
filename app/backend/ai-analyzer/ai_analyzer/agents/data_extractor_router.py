@@ -126,21 +126,37 @@ class DataExtractorRouterAgent:
             "⚠️  ONLY include details that are EXPLICITLY mentioned or clearly implied in the input.",
             "⚠️  For short queries (just a recipe name), keep description SHORT and factual.",
             "",
+            "⚠️  IMPORTANT: The text_description is used for SEMANTIC VECTOR SEARCH against indexed recipe descriptions.",
+            "Indexed recipe descriptions are SHORT and PRODUCT-IDENTITY focused, for example:",
+            "  - 'FP Cherry Vanilla Drink for drinking yogurt application'",
+            "  - 'Fruit preparation with mango and passion fruit for spoonable yogurt'",
+            "  - 'Aloe vera passionfruit preparation for drinking yogurt'",
+            "",
+            "DO NOT include constraint/specification language in text_description!",
+            "Constraints like 'no sweeteners', 'allergen-free', 'with starch', '42% fruit content'",
+            "are handled separately by filters and should NOT be in text_description.",
+            "Including them dilutes the semantic search signal.",
+            "",
             "Guidelines for creating text_description:",
-            "- If brief is DETAILED (multiple paragraphs): Create a rich 3-5 sentence description",
-            "- If brief is SHORT (just a name/flavor): Create a SHORT 1-sentence description using ONLY what's given",
-            "- NEVER invent details like 'rich in flavor', 'smooth texture', 'no artificial colors' unless EXPLICITLY stated",
-            "- Include ONLY information from the brief:",
+            "- Focus on PRODUCT IDENTITY: product type, flavor(s), application, brand/product name",
+            "- If brief is DETAILED: Create a concise 1-2 sentence identity description",
+            "- If brief is SHORT (just a name/flavor): Create a SHORT description using ONLY what's given",
+            "- NEVER invent details like 'rich in flavor', 'smooth texture' etc.",
+            "- DO NOT include constraint/filter information:",
+            "  ❌ BAD: 'Fruit preparation with aloe vera and passion fruit, no sweeteners, allergen-free, with starch, 42% fruit content'",
+            "  ✅ GOOD: 'Fruit preparation with aloe vera and passion fruit for drinking yogurt'",
+            "- Include ONLY product-identity information from the brief:",
             "  * Product type: ONLY if mentioned (fruit preparation, fruit filling, compound, puree, etc.)",
             "  * Application: ONLY if mentioned (yogurt, ice cream, bakery, beverage, dairy, quark/skyr, cheese)",
             "  * Main flavor(s): ALWAYS extract (this is usually present)",
+            "  * Brand/product name: If mentioned",
             "  * Texture: ONLY if explicitly stated (with pieces, smooth, chunky, liquid)",
-            "  * Key attributes: ONLY if explicitly stated (organic, natural, no artificial colors, low sugar, etc.)",
             "",
             "EXAMPLE TEXT DESCRIPTIONS:",
-            "- DETAILED BRIEF → 'Matcha tea fruit preparation for skyr and quark application, natural flavor, starch stabilized, no artificial colors, with pieces'",
+            "- DETAILED BRIEF → 'Matcha fruit preparation for skyr and quark application, with pieces'",
             "- SHORT QUERY ('Mango Chutney für Ofenkäse') → 'Mango chutney for baked cheese'  ← KEEP IT SHORT!",
             "- SHORT QUERY ('Strawberry organic') → 'Strawberry, organic certified'  ← DO NOT ADD texture, colors, etc.",
+            "- BRIEF with constraints → 'Aloe vera passionfruit fruit preparation for drinking yogurt'  ← NO constraints!",
             "",
             "=" * 80,
             "FEATURE EXTRACTION - DATABASE FIELD NAMES (charactDescr):",
@@ -197,7 +213,7 @@ class DataExtractorRouterAgent:
             "=" * 80,
             "{",
             '  "search_type": "two_step",',
-            '  "text_description": "Rich searchable description with product type, flavor, application, texture, key attributes",',
+            '  "text_description": "Short product-identity description: product type, flavor, application (NO constraints like no sweeteners, allergen-free, etc.)",',
             '  "features": [',
             '    {"feature_name": "Flavour", "feature_value": "Matcha"},',
             '    {"feature_name": "Produktsegment (SD Reporting)", "feature_value": "Quark/Topfen"},',
@@ -683,6 +699,57 @@ Provide your response as a JSON object following the specified format.
                 'reasoning': f'Error in extraction: {str(e)}. Falling back to two-step search with text only.'
             }
 
+    def _strip_constraint_language(self, text: str) -> str:
+        """
+        Remove constraint/specification phrases from LLM-generated text_description
+        to align it with the terse, product-identity-focused indexed descriptions.
+
+        Indexed descriptions in Qdrant look like:
+          "MaterialMasterShorttext: FP Cherry Vanilla Drink, Produktsegment: Trinkjoghurt, Flavour: Yes"
+        They never contain constraint language like "no sweeteners", "allergen-free", etc.
+        Including such phrases in the search embedding dilutes the signal.
+
+        This method strips out:
+        - Binary constraint phrases (no sweeteners, allergen-free, with starch, etc.)
+        - Percentage mentions (42% fruit content, 10% dosage)
+        - Specification language that only appears in filters, not in indexed text
+        """
+        if not text:
+            return text
+
+        # Patterns that indicate constraint language (not product identity)
+        # These are phrases that appear in user briefs but never in indexed descriptions
+        constraint_patterns = [
+            # Binary constraint phrases (English)
+            r'\bno\s+(?:sweeteners?|preservativ\w*|artificial\s+color\w*|artificial\s+colour\w*|color\w*|colour\w*|gmo|added\s+sugar|xanthan|pectin|starch|blend|lbg|stabilizer\w*|aspartame)\b',
+            r'\bwithout\s+(?:sweeteners?|preservativ\w*|artificial\s+color\w*|colour\w*|color\w*|gmo|added\s+sugar|stabilizer\w*)\b',
+            r'\b(?:allergen[- ]?free|gmo[- ]?free|non[- ]?gmo|sugar[- ]?free|lactose[- ]?free|gluten[- ]?free)\b',
+            r'\bcontains?\s+(?:sucrose|saccharose|starch|pectin|natural\s+flavor\w*|natural\s+flavour\w*)\b',
+            r'\bwith\s+(?:starch|pectin|natural\s+flavor\w*|natural\s+flavour\w*|sucrose|saccharose|pieces)\b',
+            # Percentage constraints
+            r'\b\d+(?:\.\d+)?%\s*(?:fruit\s+content|dosage|sugar|frucht\w*|zucker)\b',
+            r'\b(?:fruit\s+content|dosage|sugar\s+content|fruchtgehalt)\s*(?:of\s+)?\d+(?:\.\d+)?%',
+            # German constraint phrases
+            r'\b(?:kein\w*\s+(?:süß\w*|konserv\w*|künstl\w*|farbe\w*|stärke|pektin|xanthan|aroma\w*|stabilisator\w*))\b',
+            r'\b(?:nicht\s+(?:konserv\w*|genfrei))\b',
+            r'\b(?:allergenfrei|genfrei|laktosefrei|glutenfrei)\b',
+            r'\b(?:saccharose|stärke\s+enthalten|pektin\s+enthalten)\b',
+            r'\b(?:natürlich\w*\s+aroma\w*|naturident\w*\s+aroma\w*)\b',
+        ]
+
+        cleaned = text
+        for pattern in constraint_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
+        # Clean up artifacts: multiple commas, leading/trailing commas, extra spaces
+        cleaned = re.sub(r',\s*,', ',', cleaned)
+        cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+        cleaned = re.sub(r'^\s*,\s*', '', cleaned)
+        cleaned = re.sub(r'\s*,\s*$', '', cleaned)
+        cleaned = cleaned.strip(' ,.')
+
+        return cleaned
+
     def _enhance_text_description(
         self,
         text_description: str,
@@ -692,6 +759,16 @@ Provide your response as a JSON object following the specified format.
         """
         Align text_description with indexed recipe descriptions by adding
         key searchable terms (e.g., MaterialMasterShorttext, Flavour, Segment).
+
+        IMPORTANT: Indexed descriptions in Qdrant are TERSE and product-identity focused.
+        They typically look like:
+          "MaterialMasterShorttext: FP Cherry Vanilla Drink, Produktsegment: Trinkjoghurt, Flavour: Yes"
+        They do NOT contain constraint language (no sweeteners, allergen-free, etc.).
+
+        This method builds a search text that mirrors the indexed format by:
+        1. Adding structured key-value pairs (MaterialMasterShorttext, Flavour, Produktsegment)
+        2. Stripping constraint language from the LLM text_description
+        3. Keeping only product-identity information (product type, flavor, application)
         """
         description_parts = []
         structured_parts = []
@@ -780,8 +857,22 @@ Provide your response as a JSON object following the specified format.
 
         if structured_parts:
             description_parts.extend(structured_parts)
+
+        # Strip constraint language from LLM text_description before appending.
+        # Indexed descriptions never contain phrases like "no sweeteners", "allergen-free",
+        # "42% fruit content" etc. - those are in spec_fields for filtering.
+        # Including them in the embedding dilutes the semantic search signal.
         if text_description:
-            description_parts.append(text_description.strip())
+            cleaned_text = self._strip_constraint_language(
+                text_description.strip())
+            if cleaned_text:
+                description_parts.append(cleaned_text)
+                if cleaned_text != text_description.strip():
+                    logger.info(
+                        f"Stripped constraint language from text_description for search:")
+                    logger.info(
+                        f"  Original: {text_description.strip()[:200]}")
+                    logger.info(f"  Cleaned:  {cleaned_text[:200]}")
 
         # De-duplicate while preserving order
         seen = set()
