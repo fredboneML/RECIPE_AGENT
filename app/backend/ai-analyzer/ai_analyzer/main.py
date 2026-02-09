@@ -1403,6 +1403,305 @@ def create_conversation_tables(engine):
         return False
 
 
+# ============================================================================
+# Admin Endpoints
+# ============================================================================
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency to ensure user has admin role"""
+    if current_user.role != 'admin':
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required"
+        )
+    return current_user
+
+
+class AddUserRequest(BaseModel):
+    username: str
+    password: Optional[str] = None  # If None, password will be auto-generated
+    role: str = 'read_only'
+
+
+class ResetPasswordRequest(BaseModel):
+    password: Optional[str] = None  # If None, password will be auto-generated
+    
+    class Config:
+        # Allow empty request body
+        json_encoders = {
+            type(None): lambda v: None
+        }
+
+
+@app.get("/api/admin/users")
+async def list_users(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """List all users (Admin only)"""
+    try:
+        users = db.query(User).all()
+        return {
+            "success": True,
+            "users": [
+                {
+                    "username": user.username,
+                    "role": user.role,
+                    "id": user.id
+                }
+                for user in users
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list users")
+
+
+@app.post("/api/admin/users")
+async def add_user(
+    user_data: AddUserRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Add a new user (Admin only)"""
+    try:
+        # Check if user already exists
+        existing_user = db.query(User).filter(User.username == user_data.username).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=400,
+                detail=f"User '{user_data.username}' already exists"
+            )
+
+        # Validate role
+        if user_data.role not in ['admin', 'read_only', 'write']:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid role. Must be 'admin', 'read_only', or 'write'"
+            )
+
+        # Insert user - password will be auto-hashed by trigger
+        # If password is None, trigger will auto-generate it
+        if user_data.password:
+            # Insert with provided password (will be hashed by trigger)
+            db.execute(
+                text("""
+                    INSERT INTO users (username, password_hash, role)
+                    VALUES (:username, :password, :role)
+                """),
+                {
+                    "username": user_data.username,
+                    "password": user_data.password,
+                    "role": user_data.role
+                }
+            )
+        else:
+            # Let trigger generate password
+            db.execute(
+                text("""
+                    INSERT INTO users (username, role)
+                    VALUES (:username, :role)
+                """),
+                {
+                    "username": user_data.username,
+                    "role": user_data.role
+                }
+            )
+
+        db.commit()
+
+        # If password was auto-generated, retrieve it
+        generated_password = None
+        if not user_data.password:
+            result = db.execute(
+                text("SELECT * FROM get_generated_password(:username)"),
+                {"username": user_data.username}
+            )
+            row = result.fetchone()
+            if row:
+                generated_password = row[0]  # password column
+
+        logger.info(f"Admin {current_user.username} added user: {user_data.username}")
+        return {
+            "success": True,
+            "message": "User added successfully",
+            "username": user_data.username,
+            "generated_password": generated_password
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error adding user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add user: {str(e)}")
+
+
+@app.put("/api/admin/users/{username}/reset-password")
+async def reset_user_password(
+    username: str,
+    password_data: ResetPasswordRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Reset a user's password (Admin only)"""
+    try:
+        logger.info(f"Admin {current_user.username} attempting to reset password for user: {username}")
+        
+        # Check if user exists
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail=f"User '{username}' not found"
+            )
+
+        # Check if password is provided (not None and not empty string)
+        # Explicitly check for None, empty string, or missing field
+        provided_password = getattr(password_data, 'password', None)
+        if provided_password and provided_password.strip():
+            # Hash the provided password and update
+            logger.info(f"Resetting password with provided password for user: {username}")
+            hashed_password = hash_password(provided_password)
+            db.execute(
+                text("""
+                    UPDATE users
+                    SET password_hash = :password_hash
+                    WHERE username = :username
+                """),
+                {
+                    "username": username,
+                    "password_hash": hashed_password
+                }
+            )
+            db.commit()
+            generated_password = None
+            logger.info(f"Password reset successfully with provided password for user: {username}")
+        else:
+            # Generate new password - delete and re-insert to trigger auto-generation
+            logger.info(f"Auto-generating password for user: {username}")
+            role = user.role
+            
+            try:
+                # Delete and re-insert in the same transaction
+                db.execute(
+                    text("DELETE FROM users WHERE username = :username"),
+                    {"username": username}
+                )
+                db.execute(
+                    text("""
+                        INSERT INTO users (username, role)
+                        VALUES (:username, :role)
+                    """),
+                    {
+                        "username": username,
+                        "role": role
+                    }
+                )
+                db.commit()
+
+                # Get generated password
+                result = db.execute(
+                    text("SELECT * FROM get_generated_password(:username)"),
+                    {"username": username}
+                )
+                row = result.fetchone()
+                generated_password = row[0] if row else None
+                
+                if generated_password:
+                    logger.info(f"Password auto-generated successfully for user: {username}")
+                else:
+                    logger.warning(f"Password was generated but could not be retrieved for user: {username}")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error during password auto-generation: {e}")
+                raise
+
+        logger.info(f"Admin {current_user.username} successfully reset password for user: {username}")
+        return {
+            "success": True,
+            "message": "Password reset successfully",
+            "username": username,
+            "generated_password": generated_password
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error resetting password for user {username}: {e}")
+        logger.exception("Full error traceback:")
+        raise HTTPException(status_code=500, detail=f"Failed to reset password: {str(e)}")
+
+
+@app.delete("/api/admin/users/{username}")
+async def delete_user(
+    username: str,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Delete a user (Admin only)"""
+    try:
+        # Check if user exists
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail=f"User '{username}' not found"
+            )
+
+        # Prevent deleting yourself
+        if username == current_user.username:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete your own account"
+            )
+
+        # Delete user
+        db.delete(user)
+        db.commit()
+
+        logger.info(f"Admin {current_user.username} deleted user: {username}")
+        return {
+            "success": True,
+            "message": f"User '{username}' deleted successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
+
+
+@app.get("/api/admin/users/{username}/generated-password")
+async def get_generated_password(
+    username: str,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Get generated password for a user if it was auto-generated (Admin only)"""
+    try:
+        result = db.execute(
+            text("SELECT * FROM get_generated_password(:username)"),
+            {"username": username}
+        )
+        row = result.fetchone()
+        if row:
+            return {
+                "success": True,
+                "username": username,
+                "password": row[0],  # password column
+                "created_at": row[1].isoformat() if row[1] else None  # created_at column
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No generated password found for this user"
+            }
+    except Exception as e:
+        logger.error(f"Error getting generated password: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get generated password: {str(e)}")
+
+
 @app.post("/api/refresh-token")
 async def refresh_token(request: Request, db: Session = Depends(get_db)):
     try:

@@ -5,6 +5,7 @@ import { AuthProvider } from './auth/AuthProvider';
 import AuthCallback from './auth/AuthCallback';
 import App from './App';
 import Login from './Login';
+import Admin from './Admin';
 import './index.css';
 
 ReactDOM.render(
@@ -14,6 +15,7 @@ ReactDOM.render(
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/admin" element={<Admin />} />
           <Route path="/" element={<App />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>

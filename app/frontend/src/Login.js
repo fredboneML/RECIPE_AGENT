@@ -9,6 +9,7 @@ function Login() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isAdminLogin, setIsAdminLogin] = useState(false);
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -84,7 +85,12 @@ function Login() {
                 }));
 
                 console.log('Authentication successful, navigating to dashboard');
-                navigate('/');
+                // Redirect to admin page if admin login was clicked, otherwise to app
+                if (isAdminLogin && data.role === 'admin') {
+                    navigate('/admin');
+                } else {
+                    navigate('/');
+                }
             } else {
                 console.error('Login failed:', data);
                 setError(data.detail || 'Invalid credentials');
@@ -115,6 +121,14 @@ function Login() {
 
     return (
         <div className="login-page">
+            <button
+                className="admin-login-button"
+                onClick={() => setIsAdminLogin(true)}
+                disabled={isLoading}
+                type="button"
+            >
+                Admin login
+            </button>
             <div className="login-container">
                 <div className="company-logo">
                     <img src="/logo.png" alt="Company Logo" />
@@ -149,6 +163,11 @@ function Login() {
                 {/* Local Login Form */}
                 {authConfig?.local_auth_enabled && (
                     <form onSubmit={handleLocalSubmit}>
+                        {isAdminLogin && (
+                            <div className="admin-login-notice">
+                                <p>🔐 Admin Login Mode</p>
+                            </div>
+                        )}
                         <div className="input-group">
                             <label>Username</label>
                             <input
