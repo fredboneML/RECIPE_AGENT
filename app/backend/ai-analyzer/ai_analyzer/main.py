@@ -859,7 +859,7 @@ async def process_query(
                                 
                                 if all_candidates and len(all_candidates) > 0:
                                     logger.info(f"/api/query: Found {len(all_candidates)} stored candidates, returning top {top_n} (language: {prev_detected_language})")
-                                    # Format as: "1. recipe_name - Material Short Text . Score: 0.5724"
+                                    # Format as: "1. recipe_name - Material Short Text . Score: 57,2%"
                                     recipe_list = []
                                     for i, candidate in enumerate(all_candidates[:top_n], 1):
                                         # Use recipe_name (e.g. 000000000000442938_AT10_01_L), fall back to metadata.recipe_name, then id
@@ -880,21 +880,29 @@ async def process_query(
                                                     material_short_text = str(val).strip()
                                                 break
                                         
+                                        score_pct = f"{combined_score * 100:.1f}".replace(".", ",")
                                         if material_short_text:
-                                            recipe_list.append(f"{i}. {recipe_name} - {material_short_text} . Score: {combined_score:.4f}")
+                                            recipe_list.append(f"{i}. {recipe_name} - {material_short_text} . Score: {score_pct}%")
                                         else:
-                                            recipe_list.append(f"{i}. {recipe_name} . Score: {combined_score:.4f}")
+                                            recipe_list.append(f"{i}. {recipe_name} . Score: {score_pct}%")
                                     
                                     response_text = "\n".join(recipe_list)
                                     followup_qs = recipe_search_agent.generate_followup_questions([], "", prev_detected_language)
                                     
-                                    # Store this response (as plain text, not JSON)
+                                    # Store as JSON with all_refined_candidates so subsequent
+                                    # follow-up clicks can still retrieve the full candidate list
+                                    import json as json_mod
+                                    response_with_metadata = json_mod.dumps({
+                                        "text": response_text,
+                                        "metadata": stored_metadata,  # preserves all_refined_candidates
+                                        "detected_language": prev_detected_language
+                                    })
                                     store_conversation(
                                         db_session,
                                         str(current_user.id),
                                         conversation_id,
                                         query,
-                                        response_text,
+                                        response_with_metadata,
                                         followup_questions=followup_qs
                                     )
                                     

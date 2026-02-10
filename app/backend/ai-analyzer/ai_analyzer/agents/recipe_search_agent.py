@@ -931,10 +931,12 @@ def format_response_in_language(results: List[Dict[str, Any]], language: str) ->
         response_parts.append(f"{i}. Recipe ID: {recipe_id}")
         response_parts.append(
             f"{desc_prefix}{description[:200]}{'...' if len(description) > 200 else ''}")
-        response_parts.append(f"{score_prefix}{combined_score:.3f}")
+        score_pct = f"{combined_score * 100:.1f}".replace(".", ",")
+        response_parts.append(f"{score_prefix}{score_pct}%")
 
         if feature_score is not None:
-            response_parts.append(f"{feature_prefix}{feature_score:.3f}")
+            feat_pct = f"{feature_score * 100:.1f}".replace(".", ",")
+            response_parts.append(f"{feature_prefix}{feat_pct}%")
 
         response_parts.append("")  # Empty line for readability
 
@@ -944,15 +946,17 @@ def format_response_in_language(results: List[Dict[str, Any]], language: str) ->
 def format_response_in_language_with_ai(results: List[Dict[str, Any]], language: str, original_query: str) -> str:
     """Use AI to format the response in the specified language"""
     try:
-        # Prepare the results data for AI formatting
+        # Prepare the results data for AI formatting (scores as percentages)
         results_data = []
         for i, result in enumerate(results, 1):
+            combined = result.get("combined_score", result.get("text_score", 0))
+            feat = result.get("feature_score")
             results_data.append({
                 "rank": i,
                 "id": result.get("id", f"recipe_{i}"),
                 "description": result.get("description", ""),
-                "similarity_score": result.get("combined_score", result.get("text_score", 0)),
-                "feature_score": result.get("feature_score")
+                "similarity_score": f"{combined * 100:.1f}".replace(".", ",") + "%",
+                "feature_score": f"{feat * 100:.1f}".replace(".", ",") + "%" if feat is not None else None
             })
 
         # Create language-specific instructions
@@ -983,7 +987,7 @@ Please format this as a natural, helpful response that:
 2. Lists each recipe with its description and similarity score
 3. Uses appropriate language and tone for {lang_instruction}
 4. Keeps descriptions concise but informative
-5. Includes similarity scores to help the user understand relevance
+5. Shows similarity scores as percentages (e.g. 57,2%) with a comma as decimal separator — they are already provided in that format
 6. Focuses on recipe similarity and food product characteristics
 7. Mentions key features like Color, Flavour, Stabilizer, Industry, etc. when relevant
 

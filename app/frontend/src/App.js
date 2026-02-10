@@ -654,7 +654,7 @@ function App() {
                 {message.response && (
                   <div className="message assistant">
                     {/* Check if this is a recipe list (starts with numbered recipes) */}
-                    {message.response.match(/^\d+\.\s+[A-Z0-9_]+.*Score:/) ? (
+                    {message.response.match(/^\d+\.\s+[A-Z0-9_]+.*Score:\s*\d/) ? (
                       <div className="recipe-list-container">
                         <div className="recipe-list-header">
                           <h4>Top Recipes</h4>
