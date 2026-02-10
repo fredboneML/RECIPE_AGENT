@@ -904,28 +904,23 @@ def format_response_in_language(results: List[Dict[str, Any]], language: str) ->
             f"Gevonden {len(results)} vergelijkbare recepten:\n\n"]
         desc_prefix = "   Beschrijving: "
         score_prefix = "   Overeenkomst Score: "
-        feature_prefix = "   Feature Score: "
     elif language == "fr":
         response_parts = [f"Trouvé {len(results)} recettes similaires:\n\n"]
         desc_prefix = "   Description: "
         score_prefix = "   Score de Correspondance: "
-        feature_prefix = "   Score de Caractéristique: "
     elif language == "de":
         response_parts = [f"Gefunden {len(results)} ähnliche Rezepte:\n\n"]
         desc_prefix = "   Beschreibung: "
         score_prefix = "   Ähnlichkeits-Score: "
-        feature_prefix = "   Feature-Score: "
     else:  # English
         response_parts = [f"Found {len(results)} similar recipes:\n\n"]
         desc_prefix = "   Description: "
         score_prefix = "   Similarity Score: "
-        feature_prefix = "   Feature Score: "
 
     for i, result in enumerate(results, 1):
         recipe_id = result.get("id", f"recipe_{i}")
         description = result.get("description", "")
         text_score = result.get("text_score", 0)
-        feature_score = result.get("feature_score")
         combined_score = result.get("combined_score", text_score)
 
         response_parts.append(f"{i}. Recipe ID: {recipe_id}")
@@ -933,10 +928,6 @@ def format_response_in_language(results: List[Dict[str, Any]], language: str) ->
             f"{desc_prefix}{description[:200]}{'...' if len(description) > 200 else ''}")
         score_pct = f"{combined_score * 100:.1f}".replace(".", ",")
         response_parts.append(f"{score_prefix}{score_pct}%")
-
-        if feature_score is not None:
-            feat_pct = f"{feature_score * 100:.1f}".replace(".", ",")
-            response_parts.append(f"{feature_prefix}{feat_pct}%")
 
         response_parts.append("")  # Empty line for readability
 
@@ -950,13 +941,11 @@ def format_response_in_language_with_ai(results: List[Dict[str, Any]], language:
         results_data = []
         for i, result in enumerate(results, 1):
             combined = result.get("combined_score", result.get("text_score", 0))
-            feat = result.get("feature_score")
             results_data.append({
                 "rank": i,
                 "id": result.get("id", f"recipe_{i}"),
                 "description": result.get("description", ""),
-                "similarity_score": f"{combined * 100:.1f}".replace(".", ",") + "%",
-                "feature_score": f"{feat * 100:.1f}".replace(".", ",") + "%" if feat is not None else None
+                "similarity_score": f"{combined * 100:.1f}".replace(".", ",") + "%"
             })
 
         # Create language-specific instructions
@@ -984,7 +973,7 @@ Recipe Results:
 
 Please format this as a natural, helpful response that:
 1. Announces how many similar recipes were found
-2. Lists each recipe with its description and similarity score
+2. Lists each recipe with its description and similarity score only (do NOT include any feature score)
 3. Uses appropriate language and tone for {lang_instruction}
 4. Keeps descriptions concise but informative
 5. Shows similarity scores as percentages (e.g. 57,2%) with a comma as decimal separator — they are already provided in that format
