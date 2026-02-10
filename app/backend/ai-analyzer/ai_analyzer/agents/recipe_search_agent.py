@@ -1181,74 +1181,45 @@ class RecipeSearchAgent:
             }
 
     def generate_followup_questions(self, search_results: List[Dict[str, Any]], original_query: str = "", language: str = "en") -> List[str]:
-        """Generate recipe-specific follow-up questions to help users find more similar recipes in the detected language"""
-        try:
-            # Language-specific instructions for AI
-            language_instructions = {
-                "en": "in English",
-                "nl": "in Dutch (Nederlands)",
-                "fr": "in French (Français)",
-                "de": "in German (Deutsch)",
-                "it": "in Italian (Italiano)",
-                "es": "in Spanish (Español)",
-                "pt": "in Portuguese (Português)",
-                "da": "in Danish (Dansk)"
-            }
-
-            lang_instruction = language_instructions.get(
-                language, "in English")
-
-            # Add AI-generated contextual questions based on the original query
-            if original_query:
-                try:
-                    ai_prompt = f"""Based on this recipe search query and the results found, generate 3-5 helpful follow-up questions {lang_instruction} that would help the user find more similar recipes.
-
-Original Query: "{original_query}"
-Number of Results Found: {len(search_results)}
-Has Results: {"Yes" if search_results else "No"}
-
-The user is looking for similar recipes in a food product database. Generate questions {lang_instruction} that help them:
-1. Refine their search with specific features
-2. Explore related product categories
-3. Specify technical requirements
-4. Find alternatives with similar characteristics
-
-Focus on food industry terms like: Color, Flavour, Stabilizer, Industry, Product Line, Dietary requirements, Processing methods, etc.
-
-IMPORTANT: Generate the questions {lang_instruction}. Use natural, conversational language appropriate for {lang_instruction}.
-
-Generate 3-5 specific, actionable questions that would help find more similar recipes."""
-
-                    ai_response = query_llm(
-                        ai_prompt, provider="openai")
-
-                    if ai_response:
-                        # Parse AI response into individual questions
-                        ai_questions = [q.strip() for q in ai_response.split(
-                            '\n') if q.strip() and '?' in q]
-                        # Return AI-generated questions
-                        return ai_questions[:5]
-
-                except Exception as e:
-                    logger.warning(
-                        f"Error generating AI follow-up questions: {e}")
-
-            # Fallback questions in English if no query provided
-            return [
-                "Would you like to refine your search with specific features?",
-                "Are you looking for recipes with similar characteristics?",
-                "Would you like to specify dietary requirements?",
-                "Do you want to explore different product categories?",
-                "Would you like to search by flavor profile?"
-            ]
-
-        except Exception as e:
-            logger.error(f"Error generating follow-up questions: {e}")
-            logger.exception("Detailed error:")
-            return [
-                "Would you like to refine your search with specific features?",
-                "Are you looking for recipes with similar characteristics?",
-                "Would you like to specify dietary requirements?",
-                "Do you want to explore different product categories?",
-                "Would you like to search by flavor profile?"
-            ]
+        """Generate recipe-specific follow-up questions - always returns the 3 specific top N questions in the detected language"""
+        # Translations for the follow-up questions
+        # The key format must be preserved for backend detection: "show me the next top N"
+        translations = {
+            "fr": [
+                "Montrez-moi les 10 meilleures recettes suivantes",
+                "Montrez-moi les 25 meilleures recettes suivantes",
+                "Montrez-moi les 50 meilleures recettes suivantes"
+            ],
+            "de": [
+                "Zeige mir die nächsten Top 10 Rezepte",
+                "Zeige mir die nächsten Top 25 Rezepte",
+                "Zeige mir die nächsten Top 50 Rezepte"
+            ],
+            "nl": [
+                "Toon mij de volgende top 10 recepten",
+                "Toon mij de volgende top 25 recepten",
+                "Toon mij de volgende top 50 recepten"
+            ],
+            "it": [
+                "Mostrami le prossime 10 migliori ricette",
+                "Mostrami le prossime 25 migliori ricette",
+                "Mostrami le prossime 50 migliori ricette"
+            ],
+            "es": [
+                "Muéstrame las siguientes 10 mejores recetas",
+                "Muéstrame las siguientes 25 mejores recetas",
+                "Muéstrame las siguientes 50 mejores recetas"
+            ],
+        }
+        
+        lang_code = language.lower()[:2] if language else "en"
+        
+        if lang_code in translations:
+            return translations[lang_code]
+        
+        # Default: English
+        return [
+            "Show me the next top 10 recipes",
+            "Show me the next top 25 recipes",
+            "Show me the next top 50 recipes"
+        ]

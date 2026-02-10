@@ -170,21 +170,23 @@ function App() {
   };
 
   
-  const handleSubmit = async () => {
-    if (!query.trim() || isProcessing) return;
+  const handleSubmit = async (overrideQuery) => {
+    const submitQuery = (typeof overrideQuery === 'string') ? overrideQuery : query;
+    if (!submitQuery.trim() || isProcessing) return;
     
     setIsProcessing(true);
+    setQuery(submitQuery);
     
     abortControllerRef.current = new AbortController();
     
     try {
       // Combine query with all uploaded documents' text if available
-      let finalQuery = query;
+      let finalQuery = submitQuery;
       if (uploadedDocuments.length > 0) {
         const documentsText = uploadedDocuments
           .map(doc => `[Extracted from document: ${doc.filename}]\n${doc.extractedText}`)
           .join('\n\n');
-        finalQuery = `${query}\n\n${documentsText}`;
+        finalQuery = `${submitQuery}\n\n${documentsText}`;
       }
       
       const response = await tokenManager.post('/query', {
@@ -205,7 +207,7 @@ function App() {
       if (!isRequestCanceled) {
         if (data.error) {
           const errorMessage = {
-            query,
+            query: submitQuery,
             error: data.error,
             reformulated_question: data.reformulated_question,
             followup_questions: data.followup_questions || [],
@@ -217,7 +219,7 @@ function App() {
           const responseText = data.result || data.response || "";
           setResult(responseText);
           const newMessage = {
-            query,
+            query: submitQuery,
             response: responseText,
             followup_questions: data.followup_questions || [],
             comparison_table: data.comparison_table || null,
@@ -273,6 +275,20 @@ function App() {
   };
 
   const handleQuestionClick = (question) => {
+    // Auto-submit for "top N recipes" follow-up questions (all languages)
+    const topNPatterns = [
+      "show me the next top",           // English
+      "montrez-moi les",                // French
+      "zeige mir die nächsten top",     // German
+      "toon mij de volgende top",       // Dutch
+      "mostrami le prossime",           // Italian
+      "muéstrame las siguientes",       // Spanish
+    ];
+    const isTopNQuestion = topNPatterns.some(p => question.toLowerCase().startsWith(p));
+    if (isTopNQuestion) {
+      handleSubmit(question);
+      return;
+    }
     setQuery(question);
     if (textareaRef.current) {
       textareaRef.current.focus();
@@ -637,11 +653,30 @@ function App() {
                 {/* Assistant response */}
                 {message.response && (
                   <div className="message assistant">
-                    <div className="message-content assistant-message" dangerouslySetInnerHTML={{
-                      __html: message.response
-                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                        .replace(/\n/g, '<br/>')
-                    }} />
+                    {/* Check if this is a recipe list (starts with numbered recipes) */}
+                    {message.response.match(/^\d+\.\s+[A-Z0-9_]+.*Score:/) ? (
+                      <div className="recipe-list-container">
+                        <div className="recipe-list-header">
+                          <h4>Top Recipes</h4>
+                        </div>
+                        <div className="recipe-list-content">
+                          {message.response.split('\n').map((line, idx) => {
+                            if (!line.trim()) return null;
+                            return (
+                              <div key={idx} className="recipe-list-item">
+                                {line}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="message-content assistant-message" dangerouslySetInnerHTML={{
+                        __html: message.response
+                          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                          .replace(/\n/g, '<br/>')
+                      }} />
+                    )}
                     
                     {/* Comparison Table - 60 Specified Fields Format */}
                     {message.comparison_table && message.comparison_table.has_data && (

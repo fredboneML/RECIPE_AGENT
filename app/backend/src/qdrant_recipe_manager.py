@@ -2155,12 +2155,17 @@ class QdrantRecipeManager:
             logger.info("Step 2: Refining candidates with feature-based similarity")
             search_metadata["query_features_count"] = len(query_features)
 
-            final_results = self._refine_by_features(
+            # Get all refined results (not just top_k)
+            all_refined_results = self._refine_by_features(
                 all_candidates, query_features, query_values, final_top_k,
                 original_query=original_query,
                 name_match_query=query_for_name_match,
                 numerical_filters=numerical_filters
             )
+            # Store all refined candidates in metadata for follow-up questions
+            search_metadata["all_refined_candidates"] = all_refined_results
+            # Return only top_k for the initial response
+            final_results = all_refined_results[:final_top_k]
             search_metadata["refinement_completed"] = True
 
         else:
@@ -2168,6 +2173,8 @@ class QdrantRecipeManager:
             # Sort by text_score when no features are provided
             all_candidates.sort(key=lambda x: x.get(
                 "text_score", 0.0), reverse=True)
+            # Store all candidates in metadata for follow-up questions
+            search_metadata["all_refined_candidates"] = all_candidates
             final_results = all_candidates[:final_top_k]
             search_metadata["refinement_completed"] = False
 
@@ -2744,12 +2751,13 @@ class QdrantRecipeManager:
                     f"(Text: {text_score:.4f}×{text_weight:.2f} + FeatSearch: {feature_search_score:.4f}×{feature_search_weight:.2f} + FeatMatch: {feature_score:.4f}×{feature_refinement_weight:.2f})"
                 )
 
-            return refined_results[:top_k]
+            # Return all refined results (not just top_k) so we can retrieve top N later
+            return refined_results
 
         except Exception as e:
             logger.error(f"Error in feature refinement: {e}")
             # Fallback to text results
-            return candidates[:top_k]
+            return candidates
 
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about the Qdrant collection"""

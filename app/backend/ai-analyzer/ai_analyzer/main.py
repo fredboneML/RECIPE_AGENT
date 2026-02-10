@@ -755,6 +755,7 @@ async def process_query(
     current_user: User = Depends(get_current_user),
     db_session: Session = Depends(get_db)
 ):
+    global recipe_search_agent, data_extractor_router_agent
     logger = logging.getLogger(__name__)
     logger.info(
         f"/api/query: Received request from user: {getattr(current_user, 'username', None)} role: {getattr(current_user, 'role', None)}")
@@ -802,13 +803,128 @@ async def process_query(
             logger.warning("/api/query: Query is missing in request body")
             raise HTTPException(status_code=400, detail="Query is required")
 
+        # Check if this is a follow-up question for top N recipes
+        # Support all translated versions of the follow-up questions
+        top_n = None
+        followup_keywords = [
+            # English
+            "show me the next top",
+            # French
+            "montrez-moi les", "meilleures recettes suivantes",
+            # German
+            "zeige mir die nächsten top", "nächsten top",
+            # Dutch
+            "toon mij de volgende top",
+            # Italian
+            "mostrami le prossime", "migliori ricette",
+            # Spanish
+            "muéstrame las siguientes", "mejores recetas",
+        ]
+        query_lower = query.strip().lower()
+        
+        is_followup = any(kw in query_lower for kw in followup_keywords)
+        if is_followup:
+            # Extract the number from the query
+            import re
+            numbers_found = re.findall(r'\b(10|25|50)\b', query_lower)
+            if numbers_found:
+                top_n = int(numbers_found[0])
+            
+            if top_n and conversation_id:
+                logger.info(f"/api/query: Detected follow-up question for top {top_n} recipes")
+                # Get previous message from this conversation to retrieve stored candidates
+                try:
+                    previous_messages = db_session.query(UserMemory)\
+                        .filter(
+                            UserMemory.conversation_id == conversation_id,
+                            UserMemory.user_id == str(current_user.id),
+                            UserMemory.is_active == True
+                        )\
+                        .order_by(UserMemory.message_order.desc())\
+                        .limit(1)\
+                        .all()
+                    
+                    if previous_messages:
+                        # Try to get stored metadata from previous response
+                        prev_response = previous_messages[0].response
+                        try:
+                            # Check if response contains stored metadata
+                            import json
+                            if prev_response and prev_response.strip().startswith("{"):
+                                prev_data = json.loads(prev_response)
+                                stored_metadata = prev_data.get("metadata", {})
+                                all_candidates = stored_metadata.get("all_refined_candidates", [])
+                                # Retrieve stored detected language
+                                prev_detected_language = prev_data.get("detected_language", "en")
+                                
+                                if all_candidates and len(all_candidates) > 0:
+                                    logger.info(f"/api/query: Found {len(all_candidates)} stored candidates, returning top {top_n} (language: {prev_detected_language})")
+                                    # Format as: "1. recipe_name - Material Short Text . Score: 0.5724"
+                                    recipe_list = []
+                                    for i, candidate in enumerate(all_candidates[:top_n], 1):
+                                        # Use recipe_name (e.g. 000000000000442938_AT10_01_L), fall back to metadata.recipe_name, then id
+                                        recipe_name = (
+                                            candidate.get("recipe_name") 
+                                            or candidate.get("metadata", {}).get("recipe_name")
+                                            or candidate.get("id", "Unknown")
+                                        )
+                                        combined_score = candidate.get("combined_score", 0.0)
+                                        
+                                        # Extract Material short text from features/values if available
+                                        material_short_text = ""
+                                        features = candidate.get("features", [])
+                                        values = candidate.get("values", [])
+                                        for feat, val in zip(features, values):
+                                            if feat and feat.lower() in ("material short text", "materialkurztext", "z_maktx"):
+                                                if val and str(val).strip() and str(val).strip() != "-":
+                                                    material_short_text = str(val).strip()
+                                                break
+                                        
+                                        if material_short_text:
+                                            recipe_list.append(f"{i}. {recipe_name} - {material_short_text} . Score: {combined_score:.4f}")
+                                        else:
+                                            recipe_list.append(f"{i}. {recipe_name} . Score: {combined_score:.4f}")
+                                    
+                                    response_text = "\n".join(recipe_list)
+                                    followup_qs = recipe_search_agent.generate_followup_questions([], "", prev_detected_language)
+                                    
+                                    # Store this response (as plain text, not JSON)
+                                    store_conversation(
+                                        db_session,
+                                        str(current_user.id),
+                                        conversation_id,
+                                        query,
+                                        response_text,
+                                        followup_questions=followup_qs
+                                    )
+                                    
+                                    return {
+                                        "response": response_text,
+                                        "conversation_id": conversation_id,
+                                        "followup_questions": followup_qs,
+                                        "search_results": all_candidates[:top_n],
+                                        "metadata": {"top_n": top_n, "total_candidates": len(all_candidates)},
+                                        "comparison_table": None
+                                    }
+                                else:
+                                    logger.warning(f"/api/query: No stored candidates found in previous message")
+                        except json.JSONDecodeError:
+                            logger.warning(f"/api/query: Previous response is not JSON, cannot retrieve candidates")
+                        except Exception as e:
+                            logger.warning(f"/api/query: Could not parse previous response metadata: {e}")
+                            logger.exception("Full error:")
+                    else:
+                        logger.warning(f"/api/query: No previous messages found in conversation {conversation_id}")
+                except Exception as e:
+                    logger.warning(f"/api/query: Could not retrieve previous message: {e}")
+                    logger.exception("Full error:")
+
         logger.info(f"/api/query: Processing recipe search query: '{query}'")
         if conversation_id:
             logger.info(
                 f"/api/query: Continuing conversation: {conversation_id}")
 
         # Check if recipe search agent is available
-        global recipe_search_agent, data_extractor_router_agent
         if not recipe_search_agent:
             logger.error("Recipe search agent not initialized")
             raise HTTPException(
@@ -899,12 +1015,23 @@ async def process_query(
         try:
             logger.info(
                 f"/api/query: Storing conversation with ID: {conversation_id}")
+            
+            # Store metadata (including all_refined_candidates) in response for follow-up questions
+            # We'll store it as JSON that we can parse later
+            import json
+            response_with_metadata = {
+                "text": response,
+                "metadata": metadata,  # This includes all_refined_candidates
+                "detected_language": detected_language  # Store language for follow-up questions
+            }
+            response_to_store = json.dumps(response_with_metadata)
+            
             store_conversation(
                 db_session,
                 str(current_user.id),  # Convert user ID to string
                 conversation_id,
                 query,
-                response,
+                response_to_store,
                 followup_questions=followup_questions
             )
             logger.info("/api/query: Conversation stored successfully")
@@ -925,8 +1052,9 @@ async def process_query(
                 logger.info(f"/api/query: field_definitions count: {len(comparison_table.get('field_definitions', []))}")
             logger.info(f"/api/query: comparison_table recipes count: {len(comparison_table.get('recipes', []))}")
         
+        # Return the original response text (not the JSON with metadata) to frontend
         return {
-            "response": response,
+            "response": response,  # This is the formatted text response
             "conversation_id": conversation_id,
             "followup_questions": followup_questions,
             "search_results": results,  # Include raw results for frontend
@@ -1307,8 +1435,28 @@ async def get_conversation(
                 "followup_questions": msg.followup_questions
             }
 
+            # Parse response - it might be stored as JSON with metadata
+            response_text = msg.response
+            if response_text:
+                try:
+                    import json
+                    # Try to parse as JSON if it starts with {
+                    if isinstance(response_text, str) and response_text.strip().startswith("{"):
+                        parsed = json.loads(response_text)
+                        if isinstance(parsed, dict):
+                            # Check for "response" field (new format) or "text" field (old format)
+                            if "response" in parsed:
+                                response_text = parsed["response"]
+                            elif "text" in parsed:
+                                response_text = parsed["text"]
+                            # If neither exists, keep the original JSON string
+                except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                    # Not JSON or parsing failed, use as-is
+                    logger.debug(f"Response is not JSON or parsing failed: {e}")
+                    pass
+            
             # Check if this is an error response
-            if msg.response and msg.response.startswith("Error") or "error" in msg.response.lower():
+            if response_text and (response_text.startswith("Error") or "error" in response_text.lower()):
                 # Detect language (Dutch vs English)
                 is_dutch = any(dutch_word in msg.query.lower() for dutch_word in
                                ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
@@ -1319,8 +1467,8 @@ async def get_conversation(
                 else:
                     message_data["response"] = "There was an issue answering this question. Please try again or ask a different question."
             else:
-                # Keep the original response
-                message_data["response"] = msg.response
+                # Use the parsed or original response
+                message_data["response"] = response_text
 
             processed_messages.append(message_data)
 
