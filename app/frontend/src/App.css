@@ -620,6 +620,48 @@
   background-color: #f44336;
 }
 
+/* Input Container with Drag and Drop */
+.input-container {
+  position: relative;
+}
+
+.input-container.drag-over {
+  border: 2px dashed #9f1a15;
+  border-radius: 10px;
+  background-color: rgba(159, 26, 21, 0.05);
+}
+
+.drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(159, 26, 21, 0.1);
+  border: 2px dashed #9f1a15;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.drag-overlay-content {
+  text-align: center;
+  color: #9f1a15;
+}
+
+.drag-icon {
+  font-size: 48px;
+  margin-bottom: 10px;
+}
+
+.drag-text {
+  font-size: 18px;
+  font-weight: 600;
+}
+
 /* Processing Message */
 .processing-message {
   position: absolute;

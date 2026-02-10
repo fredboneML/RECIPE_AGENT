@@ -20,6 +20,7 @@ function App() {
   const [selectedCountries, setSelectedCountries] = useState([]);
   const [selectedVersion, setSelectedVersion] = useState('P');
   const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   
   const navigate = useNavigate();
   const textareaRef = useRef(null);
@@ -27,6 +28,7 @@ function App() {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const countryDropdownRef = useRef(null);
+  const dropZoneRef = useRef(null);
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -382,10 +384,103 @@ function App() {
         const docNames = updated.map(d => d.filename);
         setQuery(`[Documents uploaded: ${docNames.join(', ')}]\n\n`);
       } else {
-    setQuery('');
+        setQuery('');
       }
       return updated;
     });
+  };
+
+  // Drag and drop handlers
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set dragging to false if we're leaving the drop zone itself
+    if (!dropZoneRef.current?.contains(e.relatedTarget)) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length) return;
+
+    // Check if adding these files would exceed the limit
+    const remainingSlots = MAX_DOCUMENTS - uploadedDocuments.length;
+    if (remainingSlots <= 0) {
+      alert(`Maximum ${MAX_DOCUMENTS} documents allowed. Please remove some documents first.`);
+      return;
+    }
+
+    // Only process up to the remaining slots
+    const filesToProcess = files.slice(0, remainingSlots);
+    if (files.length > remainingSlots) {
+      alert(`Only ${remainingSlots} more document(s) can be added. Processing first ${remainingSlots} file(s).`);
+    }
+
+    // Process the dropped files using the same logic as file upload
+    setIsUploading(true);
+    
+    try {
+      const newDocuments = [];
+      
+      for (const file of filesToProcess) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await tokenManager.post('/upload-document', formData);
+
+        if (!response.ok) {
+          let errorMessage = 'Failed to upload document';
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
+          } catch (e) {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          }
+          throw new Error(`${file.name}: ${errorMessage}`);
+        }
+
+        const data = await response.json();
+        
+        if (data.success) {
+          newDocuments.push({
+            filename: data.filename,
+            extractedText: data.extracted_text
+          });
+        }
+      }
+      
+      // Add new documents to existing ones
+      setUploadedDocuments(prev => [...prev, ...newDocuments]);
+        
+      // Update query with all document names
+      const allDocNames = [...uploadedDocuments, ...newDocuments].map(d => d.filename);
+      setQuery(`[Documents uploaded: ${allDocNames.join(', ')}]\n\n`);
+        
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    } catch (error) {
+      console.error('Error uploading dropped files:', error);
+      alert(`Error uploading document: ${error.message}`);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleCountryToggle = (countryName) => {
@@ -686,7 +781,14 @@ function App() {
             </div>
           )}
 
-          <div className="input-container">
+          <div 
+            className={`input-container ${isDragging ? 'drag-over' : ''}`}
+            ref={dropZoneRef}
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             {uploadedDocuments.length > 0 && (
               <div className="uploaded-documents-container">
                 {uploadedDocuments.map((doc, index) => (
@@ -706,6 +808,14 @@ function App() {
                     {uploadedDocuments.length}/{MAX_DOCUMENTS} documents
                   </div>
                 )}
+              </div>
+            )}
+            {isDragging && (
+              <div className="drag-overlay">
+                <div className="drag-overlay-content">
+                  <div className="drag-icon">📄</div>
+                  <div className="drag-text">Drop files here to upload</div>
+                </div>
               </div>
             )}
             <div className="query-input">
