@@ -693,6 +693,11 @@ function App() {
                                   {message.comparison_table.recipes.map((recipe, idx) => (
                                     <th key={idx} className="recipe-value-header">
                                       {idx + 1}. {recipe.recipe_name || recipe.recipe_id}
+                                      {recipe.differences && recipe.differences.length > 0 && (
+                                        <span className="diff-count-badge" title={`${recipe.differences.length} field(s) differ from search criteria`}>
+                                          Δ{recipe.differences.length}
+                                        </span>
+                                      )}
                                     </th>
                                   ))}
                                 </tr>
@@ -706,13 +711,22 @@ function App() {
                                     <tr key={fieldIdx} className={hasAnyValue ? 'has-value' : 'no-value'}>
                                       <td className="field-code sticky-col">{field.code}</td>
                                       <td className="field-name sticky-col-2">{field.display_name}</td>
-                                      {message.comparison_table.recipes.map((recipe, recipeIdx) => (
-                                        <td key={recipeIdx} className="recipe-value">
-                                          {recipe.values && recipe.values[fieldIdx] 
-                                            ? String(recipe.values[fieldIdx])
-                                            : '-'}
-                                        </td>
-                                      ))}
+                                      {message.comparison_table.recipes.map((recipe, recipeIdx) => {
+                                        const diff = recipe.differences && recipe.differences.find(d => d.field_index === fieldIdx);
+                                        return (
+                                          <td key={recipeIdx} className={`recipe-value${diff ? ' value-differs' : ''}`}
+                                              title={diff ? `Expected: ${diff.expected}` : ''}>
+                                            {recipe.values && recipe.values[fieldIdx] 
+                                              ? String(recipe.values[fieldIdx])
+                                              : '-'}
+                                            {diff && (
+                                              <span className="diff-indicator">
+                                                <span className="diff-expected">⊘ {diff.expected}</span>
+                                              </span>
+                                            )}
+                                          </td>
+                                        );
+                                      })}
                                     </tr>
                                   );
                                 })}
@@ -752,6 +766,9 @@ function App() {
                         <div className="table-legend">
                           <span className="legend-has-value">● Fields with values</span>
                           <span className="legend-no-value">○ Fields without values</span>
+                          {message.comparison_table.has_constraints && (
+                            <span className="legend-diff">⊘ Differs from search criteria</span>
+                          )}
                         </div>
                       </div>
                     )}

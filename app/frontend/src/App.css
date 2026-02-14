@@ -1091,3 +1091,46 @@
     border: 1px solid #dee2e6;
     border-radius: 6px;
 }
+
+/* --- Constraint difference highlighting --- */
+
+/* Badge in recipe column header showing count of differences */
+.diff-count-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+    border-radius: 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+    vertical-align: middle;
+}
+
+/* Cell where value differs from the extracted constraint */
+.comparison-table.structured td.value-differs {
+    background-color: #fff3cd;
+    border-left: 3px solid #ffc107;
+    position: relative;
+}
+
+/* Inline indicator showing expected value */
+.diff-indicator {
+    display: block;
+    margin-top: 3px;
+    font-size: 0.78em;
+    line-height: 1.3;
+}
+
+.diff-expected {
+    color: #856404;
+    font-style: italic;
+    white-space: nowrap;
+}
+
+/* Legend entry for differences */
+.table-legend .legend-diff {
+    color: #856404;
+    font-weight: 500;
+}

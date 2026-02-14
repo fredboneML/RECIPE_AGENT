@@ -804,22 +804,166 @@ SPECIFIED_FIELDS_60 = [
 ]
 
 
-def create_comparison_table(results: List[Dict[str, Any]], detected_language: str = "en") -> Dict[str, Any]:
+def _compute_recipe_differences(
+    recipe_raw_values: Dict[str, str],
+    numerical_filters: Optional[Dict[str, Dict[str, Any]]],
+    categorical_filters: Optional[Dict[str, Dict[str, Any]]],
+    field_display_names: Dict[str, str],
+    field_index_map: Dict[str, int]
+) -> List[Dict[str, Any]]:
+    """
+    Compute the differences between extracted constraints and a recipe's actual values.
+    
+    Args:
+        recipe_raw_values: Dict mapping field code to the raw (untranslated) value string
+        numerical_filters: Extracted numerical constraints (e.g. {"Z_BRIX": {"gte": 31.99, "lte": 32.01}})
+        categorical_filters: Extracted categorical constraints (e.g. {"Z_INH04": {"value": "No"}})
+        field_display_names: Dict mapping field code to translated display name
+        field_index_map: Dict mapping field code to index position in field_definitions
+    
+    Returns:
+        List of diffs: [{code, field_name, expected, actual, field_index}]
+    """
+    differences = []
+    
+    # Check numerical constraints
+    if numerical_filters:
+        for code, range_spec in numerical_filters.items():
+            raw_val = recipe_raw_values.get(code, "").strip()
+            if not raw_val:
+                # No value in recipe for this field - that's a difference
+                differences.append({
+                    "code": code,
+                    "field_name": field_display_names.get(code, code),
+                    "expected": _format_numerical_expected(range_spec),
+                    "actual": "-",
+                    "field_index": field_index_map.get(code, -1),
+                    "type": "numerical"
+                })
+                continue
+            try:
+                actual_num = float(raw_val.replace(",", "."))
+                gte = range_spec.get("gte")
+                lte = range_spec.get("lte")
+                gt = range_spec.get("gt")
+                lt = range_spec.get("lt")
+                
+                is_match = True
+                if gte is not None and actual_num < gte:
+                    is_match = False
+                if lte is not None and actual_num > lte:
+                    is_match = False
+                if gt is not None and actual_num <= gt:
+                    is_match = False
+                if lt is not None and actual_num >= lt:
+                    is_match = False
+                
+                if not is_match:
+                    differences.append({
+                        "code": code,
+                        "field_name": field_display_names.get(code, code),
+                        "expected": _format_numerical_expected(range_spec),
+                        "actual": raw_val,
+                        "field_index": field_index_map.get(code, -1),
+                        "type": "numerical"
+                    })
+            except (ValueError, TypeError):
+                # Can't parse as number, treat as difference
+                differences.append({
+                    "code": code,
+                    "field_name": field_display_names.get(code, code),
+                    "expected": _format_numerical_expected(range_spec),
+                    "actual": raw_val,
+                    "field_index": field_index_map.get(code, -1),
+                    "type": "numerical"
+                })
+    
+    # Check categorical constraints
+    if categorical_filters:
+        for code, match_spec in categorical_filters.items():
+            expected_value = match_spec.get("value", "")
+            raw_val = recipe_raw_values.get(code, "").strip()
+            
+            if not raw_val:
+                differences.append({
+                    "code": code,
+                    "field_name": field_display_names.get(code, code),
+                    "expected": expected_value,
+                    "actual": "-",
+                    "field_index": field_index_map.get(code, -1),
+                    "type": "categorical"
+                })
+                continue
+            
+            # Case-insensitive comparison
+            if raw_val.lower() != expected_value.lower():
+                differences.append({
+                    "code": code,
+                    "field_name": field_display_names.get(code, code),
+                    "expected": expected_value,
+                    "actual": raw_val,
+                    "field_index": field_index_map.get(code, -1),
+                    "type": "categorical"
+                })
+    
+    return differences
+
+
+def _format_numerical_expected(range_spec: Dict[str, Any]) -> str:
+    """Format a numerical range spec into a human-readable string."""
+    parts = []
+    gte = range_spec.get("gte")
+    lte = range_spec.get("lte")
+    gt = range_spec.get("gt")
+    lt = range_spec.get("lt")
+    
+    # If gte and lte are very close, show as single value
+    if gte is not None and lte is not None and abs(lte - gte) < 0.1:
+        mid = (gte + lte) / 2
+        # Format nicely: remove unnecessary decimals
+        if mid == int(mid):
+            return str(int(mid))
+        return f"{mid:.1f}"
+    
+    if gte is not None:
+        parts.append(f"≥{gte}")
+    if gt is not None:
+        parts.append(f">{gt}")
+    if lte is not None:
+        parts.append(f"≤{lte}")
+    if lt is not None:
+        parts.append(f"<{lt}")
+    
+    return ", ".join(parts) if parts else "?"
+
+
+def create_comparison_table(
+    results: List[Dict[str, Any]],
+    detected_language: str = "en",
+    numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+    categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None
+) -> Dict[str, Any]:
     """
     Create a comparison table structure for the top 3 recipes.
     Uses the 60 specified fields in the correct order.
     Translates field names and values to match the detected language of the user's query.
     Translations are cached in the database for performance.
 
+    Also computes per-recipe differences between the extracted constraints and the actual
+    recipe field values, so the UI can highlight mismatches.
+
     Args:
         results: List of recipe search results
         detected_language: The language detected from the user's query (e.g., "fr", "de", "en")
+        numerical_filters: Extracted numerical constraints (e.g. {"Z_BRIX": {"gte": 31.99, "lte": 32.01}})
+        categorical_filters: Extracted categorical constraints (e.g. {"Z_INH04": {"value": "No"}})
 
     Returns:
         Dictionary with table structure containing:
         - field_definitions: List of {code, name_en, name_de, display_name} for the 60 fields in order
-        - recipes: List of recipe data with values for each field
+        - recipes: List of recipe data with values for each field and differences from constraints
         - has_data: Boolean
+        - extracted_constraints: Summary of constraints used for comparison
     """
     try:
         # Take only top 3 recipes
@@ -846,13 +990,34 @@ def create_comparison_table(results: List[Dict[str, Any]], detected_language: st
                 "display_name": display_name
             })
 
+        # Build field_index_map and field_display_names for difference computation
+        field_index_map = {}
+        field_display_names = {}
+        for idx, (code, name_en, name_de) in enumerate(SPECIFIED_FIELDS_60):
+            field_index_map[code] = idx
+            field_display_names[code] = translated_field_names.get(code, name_en)
+
+        # Check if we have any constraints to compare against
+        has_constraints = bool(numerical_filters) or bool(categorical_filters)
+
         # Initialize table structure with new format
         table_data = {
             "field_definitions": field_definitions,
             "recipes": [],
             "has_data": len(top_recipes) > 0,
-            "detected_language": detected_language
+            "detected_language": detected_language,
+            "has_constraints": has_constraints
         }
+
+        # If we have constraints, also include a summary of the extracted constraints
+        # so the frontend knows what was searched for
+        if has_constraints:
+            constraint_codes = set()
+            if numerical_filters:
+                constraint_codes.update(numerical_filters.keys())
+            if categorical_filters:
+                constraint_codes.update(categorical_filters.keys())
+            table_data["constrained_field_codes"] = list(constraint_codes)
 
         # Process each recipe
         for recipe in top_recipes:
@@ -873,7 +1038,9 @@ def create_comparison_table(results: List[Dict[str, Any]], detected_language: st
             numerical = payload.get("numerical", {})
 
             # Build values list for this recipe following the 60-field order
+            # Also build raw values map (untranslated) for difference computation
             recipe_values = []
+            raw_values_map = {}
             for code, name_en, name_de in SPECIFIED_FIELDS_60:
                 value = ""
                 
@@ -895,6 +1062,18 @@ def create_comparison_table(results: List[Dict[str, Any]], detected_language: st
                     value = str(feature_map[code])
 
                 recipe_values.append(value)
+                raw_values_map[code] = value
+
+            # Compute differences BEFORE translating values (use raw EN/DE values)
+            differences = []
+            if has_constraints:
+                differences = _compute_recipe_differences(
+                    raw_values_map,
+                    numerical_filters,
+                    categorical_filters,
+                    field_display_names,
+                    field_index_map
+                )
 
             # Translate values if target language is not English or German
             # (Values in DB are typically in EN or DE)
@@ -920,6 +1099,7 @@ def create_comparison_table(results: List[Dict[str, Any]], detected_language: st
                 "recipe_name": recipe_name,
                 "recipe_id": recipe_id,
                 "values": recipe_values,  # Values in same order as field_definitions (translated if needed)
+                "differences": differences,  # Differences from extracted constraints
                 # Keep characteristics for backward compatibility
                 "characteristics": [
                     {
@@ -930,6 +1110,9 @@ def create_comparison_table(results: List[Dict[str, Any]], detected_language: st
                     for i, fd in enumerate(field_definitions)
                 ]
             }
+
+            if differences:
+                logger.info(f"Recipe {recipe_name}: {len(differences)} field(s) differ from extracted constraints")
 
             table_data["recipes"].append(recipe_table_data)
 
@@ -1188,8 +1371,11 @@ class RecipeSearchAgent:
                 results, detected_language, description)
 
             # Create comparison table for top 3 recipes with translation to detected language
+            # Pass constraints so we can compute per-recipe differences
             comparison_table = create_comparison_table(
-                results, detected_language)
+                results, detected_language,
+                numerical_filters=numerical_filters,
+                categorical_filters=categorical_filters)
 
             logger.info(f"Found {len(results)} recipes")
             return results, metadata, formatted_response, detected_language, comparison_table
