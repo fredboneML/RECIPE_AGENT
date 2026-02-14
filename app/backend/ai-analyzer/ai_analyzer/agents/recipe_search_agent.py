@@ -899,7 +899,15 @@ def _compute_recipe_differences(
                 })
                 continue
             try:
-                actual_num = float(raw_val.replace(",", "."))
+                # Strip common suffixes (%, °C, etc.) and whitespace before parsing
+                numeric_str = raw_val.replace(",", ".")
+                # Remove known unit suffixes that may be appended to numeric values
+                for suffix in ('%', '°C', '°c', ' %', ' °C', ' °c', 'mPa·s', 'mPas', 'cP'):
+                    if numeric_str.endswith(suffix):
+                        numeric_str = numeric_str[:-len(suffix)]
+                        break
+                numeric_str = numeric_str.strip()
+                actual_num = float(numeric_str)
                 gte = range_spec.get("gte")
                 lte = range_spec.get("lte")
                 gt = range_spec.get("gt")
