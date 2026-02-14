@@ -4,6 +4,7 @@ from qdrant_recipe_manager import QdrantRecipeManager
 import os
 import logging
 import json
+import csv
 import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple, Union
 import sys
@@ -497,6 +498,51 @@ def save_field_translations_to_cache(target_language: str, translations: Dict[st
         return False
 
 
+def _load_official_field_translations() -> Dict[str, Dict[str, str]]:
+    """
+    Load official translations for field names from code_translation.csv.
+    This file contains authoritative translations in EN, DE, ES, PL, FR.
+    
+    Returns:
+        Dictionary mapping Z-code to {en: str, de: str, es: str, pl: str, fr: str}
+    """
+    translations = {}
+    # Relative path from this file: agents/ -> ai_analyzer/ -> ai-analyzer/ -> backend/
+    csv_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'code_translation.csv')
+    csv_path = os.path.normpath(csv_path)
+    # Fallback to Docker container absolute path
+    if not os.path.exists(csv_path):
+        csv_path = '/usr/src/app/code_translation.csv'
+    
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                z_code = row.get('Merkmalname', '').strip()
+                if z_code:
+                    translations[z_code] = {
+                        'en': row.get('Description (EN)', '').strip(),
+                        'de': row.get('Description (DE)', '').strip(),
+                        'es': row.get('Description (ES)', '').strip(),
+                        'pl': row.get('Description (PL)', '').strip(),
+                        'fr': row.get('Description (FR)', '').strip(),
+                    }
+        logger.info(f"Loaded official field translations for {len(translations)} Z-codes from {csv_path}")
+    except Exception as e:
+        logger.warning(f"Could not load official field translations from {csv_path}: {e}")
+    
+    return translations
+
+
+# Official translations loaded at module level from code_translation.csv
+# These are used for the "Field Name" column in the comparison table
+# for languages: EN, DE, ES, PL, FR. Other languages still use LLM.
+OFFICIAL_FIELD_TRANSLATIONS = _load_official_field_translations()
+
+# Languages that have official translations in code_translation.csv
+OFFICIAL_TRANSLATION_LANGUAGES = {"en", "de", "es", "pl", "fr"}
+
+
 def translate_field_names_with_llm(field_names: List[Tuple[str, str, str]], target_language: str) -> Dict[str, str]:
     """
     Translate the 60 field names to the target language using LLM.
@@ -574,7 +620,12 @@ No explanations, just the JSON object:"""
 
 def get_translated_field_names(field_definitions: List[Tuple[str, str, str]], target_language: str) -> Dict[str, str]:
     """
-    Get translated field names for the target language, using cache when available.
+    Get translated field names for the target language.
+    
+    For languages with official translations in code_translation.csv (EN, DE, ES, PL, FR),
+    uses those authoritative translations directly. No LLM or cache needed.
+    
+    For other languages (e.g., PT, IT, NL, DA), checks cache first, then falls back to LLM.
     
     Args:
         field_definitions: List of (code, english_name, german_name) tuples
@@ -583,11 +634,18 @@ def get_translated_field_names(field_definitions: List[Tuple[str, str, str]], ta
     Returns:
         Dictionary mapping field codes to display names in target language
     """
-    # For English and German, we have predefined translations
-    if target_language == "en":
-        return {code: en for code, en, de in field_definitions}
-    elif target_language == "de":
-        return {code: de for code, en, de in field_definitions}
+    # For languages with official translations in code_translation.csv, use them directly
+    if target_language in OFFICIAL_TRANSLATION_LANGUAGES and OFFICIAL_FIELD_TRANSLATIONS:
+        translations = {}
+        for code, en, de in field_definitions:
+            official = OFFICIAL_FIELD_TRANSLATIONS.get(code, {})
+            translated = official.get(target_language, '').strip()
+            # Fallback: if official translation is empty or '#N/A', use English
+            if not translated or translated == '#N/A':
+                translated = en
+            translations[code] = translated
+        logger.info(f"Using official translations from code_translation.csv for {target_language}")
+        return translations
     
     # For other languages, check cache first
     cached = get_cached_field_translations(target_language)
@@ -770,17 +828,16 @@ def create_comparison_table(results: List[Dict[str, Any]], detected_language: st
         if not top_recipes:
             return None
 
-        # Get translated field names (uses cache for non-en/de languages)
+        # Get translated field names
+        # For EN, DE, ES, PL, FR: uses official translations from code_translation.csv
+        # For other languages: uses cached LLM translations
         translated_field_names = get_translated_field_names(SPECIFIED_FIELDS_60, detected_language)
         
         # Build field definitions list (60 fields in order) with translations
         field_definitions = []
         for code, name_en, name_de in SPECIFIED_FIELDS_60:
-            # Use translated name from cache/LLM, or fallback to en/de
-            if detected_language in ("en", "de"):
-                display_name = name_de if detected_language == "de" else name_en
-            else:
-                display_name = translated_field_names.get(code, name_en)
+            # Use translated name from official CSV or cache/LLM, fallback to English
+            display_name = translated_field_names.get(code, name_en)
             
             field_definitions.append({
                 "code": code,
