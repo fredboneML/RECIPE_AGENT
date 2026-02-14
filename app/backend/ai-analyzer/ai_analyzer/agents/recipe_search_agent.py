@@ -804,6 +804,63 @@ SPECIFIED_FIELDS_60 = [
 ]
 
 
+def _is_boolean_match(actual_value: str, expected_value: str) -> bool:
+    """
+    Check if a recipe field value semantically matches a Yes/No constraint.
+    
+    Many spec_fields store descriptive text instead of simple Yes/No:
+      - "Saccharose" instead of "Yes" for the Saccharose field
+      - "Genfrei" instead of "No" for the Contains GMO field
+      - "-" or "" for missing data (treated as absence / "No")
+    
+    Matching rules:
+      - For "Yes" constraints: any non-empty value that is NOT an explicit "No" equivalent
+        is considered a match (e.g. "Saccharose", "Genfrei", "Mit Allergenen" all match "Yes")
+      - For "No" constraints: empty strings, "-", and explicit negatives ("No", "Nein", etc.)
+        are considered a match. Additionally, descriptive text containing negative indicators
+        like "frei", "kein", "ohne", "nicht" is also treated as "No".
+    
+    Returns:
+        True if the actual value semantically matches the expected constraint value.
+    """
+    actual = actual_value.strip() if actual_value else ""
+    expected = expected_value.strip() if expected_value else ""
+    
+    actual_lower = actual.lower()
+    expected_lower = expected.lower()
+    
+    # Direct case-insensitive match
+    if actual_lower == expected_lower:
+        return True
+    
+    # Known absence/negative values
+    NO_EQUIVALENTS = {'no', 'nein', 'non', 'false', '0', '', '-'}
+    # Known presence/positive values
+    YES_EQUIVALENTS = {'yes', 'ja', 'oui', 'si', 'sì', 'true', '1'}
+    
+    if expected_lower in YES_EQUIVALENTS:
+        # Constraint expects "Yes" (presence/positive):
+        # Any non-empty value that isn't explicitly "No" counts as a match.
+        # E.g. "Saccharose" for Z_INH03 means saccharose IS present → matches "Yes"
+        return actual_lower not in NO_EQUIVALENTS
+    
+    if expected_lower in NO_EQUIVALENTS:
+        # Constraint expects "No" (absence/negative):
+        # Explicit negatives and empty values match.
+        if actual_lower in NO_EQUIVALENTS:
+            return True
+        # Also check for German/English negative indicators in descriptive text
+        # e.g. "Genfrei" (GMO-free), "Süßstofffrei" (sweetener-free), "ohne Konservierung"
+        negative_indicators = ['frei', 'kein', 'nicht', 'ohne', 'free', 'without', 'no ']
+        for neg in negative_indicators:
+            if neg in actual_lower:
+                return True
+        return False
+    
+    # Non-boolean comparison: exact case-insensitive match only
+    return False
+
+
 def _compute_recipe_differences(
     recipe_raw_values: Dict[str, str],
     numerical_filters: Optional[Dict[str, Dict[str, Any]]],
@@ -878,33 +935,26 @@ def _compute_recipe_differences(
                     "type": "numerical"
                 })
     
-    # Check categorical constraints
+    # Check categorical constraints using boolean-aware comparison
     if categorical_filters:
         for code, match_spec in categorical_filters.items():
             expected_value = match_spec.get("value", "")
             raw_val = recipe_raw_values.get(code, "").strip()
             
-            if not raw_val:
-                differences.append({
-                    "code": code,
-                    "field_name": field_display_names.get(code, code),
-                    "expected": expected_value,
-                    "actual": "-",
-                    "field_index": field_index_map.get(code, -1),
-                    "type": "categorical"
-                })
-                continue
+            # Use boolean-aware matching for Yes/No type constraints
+            # This handles cases like "Saccharose" matching "Yes" for Z_INH03,
+            # or "-" matching "No" for Z_KNOGM
+            if _is_boolean_match(raw_val, expected_value):
+                continue  # Values match semantically, no difference
             
-            # Case-insensitive comparison
-            if raw_val.lower() != expected_value.lower():
-                differences.append({
-                    "code": code,
-                    "field_name": field_display_names.get(code, code),
-                    "expected": expected_value,
-                    "actual": raw_val,
-                    "field_index": field_index_map.get(code, -1),
-                    "type": "categorical"
-                })
+            differences.append({
+                "code": code,
+                "field_name": field_display_names.get(code, code),
+                "expected": expected_value,
+                "actual": raw_val if raw_val else "-",
+                "field_index": field_index_map.get(code, -1),
+                "type": "categorical"
+            })
     
     return differences
 
