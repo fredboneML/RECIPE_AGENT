@@ -5,6 +5,7 @@ import os
 import logging
 import json
 import csv
+import re
 import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple, Union
 import sys
@@ -430,10 +431,10 @@ Respond with only the language code, nothing else."""
 def get_cached_field_translations(target_language: str) -> Optional[Dict[str, str]]:
     """
     Get cached field name translations for the 60 specified fields.
-    
+
     Args:
         target_language: The target language code (e.g., "fr", "it", "es")
-    
+
     Returns:
         Dictionary mapping field codes to translated names, or None if not cached
     """
@@ -441,21 +442,22 @@ def get_cached_field_translations(target_language: str) -> Optional[Dict[str, st
         engine = get_db_engine()
         if not engine:
             return None
-        
+
         with engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT translated_fields 
                 FROM field_name_translation_cache 
                 WHERE target_language = :target_language
             """), {"target_language": target_language})
-            
+
             row = result.fetchone()
             if row:
-                logger.info(f"Found cached field translations for {target_language}")
+                logger.info(
+                    f"Found cached field translations for {target_language}")
                 return row[0]  # JSONB is automatically parsed
-        
+
         return None
-    
+
     except Exception as e:
         logger.error(f"Error retrieving cached field translations: {e}")
         return None
@@ -464,11 +466,11 @@ def get_cached_field_translations(target_language: str) -> Optional[Dict[str, st
 def save_field_translations_to_cache(target_language: str, translations: Dict[str, str]) -> bool:
     """
     Save field name translations to cache.
-    
+
     Args:
         target_language: The target language code
         translations: Dictionary mapping field codes to translated names
-    
+
     Returns:
         True if saved successfully, False otherwise
     """
@@ -476,7 +478,7 @@ def save_field_translations_to_cache(target_language: str, translations: Dict[st
         engine = get_db_engine()
         if not engine:
             return False
-        
+
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO field_name_translation_cache (target_language, translated_fields)
@@ -489,10 +491,10 @@ def save_field_translations_to_cache(target_language: str, translations: Dict[st
                 "target_language": target_language,
                 "translated_fields": json.dumps(translations)
             })
-        
+
         logger.info(f"Saved field translations for {target_language} to cache")
         return True
-    
+
     except Exception as e:
         logger.error(f"Error saving field translations to cache: {e}")
         return False
@@ -502,18 +504,19 @@ def _load_official_field_translations() -> Dict[str, Dict[str, str]]:
     """
     Load official translations for field names from code_translation.csv.
     This file contains authoritative translations in EN, DE, ES, PL, FR.
-    
+
     Returns:
         Dictionary mapping Z-code to {en: str, de: str, es: str, pl: str, fr: str}
     """
     translations = {}
     # Relative path from this file: agents/ -> ai_analyzer/ -> ai-analyzer/ -> backend/
-    csv_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'code_translation.csv')
+    csv_path = os.path.join(os.path.dirname(__file__),
+                            '..', '..', '..', 'code_translation.csv')
     csv_path = os.path.normpath(csv_path)
     # Fallback to Docker container absolute path
     if not os.path.exists(csv_path):
         csv_path = '/usr/src/app/code_translation.csv'
-    
+
     try:
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
@@ -527,10 +530,12 @@ def _load_official_field_translations() -> Dict[str, Dict[str, str]]:
                         'pl': row.get('Description (PL)', '').strip(),
                         'fr': row.get('Description (FR)', '').strip(),
                     }
-        logger.info(f"Loaded official field translations for {len(translations)} Z-codes from {csv_path}")
+        logger.info(
+            f"Loaded official field translations for {len(translations)} Z-codes from {csv_path}")
     except Exception as e:
-        logger.warning(f"Could not load official field translations from {csv_path}: {e}")
-    
+        logger.warning(
+            f"Could not load official field translations from {csv_path}: {e}")
+
     return translations
 
 
@@ -546,11 +551,11 @@ OFFICIAL_TRANSLATION_LANGUAGES = {"en", "de", "es", "pl", "fr"}
 def translate_field_names_with_llm(field_names: List[Tuple[str, str, str]], target_language: str) -> Dict[str, str]:
     """
     Translate the 60 field names to the target language using LLM.
-    
+
     Args:
         field_names: List of tuples (code, english_name, german_name)
         target_language: Target language code (e.g., "fr", "it", "es")
-    
+
     Returns:
         Dictionary mapping field codes to translated names
     """
@@ -564,15 +569,15 @@ def translate_field_names_with_llm(field_names: List[Tuple[str, str, str]], targ
         "nl": "Dutch",
         "da": "Danish"
     }
-    
+
     target_lang_name = language_names.get(target_language, "English")
-    
+
     # Build a list of fields to translate
     fields_to_translate = [
         {"code": code, "english": en, "german": de}
         for code, en, de in field_names
     ]
-    
+
     try:
         prompt = f"""Translate the following food/recipe industry field names to {target_lang_name}.
 
@@ -597,23 +602,25 @@ Respond with ONLY a JSON object mapping the code to the translated name. Example
 No explanations, just the JSON object:"""
 
         response = query_llm(prompt, provider="openai")
-        
+
         if response:
             # Clean response
             response_clean = response.strip()
             if response_clean.startswith("```"):
                 lines = response_clean.split("\n")
-                response_clean = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-            
+                response_clean = "\n".join(
+                    lines[1:-1] if lines[-1] == "```" else lines[1:])
+
             translations = json.loads(response_clean)
-            logger.info(f"Successfully translated {len(translations)} field names to {target_lang_name}")
+            logger.info(
+                f"Successfully translated {len(translations)} field names to {target_lang_name}")
             return translations
-    
+
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing field name translation response: {e}")
     except Exception as e:
         logger.error(f"Error translating field names: {e}")
-    
+
     # Return English names as fallback
     return {code: en for code, en, de in field_names}
 
@@ -621,16 +628,16 @@ No explanations, just the JSON object:"""
 def get_translated_field_names(field_definitions: List[Tuple[str, str, str]], target_language: str) -> Dict[str, str]:
     """
     Get translated field names for the target language.
-    
+
     For languages with official translations in code_translation.csv (EN, DE, ES, PL, FR),
     uses those authoritative translations directly. No LLM or cache needed.
-    
+
     For other languages (e.g., PT, IT, NL, DA), checks cache first, then falls back to LLM.
-    
+
     Args:
         field_definitions: List of (code, english_name, german_name) tuples
         target_language: Target language code
-    
+
     Returns:
         Dictionary mapping field codes to display names in target language
     """
@@ -644,66 +651,72 @@ def get_translated_field_names(field_definitions: List[Tuple[str, str, str]], ta
             if not translated or translated == '#N/A':
                 translated = en
             translations[code] = translated
-        logger.info(f"Using official translations from code_translation.csv for {target_language}")
+        logger.info(
+            f"Using official translations from code_translation.csv for {target_language}")
         return translations
-    
+
     # For other languages, check cache first
     cached = get_cached_field_translations(target_language)
     if cached:
         logger.info(f"Using cached field translations for {target_language}")
         return cached
-    
+
     # Translate using LLM
-    translations = translate_field_names_with_llm(field_definitions, target_language)
-    
+    translations = translate_field_names_with_llm(
+        field_definitions, target_language)
+
     # Save to cache for future use
     if translations:
         save_field_translations_to_cache(target_language, translations)
-    
+
     return translations
 
 
 def translate_comparison_values(values: List[str], target_language: str) -> List[str]:
     """
     Translate recipe values to the target language if needed.
-    
+
     Args:
         values: List of recipe field values
         target_language: Target language code
-    
+
     Returns:
         List of translated values
     """
     # Skip translation for English (most values are already in English)
     if target_language == "en":
         return values
-    
+
     # Filter non-empty, non-numeric values that might need translation
     values_to_translate = []
     indices_to_translate = []
-    
+
     for i, val in enumerate(values):
+        # Skip index 0 (Z_MAKTX / Material short text) — product codes/names with
+        # abbreviations that should NEVER be translated (e.g. "FP APPLE PEAR APPLESAUCE MOT")
+        if i == 0:
+            continue
         if val and not val.replace('.', '').replace(',', '').replace('%', '').replace(' ', '').isdigit():
             # Check if it's a common Yes/No or technical term
             lower_val = val.lower().strip()
             # Skip values that don't need translation
-            skip_values = ['yes', 'no', 'ja', 'nein', 'oui', 'non', '-', '', 
-                          'halal', 'kosher', 'pur', 'puree', 'pieces']
+            skip_values = ['yes', 'no', 'ja', 'nein', 'oui', 'non', '-', '',
+                           'halal', 'kosher', 'pur', 'puree', 'pieces']
             if lower_val not in skip_values and not any(c.isdigit() for c in val[:3]):
                 values_to_translate.append(val)
                 indices_to_translate.append(i)
-    
+
     # If nothing to translate, return original
     if not values_to_translate:
         return values
-    
+
     try:
         language_names = {
             "de": "German", "fr": "French", "it": "Italian",
             "es": "Spanish", "pt": "Portuguese", "nl": "Dutch", "da": "Danish"
         }
         target_lang_name = language_names.get(target_language, "English")
-        
+
         prompt = f"""Translate these food/recipe product values to {target_lang_name}:
 
 Values: {json.dumps(values_to_translate, ensure_ascii=False)}
@@ -716,26 +729,27 @@ Rules:
 Respond with ONLY a JSON array:"""
 
         response = query_llm(prompt, provider="openai")
-        
+
         if response:
             response_clean = response.strip()
             if response_clean.startswith("```"):
                 lines = response_clean.split("\n")
-                response_clean = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-            
+                response_clean = "\n".join(
+                    lines[1:-1] if lines[-1] == "```" else lines[1:])
+
             translated = json.loads(response_clean)
-            
+
             # Merge translations back into original list
             result = values.copy()
             for idx, trans_idx in enumerate(indices_to_translate):
                 if idx < len(translated):
                     result[trans_idx] = translated[idx]
-            
+
             return result
-    
+
     except Exception as e:
         logger.error(f"Error translating values: {e}")
-    
+
     return values
 
 
@@ -759,7 +773,8 @@ SPECIFIED_FIELDS_60 = [
     ('Z_INH18',       'Color',                           'Farbe'),
     ('Z_INH05',       'Artificial colors',               'Künstliche Farben'),
     ('Z_INH09',       'Flavour',                         'Aroma'),
-    ('Z_INH06',       'Nature identical flavor',         'naturident/künstliches Aroma'),
+    ('Z_INH06',       'Nature identical flavor',
+     'naturident/künstliches Aroma'),
     ('Z_INH06Z',      'Natural flavor',                  'Natürliche Aromen'),
     ('Z_FSTAT',       'Flavor status',                   'Flavor status'),
     ('Z_INH21',       'Vitamins',                        'Vitamine'),
@@ -769,9 +784,11 @@ SPECIFIED_FIELDS_60 = [
     ('Z_INH16',       'Blend',                           'Mischung'),
     ('Z_INH20',       'Xanthan',                         'Xanthan'),
     ('Z_STABGU',      'Stabilizing System - Guar',       'Stabilizing System - Guar'),
-    ('Z_STABCAR',     'Stabilizing System - Carrageen', 'Stabilizing System - Carrageen'),
+    ('Z_STABCAR',     'Stabilizing System - Carrageen',
+     'Stabilizing System - Carrageen'),
     ('Z_STAGEL',      'Stabilizing System - Gellan',    'Stabilizing System - Gellan'),
-    ('Z_STANO',       'Stabilizing System - No stabil', 'Stabilizing System - No stabil'),
+    ('Z_STANO',       'Stabilizing System - No stabil',
+     'Stabilizing System - No stabil'),
     ('Z_INH17',       'Other stabilizer',               'Andere Stabilisatoren'),
     ('Z_BRIX',        'Brix',                            'Brix'),
     ('Z_PH',          'pH',                              'PH'),
@@ -807,43 +824,43 @@ SPECIFIED_FIELDS_60 = [
 def _is_boolean_match(actual_value: str, expected_value: str) -> bool:
     """
     Check if a recipe field value semantically matches a Yes/No constraint.
-    
+
     Many spec_fields store descriptive text instead of simple Yes/No:
       - "Saccharose" instead of "Yes" for the Saccharose field
       - "Genfrei" instead of "No" for the Contains GMO field
       - "-" or "" for missing data (treated as absence / "No")
-    
+
     Matching rules:
       - For "Yes" constraints: any non-empty value that is NOT an explicit "No" equivalent
         is considered a match (e.g. "Saccharose", "Genfrei", "Mit Allergenen" all match "Yes")
       - For "No" constraints: empty strings, "-", and explicit negatives ("No", "Nein", etc.)
         are considered a match. Additionally, descriptive text containing negative indicators
         like "frei", "kein", "ohne", "nicht" is also treated as "No".
-    
+
     Returns:
         True if the actual value semantically matches the expected constraint value.
     """
     actual = actual_value.strip() if actual_value else ""
     expected = expected_value.strip() if expected_value else ""
-    
+
     actual_lower = actual.lower()
     expected_lower = expected.lower()
-    
+
     # Direct case-insensitive match
     if actual_lower == expected_lower:
         return True
-    
+
     # Known absence/negative values
     NO_EQUIVALENTS = {'no', 'nein', 'non', 'false', '0', '', '-'}
     # Known presence/positive values
     YES_EQUIVALENTS = {'yes', 'ja', 'oui', 'si', 'sì', 'true', '1'}
-    
+
     if expected_lower in YES_EQUIVALENTS:
         # Constraint expects "Yes" (presence/positive):
         # Any non-empty value that isn't explicitly "No" counts as a match.
         # E.g. "Saccharose" for Z_INH03 means saccharose IS present → matches "Yes"
         return actual_lower not in NO_EQUIVALENTS
-    
+
     if expected_lower in NO_EQUIVALENTS:
         # Constraint expects "No" (absence/negative):
         # Explicit negatives and empty values match.
@@ -851,12 +868,13 @@ def _is_boolean_match(actual_value: str, expected_value: str) -> bool:
             return True
         # Also check for German/English negative indicators in descriptive text
         # e.g. "Genfrei" (GMO-free), "Süßstofffrei" (sweetener-free), "ohne Konservierung"
-        negative_indicators = ['frei', 'kein', 'nicht', 'ohne', 'free', 'without', 'no ']
+        negative_indicators = ['frei', 'kein',
+                               'nicht', 'ohne', 'free', 'without', 'no ']
         for neg in negative_indicators:
             if neg in actual_lower:
                 return True
         return False
-    
+
     # Non-boolean comparison: exact case-insensitive match only
     return False
 
@@ -870,19 +888,19 @@ def _compute_recipe_differences(
 ) -> List[Dict[str, Any]]:
     """
     Compute the differences between extracted constraints and a recipe's actual values.
-    
+
     Args:
         recipe_raw_values: Dict mapping field code to the raw (untranslated) value string
         numerical_filters: Extracted numerical constraints (e.g. {"Z_BRIX": {"gte": 31.99, "lte": 32.01}})
         categorical_filters: Extracted categorical constraints (e.g. {"Z_INH04": {"value": "No"}})
         field_display_names: Dict mapping field code to translated display name
         field_index_map: Dict mapping field code to index position in field_definitions
-    
+
     Returns:
         List of diffs: [{code, field_name, expected, actual, field_index}]
     """
     differences = []
-    
+
     # Check numerical constraints
     if numerical_filters:
         for code, range_spec in numerical_filters.items():
@@ -912,7 +930,7 @@ def _compute_recipe_differences(
                 lte = range_spec.get("lte")
                 gt = range_spec.get("gt")
                 lt = range_spec.get("lt")
-                
+
                 is_match = True
                 if gte is not None and actual_num < gte:
                     is_match = False
@@ -922,7 +940,7 @@ def _compute_recipe_differences(
                     is_match = False
                 if lt is not None and actual_num >= lt:
                     is_match = False
-                
+
                 if not is_match:
                     differences.append({
                         "code": code,
@@ -942,19 +960,19 @@ def _compute_recipe_differences(
                     "field_index": field_index_map.get(code, -1),
                     "type": "numerical"
                 })
-    
+
     # Check categorical constraints using boolean-aware comparison
     if categorical_filters:
         for code, match_spec in categorical_filters.items():
             expected_value = match_spec.get("value", "")
             raw_val = recipe_raw_values.get(code, "").strip()
-            
+
             # Use boolean-aware matching for Yes/No type constraints
             # This handles cases like "Saccharose" matching "Yes" for Z_INH03,
             # or "-" matching "No" for Z_KNOGM
             if _is_boolean_match(raw_val, expected_value):
                 continue  # Values match semantically, no difference
-            
+
             differences.append({
                 "code": code,
                 "field_name": field_display_names.get(code, code),
@@ -963,7 +981,7 @@ def _compute_recipe_differences(
                 "field_index": field_index_map.get(code, -1),
                 "type": "categorical"
             })
-    
+
     return differences
 
 
@@ -974,7 +992,7 @@ def _format_numerical_expected(range_spec: Dict[str, Any]) -> str:
     lte = range_spec.get("lte")
     gt = range_spec.get("gt")
     lt = range_spec.get("lt")
-    
+
     # If gte and lte are very close, show as single value
     if gte is not None and lte is not None and abs(lte - gte) < 0.1:
         mid = (gte + lte) / 2
@@ -982,7 +1000,7 @@ def _format_numerical_expected(range_spec: Dict[str, Any]) -> str:
         if mid == int(mid):
             return str(int(mid))
         return f"{mid:.1f}"
-    
+
     if gte is not None:
         parts.append(f"≥{gte}")
     if gt is not None:
@@ -991,7 +1009,7 @@ def _format_numerical_expected(range_spec: Dict[str, Any]) -> str:
         parts.append(f"≤{lte}")
     if lt is not None:
         parts.append(f"<{lt}")
-    
+
     return ", ".join(parts) if parts else "?"
 
 
@@ -1033,14 +1051,15 @@ def create_comparison_table(
         # Get translated field names
         # For EN, DE, ES, PL, FR: uses official translations from code_translation.csv
         # For other languages: uses cached LLM translations
-        translated_field_names = get_translated_field_names(SPECIFIED_FIELDS_60, detected_language)
-        
+        translated_field_names = get_translated_field_names(
+            SPECIFIED_FIELDS_60, detected_language)
+
         # Build field definitions list (60 fields in order) with translations
         field_definitions = []
         for code, name_en, name_de in SPECIFIED_FIELDS_60:
             # Use translated name from official CSV or cache/LLM, fallback to English
             display_name = translated_field_names.get(code, name_en)
-            
+
             field_definitions.append({
                 "code": code,
                 "name_en": name_en,
@@ -1053,7 +1072,8 @@ def create_comparison_table(
         field_display_names = {}
         for idx, (code, name_en, name_de) in enumerate(SPECIFIED_FIELDS_60):
             field_index_map[code] = idx
-            field_display_names[code] = translated_field_names.get(code, name_en)
+            field_display_names[code] = translated_field_names.get(
+                code, name_en)
 
         # Check if we have any constraints to compare against
         has_constraints = bool(numerical_filters) or bool(categorical_filters)
@@ -1081,7 +1101,8 @@ def create_comparison_table(
         for recipe in top_recipes:
             features = recipe.get("features", [])
             values = recipe.get("values", [])
-            recipe_name = recipe.get("recipe_name", recipe.get("id", "Unknown"))
+            recipe_name = recipe.get(
+                "recipe_name", recipe.get("id", "Unknown"))
             recipe_id = recipe.get("id", "")
 
             # Create feature-value mapping from recipe data
@@ -1101,7 +1122,7 @@ def create_comparison_table(
             raw_values_map = {}
             for code, name_en, name_de in SPECIFIED_FIELDS_60:
                 value = ""
-                
+
                 # Try to get value from various sources
                 # 1. From spec_fields in payload
                 if code in spec_fields and spec_fields[code]:
@@ -1136,14 +1157,22 @@ def create_comparison_table(
             # Translate values if target language is not English or German
             # (Values in DB are typically in EN or DE)
             if detected_language not in ("en", "de"):
+                # Preserve Z_MAKTX (Material short text, index 0) - it contains product
+                # codes/names with abbreviations that should NEVER be translated
+                # (e.g., "FP APPLE PEAR APPLESAUCE MOT" would get mangled by LLM)
+                original_maktx = recipe_values[0] if recipe_values else ""
+
                 # Check if we have cached translation for this recipe's values
-                cached_values = get_cached_translation(recipe_name, detected_language)
+                cached_values = get_cached_translation(
+                    recipe_name, detected_language)
                 if cached_values and "values_60" in cached_values:
                     recipe_values = cached_values["values_60"]
-                    logger.info(f"Using cached value translations for {recipe_name} in {detected_language}")
+                    logger.info(
+                        f"Using cached value translations for {recipe_name} in {detected_language}")
                 else:
                     # Translate values and cache them
-                    translated_values = translate_comparison_values(recipe_values, detected_language)
+                    translated_values = translate_comparison_values(
+                        recipe_values, detected_language)
                     if translated_values != recipe_values:
                         # Save to cache with the 60-field values
                         save_translation_to_cache(recipe_name, detected_language, {
@@ -1153,10 +1182,15 @@ def create_comparison_table(
                         })
                         recipe_values = translated_values
 
+                # Always restore the original Z_MAKTX value after any translation
+                if recipe_values and original_maktx:
+                    recipe_values[0] = original_maktx
+
             recipe_table_data = {
                 "recipe_name": recipe_name,
                 "recipe_id": recipe_id,
-                "values": recipe_values,  # Values in same order as field_definitions (translated if needed)
+                # Values in same order as field_definitions (translated if needed)
+                "values": recipe_values,
                 "differences": differences,  # Differences from extracted constraints
                 # Keep characteristics for backward compatibility
                 "characteristics": [
@@ -1170,7 +1204,8 @@ def create_comparison_table(
             }
 
             if differences:
-                logger.info(f"Recipe {recipe_name}: {len(differences)} field(s) differ from extracted constraints")
+                logger.info(
+                    f"Recipe {recipe_name}: {len(differences)} field(s) differ from extracted constraints")
 
             table_data["recipes"].append(recipe_table_data)
 
@@ -1235,14 +1270,46 @@ def format_response_in_language(results: List[Dict[str, Any]], language: str) ->
 def format_response_in_language_with_ai(results: List[Dict[str, Any]], language: str, original_query: str) -> str:
     """Use AI to format the response in the specified language"""
     try:
-        # Prepare the results data for AI formatting (scores as percentages)
+        # Extract and protect Z_MAKTX (Material short text) values from each result
+        # to prevent AI from translating product codes/abbreviations like "w/o", "MOT", "YOP"
+        maktx_values = []
         results_data = []
         for i, result in enumerate(results, 1):
-            combined = result.get("combined_score", result.get("text_score", 0))
+            combined = result.get(
+                "combined_score", result.get("text_score", 0))
+
+            # Extract Z_MAKTX from payload to preserve it
+            payload = result.get("payload", {})
+            spec_fields = payload.get("spec_fields", {})
+            original_maktx = spec_fields.get("Z_MAKTX", "")
+            maktx_values.append(original_maktx)
+
+            # Get description and protect Z_MAKTX by replacing it with placeholder
+            description = result.get("description", "")
+            placeholder = f"__Z_MAKTX_PLACEHOLDER_{i}__"
+
+            if original_maktx:
+                # Replace exact match first (most reliable)
+                if original_maktx in description:
+                    description = description.replace(
+                        original_maktx, placeholder)
+                else:
+                    # Try to find MaterialMasterShorttext pattern and replace the value part
+                    # Pattern matches: "MaterialMasterShorttext: <value>" or "Material short text: <value>"
+                    # and replaces everything after the colon until the next comma or end of string
+                    pattern = r'(MaterialMasterShorttext|Material\s+short\s+text|Materialkurztext)\s*:\s*([^,]+?)(?=,\s*[A-Z]|$)'
+                    match = re.search(pattern, description, re.IGNORECASE)
+                    if match:
+                        # Replace the matched value portion with our placeholder
+                        value_start = match.start(2)
+                        value_end = match.end(2)
+                        description = description[:value_start] + \
+                            placeholder + description[value_end:]
+
             results_data.append({
                 "rank": i,
                 "id": result.get("id", f"recipe_{i}"),
-                "description": result.get("description", ""),
+                "description": description,
                 "similarity_score": f"{combined * 100:.1f}".replace(".", ",") + "%"
             })
 
@@ -1278,12 +1345,22 @@ Please format this as a natural, helpful response that:
 6. Focuses on recipe similarity and food product characteristics
 7. Mentions key features like Color, Flavour, Stabilizer, Industry, etc. when relevant
 
+IMPORTANT: Do NOT translate or modify product codes, material short text values, or abbreviations in the descriptions. 
+For example, values like "FP APPLE PEAR APPLESAUCE MOT", "YOP", "MOT", or similar product codes/abbreviations must remain EXACTLY as shown.
+Only translate descriptive text, not technical codes or product identifiers.
+
 Format the response in a clear, readable way with proper numbering and structure. Emphasize that these are similar recipes found in the database."""
 
         # Make AI call for response formatting
         response = query_llm(prompt, provider="openai")
 
         if response:
+            # Restore original Z_MAKTX values by replacing placeholders
+            for i, original_maktx in enumerate(maktx_values, 1):
+                if original_maktx:
+                    placeholder = f"__Z_MAKTX_PLACEHOLDER_{i}__"
+                    response = response.replace(placeholder, original_maktx)
+
             logger.info(
                 f"AI formatted response in {language} for {len(results)} recipes")
             return response
@@ -1331,7 +1408,8 @@ class RecipeSearchAgent:
                        original_query: Optional[str] = None,
                        country_filter: Optional[Union[str, List[str]]] = None,
                        version_filter: Optional[str] = None,
-                       numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                       numerical_filters: Optional[Dict[str,
+                                                        Dict[str, Any]]] = None,
                        categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
         Search for similar recipes based on description and optional features
@@ -1401,16 +1479,18 @@ class RecipeSearchAgent:
 
             # Log numerical filters if present
             if numerical_filters:
-                logger.info(f"Applying {len(numerical_filters)} numerical range filter(s) to search:")
+                logger.info(
+                    f"Applying {len(numerical_filters)} numerical range filter(s) to search:")
                 for field_code, range_spec in numerical_filters.items():
                     logger.info(f"  - {field_code}: {range_spec}")
-            
+
             # Log categorical filters if present
             if categorical_filters:
-                logger.info(f"Applying {len(categorical_filters)} categorical exact-match filter(s) to search:")
+                logger.info(
+                    f"Applying {len(categorical_filters)} categorical exact-match filter(s) to search:")
                 for field_code, match_spec in categorical_filters.items():
                     logger.info(f"  - {field_code}: {match_spec}")
-            
+
             # Run two-step search using Qdrant
             results, metadata = self.recipe_manager.search_two_step(
                 text_description=description,
@@ -1505,12 +1585,12 @@ class RecipeSearchAgent:
                 "Muéstrame las siguientes 50 mejores recetas"
             ],
         }
-        
+
         lang_code = language.lower()[:2] if language else "en"
-        
+
         if lang_code in translations:
             return translations[lang_code]
-        
+
         # Default: English
         return [
             "Show me the next top 10 recipes",
