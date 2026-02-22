@@ -1613,6 +1613,53 @@ async def list_users(
         raise HTTPException(status_code=500, detail="Failed to list users")
 
 
+@app.get("/api/admin/conversations")
+async def admin_get_user_conversations(
+    user_ids: str,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Get conversation messages for selected user(s) (Admin only). Query param: user_ids=1,2,3"""
+    try:
+        if not user_ids or not user_ids.strip():
+            return {"conversations": [], "users": []}
+        id_list = [x.strip() for x in user_ids.split(",") if x.strip()]
+        if not id_list:
+            return {"conversations": [], "users": []}
+        # user_id in UserMemory is stored as string (numeric id)
+        user_id_strs = [str(uid) for uid in id_list]
+        # Build id -> username map from users table
+        users = db.query(User).filter(User.id.in_([int(uid) for uid in id_list if uid.isdigit()])).all()
+        id_to_username = {str(u.id): u.username for u in users}
+        # Fetch all messages for these users, active only, ordered by user, then conversation, then message_order
+        rows = (
+            db.query(UserMemory)
+            .filter(
+                UserMemory.user_id.in_(user_id_strs),
+                UserMemory.is_active == True,
+            )
+            .order_by(UserMemory.user_id, UserMemory.conversation_id, UserMemory.message_order)
+            .all()
+        )
+        conversations = []
+        for msg in rows:
+            conversations.append({
+                "user_id": msg.user_id,
+                "username": id_to_username.get(msg.user_id, msg.user_id),
+                "conversation_id": msg.conversation_id,
+                "message_order": msg.message_order,
+                "title": msg.title or "",
+                "query": msg.query or "",
+                "response": msg.response or "",
+                "timestamp": msg.timestamp.isoformat() if msg.timestamp else "",
+                "followup_questions": msg.followup_questions,
+            })
+        return {"conversations": conversations, "users": [{"id": u.id, "username": u.username} for u in users]}
+    except Exception as e:
+        logger.error(f"Error listing admin conversations: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve user conversations")
+
+
 @app.post("/api/admin/users")
 async def add_user(
     user_data: AddUserRequest,

@@ -18,6 +18,11 @@ function Admin() {
   const [autoGenerateResetPassword, setAutoGenerateResetPassword] = useState(true);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState(null);
+  const [activeTab, setActiveTab] = useState('management');
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
+  const [conversationsError, setConversationsError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -182,6 +187,40 @@ function Admin() {
     navigate('/login');
   };
 
+  const loadConversations = async () => {
+    if (!selectedUserIds.length) {
+      setConversationsError('Please select at least one user.');
+      return;
+    }
+    setConversationsError('');
+    setConversationsLoading(true);
+    try {
+      const qs = selectedUserIds.join(',');
+      const response = await tokenManager.get(`/admin/conversations?user_ids=${encodeURIComponent(qs)}`);
+      if (!response.ok) {
+        if (response.status === 403) {
+          setConversationsError('Access denied.');
+          return;
+        }
+        throw new Error('Failed to load conversations');
+      }
+      const data = await response.json();
+      setConversations(data.conversations || []);
+    } catch (err) {
+      console.error('Error loading conversations:', err);
+      setConversationsError('Failed to load conversations. Please try again.');
+      setConversations([]);
+    } finally {
+      setConversationsLoading(false);
+    }
+  };
+
+  const toggleUserSelection = (userId) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
   const copyPassword = (password) => {
     navigator.clipboard.writeText(password);
     setSuccess('Password copied to clipboard!');
@@ -206,7 +245,23 @@ function Admin() {
     <div className="admin-page">
       <div className="admin-header">
         <div className="admin-header-left">
-          <h1>User Management</h1>
+          <h1>Admin</h1>
+          <div className="admin-tabs">
+            <button
+              type="button"
+              className={`admin-tab ${activeTab === 'management' ? 'active' : ''}`}
+              onClick={() => setActiveTab('management')}
+            >
+              User Management
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${activeTab === 'conversations' ? 'active' : ''}`}
+              onClick={() => setActiveTab('conversations')}
+            >
+              Past Conversations
+            </button>
+          </div>
         </div>
         <div className="admin-header-right">
           <button className="back-button" onClick={() => navigate('/')}>
@@ -219,6 +274,8 @@ function Admin() {
       </div>
 
       <div className="admin-content">
+        {activeTab === 'management' && (
+          <>
         {error && (
           <div className="admin-message error-message">
             {error}
@@ -442,6 +499,84 @@ function Admin() {
             </table>
           )}
         </div>
+          </>
+        )}
+
+        {activeTab === 'conversations' && (
+          <div className="admin-conversations-tab">
+            <h2>Past user conversations</h2>
+            <p className="admin-conversations-intro">Select one or more users to view their conversation history.</p>
+            <div className="admin-conversations-controls">
+              <div className="admin-conversations-user-select">
+                <label>Users</label>
+                <div className="admin-conversations-checkboxes">
+                  {users.map((user) => (
+                    <label key={user.id} className="admin-conversations-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selectedUserIds.includes(user.id)}
+                        onChange={() => toggleUserSelection(user.id)}
+                      />
+                      {user.username}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="add-user-button"
+                onClick={loadConversations}
+                disabled={conversationsLoading || !selectedUserIds.length}
+              >
+                {conversationsLoading ? 'Loading…' : 'Load conversations'}
+              </button>
+            </div>
+            {conversationsError && (
+              <div className="admin-message error-message">{conversationsError}</div>
+            )}
+            <div className="admin-conversations-table-wrap">
+              {conversations.length === 0 && !conversationsLoading && (
+                <p className="no-users">
+                  {selectedUserIds.length ? 'No conversations found for the selected user(s).' : 'Select users and click Load conversations.'}
+                </p>
+              )}
+              {conversations.length > 0 && (
+                <table className="users-table admin-conversations-table">
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Conversation ID</th>
+                      <th>Order</th>
+                      <th>Title</th>
+                      <th>Query</th>
+                      <th>Response</th>
+                      <th>Timestamp</th>
+                      <th>Follow-up questions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {conversations.map((row, idx) => (
+                      <tr key={`${row.conversation_id}-${row.message_order}-${idx}`}>
+                        <td>{row.username}</td>
+                        <td className="admin-conv-id">{row.conversation_id}</td>
+                        <td>{row.message_order}</td>
+                        <td>{row.title}</td>
+                        <td className="admin-conv-query">{row.query}</td>
+                        <td className="admin-conv-response">{row.response}</td>
+                        <td>{row.timestamp}</td>
+                        <td className="admin-conv-followup">
+                          {Array.isArray(row.followup_questions)
+                            ? row.followup_questions.join(', ')
+                            : row.followup_questions != null ? String(row.followup_questions) : ''}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

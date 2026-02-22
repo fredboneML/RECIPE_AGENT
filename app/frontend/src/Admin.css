@@ -40,10 +40,45 @@
   margin-bottom: 30px;
 }
 
+.admin-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .admin-header-left h1 {
   margin: 0;
   color: #333;
   font-size: 1.8rem;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 0;
+}
+
+.admin-tab {
+  padding: 8px 16px;
+  background-color: #e9ecef;
+  color: #495057;
+  border: 1px solid #dee2e6;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.admin-tab:hover {
+  background-color: #dee2e6;
+  color: #333;
+}
+
+.admin-tab.active {
+  background-color: white;
+  color: #9f1a15;
+  border-bottom-color: white;
+  margin-bottom: -1px;
 }
 
 .admin-header-right {
@@ -395,4 +430,89 @@
   background-color: #ccc;
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* Past Conversations tab */
+.admin-conversations-tab {
+  background-color: white;
+  padding: 30px;
+  border-radius: 10px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.admin-conversations-tab h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+.admin-conversations-intro {
+  color: #666;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.admin-conversations-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.admin-conversations-user-select label {
+  display: block;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.admin-conversations-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+
+.admin-conversations-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: normal;
+  margin: 0;
+}
+
+.admin-conversations-checkbox input {
+  accent-color: #9f1a15;
+  width: 18px;
+  height: 18px;
+}
+
+.admin-conversations-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-conversations-table th,
+.admin-conversations-table td {
+  white-space: normal;
+  max-width: 280px;
+  word-break: break-word;
+  vertical-align: top;
+}
+
+.admin-conversations-table .admin-conv-id {
+  font-size: 0.8rem;
+  max-width: 180px;
+}
+
+.admin-conversations-table .admin-conv-query,
+.admin-conversations-table .admin-conv-response {
+  max-width: 320px;
+}
+
+.admin-conversations-table .admin-conv-followup {
+  max-width: 200px;
+  font-size: 0.9rem;
 }

@@ -114,6 +114,15 @@ class AdminAPIClient:
         )
         return {"status": response.status_code, "data": response.json() if response.text else {}}
 
+    def get_conversations(self, user_ids: list) -> Dict:
+        """Get conversation messages for selected user(s) (admin only). user_ids: list of int or str."""
+        ids_param = ",".join(str(uid) for uid in user_ids)
+        response = requests.get(
+            f"{self.base_url}/api/admin/conversations?user_ids={ids_param}",
+            headers=self._get_headers()
+        )
+        return {"status": response.status_code, "data": response.json() if response.text else {}}
+
 
 def test_admin_login():
     """Test 1: Admin can login successfully"""
@@ -254,8 +263,43 @@ def test_delete_user(client: AdminAPIClient, username: str):
     print(f"✅ Verified: User '{username}' no longer exists")
 
 
+def test_admin_get_conversations(client: AdminAPIClient):
+    """Test 8a: Admin can get user conversations"""
+    print("\n=== Test 8a: Admin Get User Conversations ===")
+    list_result = client.list_users()
+    assert list_result["status"] == 200, "List users must succeed"
+    users = list_result["data"].get("users", [])
+    if not users:
+        print("⚠️  No users in DB, skipping conversations response shape check")
+        return
+    user_ids = [u["id"] for u in users[:2]]
+    result = client.get_conversations(user_ids)
+    assert result["status"] == 200, f"Should return 200, got {result['status']}"
+    data = result["data"]
+    assert "conversations" in data, "Response should contain conversations"
+    assert "users" in data, "Response should contain users"
+    assert isinstance(data["conversations"], list), "conversations should be a list"
+    assert isinstance(data["users"], list), "users should be a list"
+    for row in data["conversations"]:
+        assert "user_id" in row and "username" in row
+        assert "conversation_id" in row and "message_order" in row
+        assert "query" in row and "response" in row and "timestamp" in row
+    print(f"✅ Admin get conversations: {len(data['conversations'])} rows, {len(data['users'])} users")
+
+
+def test_admin_conversations_empty_user_ids(client: AdminAPIClient):
+    """Test 8b: Admin get conversations with empty user_ids returns empty data"""
+    print("\n=== Test 8b: Admin Conversations Empty user_ids ===")
+    # Client sends user_ids= (empty string). Backend returns empty.
+    result = client.get_conversations([])
+    assert result["status"] == 200, f"Should return 200, got {result['status']}"
+    data = result["data"]
+    assert data.get("conversations") == [], "conversations should be empty"
+    print("✅ Empty user_ids returns empty conversations")
+
+
 def test_non_admin_access_denied():
-    """Test 8: Non-admin users cannot access admin endpoints"""
+    """Test 9: Non-admin users cannot access admin endpoints"""
     print("\n=== Test 8: Non-Admin Access Denied ===")
     
     # Try to login as a non-admin user (if exists)
@@ -295,6 +339,14 @@ def test_non_admin_access_denied():
     assert result["status"] == 403, f"Should return 403, got {result['status']}"
     print(f"✅ Read-only user correctly denied access to reset password (403)")
     
+    # Try to get conversations (should fail)
+    list_result = admin_client.list_users()
+    if list_result["status"] == 200 and list_result["data"].get("users"):
+        uid = list_result["data"]["users"][0]["id"]
+        result = readonly_client.get_conversations([uid])
+        assert result["status"] == 403, f"Should return 403, got {result['status']}"
+        print(f"✅ Read-only user correctly denied access to get conversations (403)")
+    
     # Clean up
     try:
         admin_client.delete_user(test_username)
@@ -304,8 +356,8 @@ def test_non_admin_access_denied():
 
 
 def test_cannot_delete_self(client: AdminAPIClient):
-    """Test 9: Admin cannot delete their own account"""
-    print("\n=== Test 9: Cannot Delete Self ===")
+    """Test 10: Admin cannot delete their own account"""
+    print("\n=== Test 10: Cannot Delete Self ===")
     
     result = client.delete_user(ADMIN_USERNAME)
     
@@ -316,8 +368,8 @@ def test_cannot_delete_self(client: AdminAPIClient):
 
 
 def test_add_user_duplicate_username(client: AdminAPIClient):
-    """Test 10: Cannot add user with duplicate username"""
-    print("\n=== Test 10: Duplicate Username Prevention ===")
+    """Test 11: Cannot add user with duplicate username"""
+    print("\n=== Test 11: Duplicate Username Prevention ===")
     
     test_username = "test_duplicate_user"
     test_password = "testpass123"
@@ -370,10 +422,14 @@ def main():
         test_delete_user(admin_client, manual_user)
         test_delete_user(admin_client, auto_user)
         
-        # Test 8: Non-admin access denied
+        # Test 8a/8b: Admin conversations
+        test_admin_get_conversations(admin_client)
+        test_admin_conversations_empty_user_ids(admin_client)
+        
+        # Test 9: Non-admin access denied
         test_non_admin_access_denied()
         
-        # Test 9: Cannot delete self
+        # Test 10: Cannot delete self
         test_cannot_delete_self(admin_client)
         
         # Test 10: Duplicate username prevention
