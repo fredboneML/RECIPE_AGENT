@@ -494,6 +494,96 @@
   overflow-x: auto;
 }
 
+/* Conversation cards (landing-page style layout) */
+.admin-conversations-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.admin-conv-card {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 10px;
+  padding: 20px 24px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+.admin-conv-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eee;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.admin-conv-meta-item code {
+  font-size: 0.85em;
+  background: #f1f3f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.admin-conv-query-block {
+  margin-bottom: 16px;
+}
+
+.admin-conv-query-block strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.admin-conv-query-text {
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 3px solid #9f1a15;
+  font-size: 0.95rem;
+}
+
+.admin-conv-response-block {
+  margin-bottom: 16px;
+}
+
+.admin-conv-response-block > strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.admin-conv-response-text {
+  padding: 12px;
+  background: #f9f9f9;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.admin-conv-card .recipe-list-container {
+  margin-top: 8px;
+}
+
+.admin-conv-card .comparison-table-container {
+  margin-top: 16px;
+}
+
+.admin-conv-card .followup-suggestions {
+  margin-top: 16px;
+}
+
+.admin-conv-card .followup-suggestions h4 {
+  margin-bottom: 10px;
+  font-size: 1rem;
+  color: #333;
+}
+
 .admin-conversations-table th,
 .admin-conversations-table td {
   white-space: normal;

@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
 import './Admin.css';
+import './App.css';
 import tokenManager from './tokenManager';
 
 function Admin() {
@@ -219,6 +220,40 @@ function Admin() {
     setSelectedUserIds((prev) =>
       prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
     );
+  };
+
+  /** Parse stored response: may be JSON with text, comparison_table, metadata or plain text */
+  const parseStoredResponse = (row) => {
+    let text = row.response || '';
+    let comparisonTable = null;
+    let metadata = null;
+    if (typeof text === 'string' && text.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(text);
+        text = parsed.text ?? parsed.response ?? text;
+        comparisonTable = parsed.comparison_table ?? null;
+        metadata = parsed.metadata ?? null;
+      } catch (_) {
+        /* keep text as-is */
+      }
+    }
+    return { text, comparisonTable, metadata };
+  };
+
+  /** True when we have enough data to show the 60-field comparison table */
+  const hasComparisonTableData = (ct) => {
+    if (!ct || typeof ct !== 'object') return false;
+    const recipes = ct.recipes;
+    return Array.isArray(recipes) && recipes.length > 0;
+  };
+
+  const formatFiltersFromMetadata = (metadata) => {
+    if (!metadata || typeof metadata !== 'object') return null;
+    const parts = [];
+    if (metadata.search_strategy) parts.push(`Strategy: ${metadata.search_strategy}`);
+    if (metadata.search_type) parts.push(`Type: ${metadata.search_type}`);
+    if (metadata.refinement_completed !== undefined) parts.push(`Refinement: ${metadata.refinement_completed ? 'Yes' : 'No'}`);
+    return parts.length ? parts.join(' · ') : null;
   };
 
   const copyPassword = (password) => {
@@ -541,38 +576,140 @@ function Admin() {
                 </p>
               )}
               {conversations.length > 0 && (
-                <table className="users-table admin-conversations-table">
-                  <thead>
-                    <tr>
-                      <th>Username</th>
-                      <th>Conversation ID</th>
-                      <th>Order</th>
-                      <th>Title</th>
-                      <th>Query</th>
-                      <th>Response</th>
-                      <th>Timestamp</th>
-                      <th>Follow-up questions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {conversations.map((row, idx) => (
-                      <tr key={`${row.conversation_id}-${row.message_order}-${idx}`}>
-                        <td>{row.username}</td>
-                        <td className="admin-conv-id">{row.conversation_id}</td>
-                        <td>{row.message_order}</td>
-                        <td>{row.title}</td>
-                        <td className="admin-conv-query">{row.query}</td>
-                        <td className="admin-conv-response">{row.response}</td>
-                        <td>{row.timestamp}</td>
-                        <td className="admin-conv-followup">
-                          {Array.isArray(row.followup_questions)
-                            ? row.followup_questions.join(', ')
-                            : row.followup_questions != null ? String(row.followup_questions) : ''}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="admin-conversations-cards">
+                  {conversations.map((row, idx) => {
+                    const { text, comparisonTable, metadata } = parseStoredResponse(row);
+                    const filtersLabel = formatFiltersFromMetadata(metadata);
+                    const isRecipeList = text && /^\d+\.\s+[A-Z0-9_]+.*Score:\s*\d/m.test(String(text));
+                    return (
+                      <div key={`${row.conversation_id}-${row.message_order}-${idx}`} className="admin-conv-card">
+                        <div className="admin-conv-meta">
+                          <span className="admin-conv-meta-item"><strong>Username:</strong> {row.username}</span>
+                          <span className="admin-conv-meta-item"><strong>Conversation ID:</strong> <code>{row.conversation_id}</code></span>
+                          <span className="admin-conv-meta-item"><strong>Order:</strong> {row.message_order}</span>
+                          <span className="admin-conv-meta-item"><strong>Title:</strong> {row.title || '—'}</span>
+                          <span className="admin-conv-meta-item"><strong>Timestamp:</strong> {row.timestamp}</span>
+                          {filtersLabel && (
+                            <span className="admin-conv-meta-item"><strong>Filters:</strong> {filtersLabel}</span>
+                          )}
+                        </div>
+                        <div className="admin-conv-query-block">
+                          <strong>Query:</strong>
+                          <div className="admin-conv-query-text">{row.query || '—'}</div>
+                        </div>
+                        <div className="admin-conv-response-block">
+                          <strong>Top proposed recipes</strong>
+                          {isRecipeList ? (
+                            <div className="recipe-list-container">
+                              <div className="recipe-list-header">
+                                <h4>Top Recipes</h4>
+                              </div>
+                              <div className="recipe-list-content">
+                                {String(text).split('\n').filter(Boolean).map((line, i) => (
+                                  <div key={i} className="recipe-list-item">{line}</div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="admin-conv-response-text" style={{ whiteSpace: 'pre-wrap' }}>
+                              {text || '—'}
+                            </div>
+                          )}
+                        </div>
+                        {hasComparisonTableData(comparisonTable) && (
+                          <div className="comparison-table-container">
+                            <h4>Recipe Comparison - 60 Specified Fields</h4>
+                            <div className="table-wrapper">
+                              {comparisonTable.field_definitions && comparisonTable.field_definitions.length > 0 ? (
+                                <table className="comparison-table structured">
+                                  <thead>
+                                    <tr>
+                                      <th className="field-code-header sticky-col">Code</th>
+                                      <th className="field-name-header sticky-col-2">Field Name</th>
+                                      {comparisonTable.recipes.map((recipe, rIdx) => (
+                                        <th key={rIdx} className="recipe-value-header">
+                                          {rIdx + 1}. {recipe.recipe_name || recipe.recipe_id}
+                                          {recipe.differences && recipe.differences.length > 0 && (
+                                            <span className="diff-count-badge" title={`${recipe.differences.length} field(s) differ from search criteria`}>
+                                              Δ{recipe.differences.length}
+                                            </span>
+                                          )}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {comparisonTable.field_definitions.map((field, fieldIdx) => {
+                                      const hasAnyValue = comparisonTable.recipes.some(r =>
+                                        r.values && r.values[fieldIdx] && String(r.values[fieldIdx]).trim() !== ''
+                                      );
+                                      return (
+                                        <tr key={fieldIdx} className={hasAnyValue ? 'has-value' : 'no-value'}>
+                                          <td className="field-code sticky-col">{field.code}</td>
+                                          <td className="field-name sticky-col-2">{field.display_name}</td>
+                                          {comparisonTable.recipes.map((recipe, recipeIdx) => {
+                                            const diff = recipe.differences && recipe.differences.find(d => d.field_index === fieldIdx);
+                                            return (
+                                              <td key={recipeIdx} className={`recipe-value${diff ? ' value-differs' : ''}`} title={diff ? `Expected: ${diff.expected}` : ''}>
+                                                {recipe.values && recipe.values[fieldIdx] ? String(recipe.values[fieldIdx]) : '-'}
+                                                {diff && <span className="diff-indicator"><span className="diff-expected">⊘ {diff.expected}</span></span>}
+                                              </td>
+                                            );
+                                          })}
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              ) : (
+                                <table className="comparison-table legacy">
+                                  <thead>
+                                    <tr className="recipe-names">
+                                      {comparisonTable.recipes.map((r, rIdx) => (
+                                        <th key={rIdx} colSpan="2" className="recipe-header">
+                                          {rIdx + 1}. {r.recipe_name || r.recipe_id}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {comparisonTable.recipes[0]?.characteristics?.map((_, charIndex) => (
+                                      <tr key={charIndex}>
+                                        {comparisonTable.recipes.map((recipe, recipeIndex) => (
+                                          <React.Fragment key={recipeIndex}>
+                                            <td className="characteristic-cell">{recipe.characteristics?.[charIndex]?.charactDescr || ''}</td>
+                                            <td className="value-cell">{recipe.characteristics?.[charIndex]?.valueCharLong || ''}</td>
+                                          </React.Fragment>
+                                        ))}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                            <div className="table-legend">
+                              <span className="legend-has-value">● Fields with values</span>
+                              <span className="legend-no-value">○ Fields without values</span>
+                              {comparisonTable.has_constraints && (
+                                <span className="legend-diff">⊘ Differs from search criteria</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {row.followup_questions && row.followup_questions.length > 0 && (
+                          <div className="followup-suggestions">
+                            <h4>Follow-up Questions</h4>
+                            <div className="common-questions">
+                              {row.followup_questions.map((q, qIdx) => (
+                                <div key={qIdx} className="question-box">{q}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>

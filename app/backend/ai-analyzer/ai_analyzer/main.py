@@ -1030,9 +1030,10 @@ async def process_query(
             response_with_metadata = {
                 "text": response,
                 "metadata": metadata,  # This includes all_refined_candidates
-                "detected_language": detected_language  # Store language for follow-up questions
+                "detected_language": detected_language,  # Store language for follow-up questions
+                "comparison_table": comparison_table  # For admin past-conversations view
             }
-            response_to_store = json.dumps(response_with_metadata)
+            response_to_store = json.dumps(response_with_metadata, default=str)
             
             store_conversation(
                 db_session,
