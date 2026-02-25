@@ -227,17 +227,23 @@ function Admin() {
     let text = row.response || '';
     let comparisonTable = null;
     let metadata = null;
+    let countryFilter = null;
+    let versionFilter = null;
+    let detectedLanguage = null;
     if (typeof text === 'string' && text.trim().startsWith('{')) {
       try {
         const parsed = JSON.parse(text);
         text = parsed.text ?? parsed.response ?? text;
         comparisonTable = parsed.comparison_table ?? null;
         metadata = parsed.metadata ?? null;
+        countryFilter = parsed.country_filter ?? null;
+        versionFilter = parsed.version_filter ?? null;
+        detectedLanguage = parsed.detected_language ?? null;
       } catch (_) {
         /* keep text as-is */
       }
     }
-    return { text, comparisonTable, metadata };
+    return { text, comparisonTable, metadata, countryFilter, versionFilter, detectedLanguage };
   };
 
   /** True when we have enough data to show the 60-field comparison table */
@@ -253,6 +259,8 @@ function Admin() {
     if (metadata.search_strategy) parts.push(`Strategy: ${metadata.search_strategy}`);
     if (metadata.search_type) parts.push(`Type: ${metadata.search_type}`);
     if (metadata.refinement_completed !== undefined) parts.push(`Refinement: ${metadata.refinement_completed ? 'Yes' : 'No'}`);
+    if (metadata.final_results_count !== undefined) parts.push(`Results: ${metadata.final_results_count}`);
+    if (metadata.text_results_found !== undefined) parts.push(`Text candidates: ${metadata.text_results_found}`);
     return parts.length ? parts.join(' · ') : null;
   };
 
@@ -578,9 +586,15 @@ function Admin() {
               {conversations.length > 0 && (
                 <div className="admin-conversations-cards">
                   {conversations.map((row, idx) => {
-                    const { text, comparisonTable, metadata } = parseStoredResponse(row);
+                    const { text, comparisonTable, metadata, countryFilter, versionFilter, detectedLanguage } = parseStoredResponse(row);
                     const filtersLabel = formatFiltersFromMetadata(metadata);
                     const isRecipeList = text && /^\d+\.\s+[A-Z0-9_]+.*Score:\s*\d/m.test(String(text));
+                    const countryDisplay = countryFilter == null || (Array.isArray(countryFilter) && countryFilter.length === 0)
+                      ? 'All'
+                      : Array.isArray(countryFilter)
+                        ? countryFilter.join(', ')
+                        : String(countryFilter);
+                    const versionDisplay = versionFilter == null || versionFilter === '' || versionFilter === 'All' ? 'All' : String(versionFilter);
                     return (
                       <div key={`${row.conversation_id}-${row.message_order}-${idx}`} className="admin-conv-card">
                         <div className="admin-conv-meta">
@@ -589,6 +603,11 @@ function Admin() {
                           <span className="admin-conv-meta-item"><strong>Order:</strong> {row.message_order}</span>
                           <span className="admin-conv-meta-item"><strong>Title:</strong> {row.title || '—'}</span>
                           <span className="admin-conv-meta-item"><strong>Timestamp:</strong> {row.timestamp}</span>
+                          <span className="admin-conv-meta-item"><strong>Country:</strong> {countryDisplay}</span>
+                          <span className="admin-conv-meta-item"><strong>Version:</strong> {versionDisplay}</span>
+                          {detectedLanguage && (
+                            <span className="admin-conv-meta-item"><strong>Language:</strong> {detectedLanguage}</span>
+                          )}
                           {filtersLabel && (
                             <span className="admin-conv-meta-item"><strong>Filters:</strong> {filtersLabel}</span>
                           )}

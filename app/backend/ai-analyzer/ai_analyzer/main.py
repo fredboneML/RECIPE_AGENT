@@ -1031,7 +1031,9 @@ async def process_query(
                 "text": response,
                 "metadata": metadata,  # This includes all_refined_candidates
                 "detected_language": detected_language,  # Store language for follow-up questions
-                "comparison_table": comparison_table  # For admin past-conversations view
+                "comparison_table": comparison_table,  # For admin past-conversations view
+                "country_filter": country_filter,  # List or str; None means "All"
+                "version_filter": version_filter,  # P, L, Missing, or None for "All"
             }
             response_to_store = json.dumps(response_with_metadata, default=str)
             
