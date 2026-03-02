@@ -1434,52 +1434,55 @@ async def get_conversation(
                 detail="Conversation not found or access denied"
             )
 
-        # Process messages to make errors user-friendly
+        # Process messages to make errors user-friendly and include comparison_table, country_filter, version_filter
         processed_messages = []
         for msg in messages:
-            # Create a copy of the message data
             message_data = {
                 "id": msg.id,
                 "conversation_id": msg.conversation_id,
                 "query": msg.query,
                 "timestamp": msg.timestamp.isoformat(),
-                "followup_questions": msg.followup_questions
+                "followup_questions": msg.followup_questions,
             }
 
-            # Parse response - it might be stored as JSON with metadata
             response_text = msg.response
+            comparison_table = None
+            country_filter = None
+            version_filter = None
+            detected_language = None
+
             if response_text:
                 try:
                     import json
-                    # Try to parse as JSON if it starts with {
                     if isinstance(response_text, str) and response_text.strip().startswith("{"):
                         parsed = json.loads(response_text)
                         if isinstance(parsed, dict):
-                            # Check for "response" field (new format) or "text" field (old format)
-                            if "response" in parsed:
-                                response_text = parsed["response"]
-                            elif "text" in parsed:
-                                response_text = parsed["text"]
-                            # If neither exists, keep the original JSON string
+                            response_text = parsed.get("text") or parsed.get("response") or response_text
+                            comparison_table = parsed.get("comparison_table")
+                            country_filter = parsed.get("country_filter")
+                            version_filter = parsed.get("version_filter")
+                            detected_language = parsed.get("detected_language")
                 except (json.JSONDecodeError, AttributeError, TypeError) as e:
-                    # Not JSON or parsing failed, use as-is
                     logger.debug(f"Response is not JSON or parsing failed: {e}")
-                    pass
-            
-            # Check if this is an error response
+
             if response_text and (response_text.startswith("Error") or "error" in response_text.lower()):
-                # Detect language (Dutch vs English)
                 is_dutch = any(dutch_word in msg.query.lower() for dutch_word in
                                ['wat', 'hoe', 'waarom', 'welke', 'kunnen', 'waar', 'wie', 'wanneer', 'onderwerp'])
-
-                # Replace error message with user-friendly message
                 if is_dutch:
                     message_data["response"] = "Er was een probleem bij het beantwoorden van deze vraag. Probeer het opnieuw of stel een andere vraag."
                 else:
                     message_data["response"] = "There was an issue answering this question. Please try again or ask a different question."
             else:
-                # Use the parsed or original response
                 message_data["response"] = response_text
+
+            if comparison_table is not None:
+                message_data["comparison_table"] = comparison_table
+            if country_filter is not None:
+                message_data["country_filter"] = country_filter
+            if version_filter is not None:
+                message_data["version_filter"] = version_filter
+            if detected_language is not None:
+                message_data["detected_language"] = detected_language
 
             processed_messages.append(message_data)
 

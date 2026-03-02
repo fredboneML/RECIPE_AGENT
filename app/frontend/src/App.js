@@ -653,6 +653,18 @@ function App() {
                 {/* Assistant response */}
                 {message.response && (
                   <div className="message assistant">
+                    {/* Country and version filters used for this message (e.g. from past conversation) */}
+                    {(message.country_filter != null || message.version_filter != null) && (
+                      <div className="message-filters-used">
+                        {message.country_filter != null && (
+                          <span><strong>Country:</strong> {Array.isArray(message.country_filter) ? message.country_filter.join(', ') : message.country_filter}</span>
+                        )}
+                        {message.country_filter != null && message.version_filter != null && ' · '}
+                        {message.version_filter != null && message.version_filter !== '' && (
+                          <span><strong>Version:</strong> {message.version_filter}</span>
+                        )}
+                      </div>
+                    )}
                     {/* Check if this is a recipe list (starts with numbered recipes) */}
                     {message.response.match(/^\d+\.\s+[A-Z0-9_]+.*Score:\s*\d/) ? (
                       <div className="recipe-list-container">
@@ -678,8 +690,8 @@ function App() {
                       }} />
                     )}
                     
-                    {/* Comparison Table - 60 Specified Fields Format */}
-                    {message.comparison_table && message.comparison_table.has_data && (
+                    {/* Comparison Table - 60 Specified Fields Format (with deltas) */}
+                    {message.comparison_table && message.comparison_table.recipes && message.comparison_table.recipes.length > 0 && (
                       <div className="comparison-table-container">
                         <h4>Recipe Comparison - 60 Specified Fields</h4>
                         <div className="table-wrapper">
