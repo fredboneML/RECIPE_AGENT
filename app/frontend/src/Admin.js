@@ -246,6 +246,14 @@ function Admin() {
     return { text, comparisonTable, metadata, countryFilter, versionFilter, detectedLanguage };
   };
 
+  /** Format response text: render **bold** as <strong> and newlines as <br/> for display */
+  const formatResponseHtml = (str) => {
+    if (str == null || typeof str !== 'string') return '';
+    return str
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br/>');
+  };
+
   /** True when we have enough data to show the 60-field comparison table */
   const hasComparisonTableData = (ct) => {
     if (!ct || typeof ct !== 'object') return false;
@@ -625,14 +633,12 @@ function Admin() {
                               </div>
                               <div className="recipe-list-content">
                                 {String(text).split('\n').filter(Boolean).map((line, i) => (
-                                  <div key={i} className="recipe-list-item">{line}</div>
+                                  <div key={i} className="recipe-list-item" dangerouslySetInnerHTML={{ __html: formatResponseHtml(line) }} />
                                 ))}
                               </div>
                             </div>
                           ) : (
-                            <div className="admin-conv-response-text" style={{ whiteSpace: 'pre-wrap' }}>
-                              {text || '—'}
-                            </div>
+                            <div className="admin-conv-response-text" dangerouslySetInnerHTML={{ __html: formatResponseHtml(text || '—') }} />
                           )}
                         </div>
                         {hasComparisonTableData(comparisonTable) && (
