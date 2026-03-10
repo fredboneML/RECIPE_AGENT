@@ -142,6 +142,8 @@ def create_payload_indexes(
         ("recipe_name", PayloadSchemaType.KEYWORD),
         ("num_available", PayloadSchemaType.INTEGER),
         ("num_missing", PayloadSchemaType.INTEGER),
+        ("Z_MU_KUNNR", PayloadSchemaType.KEYWORD),
+        ("Z_PR_KUNNR", PayloadSchemaType.KEYWORD),
     ]
     
     for field, schema in metadata_indexes:

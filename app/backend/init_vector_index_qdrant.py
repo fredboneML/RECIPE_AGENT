@@ -61,7 +61,8 @@ COUNTRY_CODE_MAP = {
     "KR": "South Korea",
     "TR": "Turkey",
     "UA": "Ukraine",
-    "US": "United States"
+    "US": "United States",
+    "ZZ": "Custom / Unassigned",
 }
 
 # =============================================================================
@@ -219,13 +220,74 @@ def get_country_code(filename: str) -> str:
     match = re.search(r'_([A-Z]{2})\d{2}_', filename)
     if match:
         return match.group(1)
-    return "Other"
+    return "XX"
+
+
+def get_country_name_from_code(country_code: str) -> str:
+    """Maps 2-letter country code to full name. UI expects 'Other' for XX and unknown codes."""
+    return COUNTRY_CODE_MAP.get(country_code, "Other")
 
 
 def get_country_name(filename: str) -> str:
-    """Extracts the country name from the filename using the country code."""
+    """Extracts the country name from the filename using the country code (fallback when werks missing)."""
     country_code = get_country_code(filename)
-    return COUNTRY_CODE_MAP.get(country_code, "Other")
+    return get_country_name_from_code(country_code)
+
+
+def extract_country_from_werks(recipe_data: dict) -> str | None:
+    """
+    Extract country code from the first 'werks' field in the recipe JSON.
+    Werks values are like 'AU10', 'AT10' — first 2 letters are the country code.
+    Returns None if no werks found.
+    """
+    found: list[str] = []
+
+    def _find(obj):
+        if isinstance(obj, dict):
+            if "werks" in obj:
+                val = obj.get("werks")
+                if val and isinstance(val, str) and len(val) >= 2:
+                    found.append(str(val)[:2].upper())
+                    return
+            for v in obj.values():
+                _find(v)
+                if found:
+                    return
+        elif isinstance(obj, list):
+            for item in obj:
+                _find(item)
+                if found:
+                    return
+
+    _find(recipe_data)
+    return found[0] if found else None
+
+
+def extract_kunnr_values(recipe_data: dict) -> tuple[str, str]:
+    """
+    Extract Z_MU_KUNNR and Z_PR_KUNNR from Classification.valuesnum.
+    Returns (value_mu, value_pr); each is str(valueFrom) or 'Missing'.
+    """
+    mu_val: str = "Missing"
+    pr_val: str = "Missing"
+    valuesnum = recipe_data.get("Classification", {}).get("valuesnum", [])
+    for item in valuesnum:
+        ch = item.get("charact")
+        if ch not in ("Z_MU_KUNNR", "Z_PR_KUNNR"):
+            continue
+        v = item.get("valueFrom")
+        if v is not None:
+            try:
+                v = str(int(v) if isinstance(v, (int, float)) else int(float(v)))
+            except (TypeError, ValueError):
+                v = str(v)
+            if ch == "Z_MU_KUNNR":
+                mu_val = v
+            else:
+                pr_val = v
+        if mu_val != "Missing" and pr_val != "Missing":
+            break
+    return mu_val, pr_val
 
 
 def extract_stlan(recipe_data: Union[dict, str]) -> Literal['L', 'P', 'Missing']:
@@ -761,6 +823,8 @@ def create_payload_indexes_for_60_fields(qdrant_client: QdrantClient, collection
             ("version", PayloadSchemaType.KEYWORD),
             ("num_available", PayloadSchemaType.INTEGER),
             ("num_missing", PayloadSchemaType.INTEGER),
+            ("Z_MU_KUNNR", PayloadSchemaType.KEYWORD),
+            ("Z_PR_KUNNR", PayloadSchemaType.KEYWORD),
         ]
         
         for field_name, schema_type in metadata_indexes:
@@ -1132,14 +1196,24 @@ def index_recipes_to_qdrant_batched(
                     # Get basic recipe info
                     description = extract_recipe_description(recipe_path)
                     filename = os.path.basename(recipe_path)
-                    country_name = get_country_name(filename)
                     recipe_id = filename.split('.')[0]
 
-                    # Extract version (stlan) from recipe JSON
-                    version = extract_stlan(recipe_path)
+                    # Load recipe JSON once for country (werks), version (stlan), and KUNNR
+                    with open(recipe_path, 'r', encoding='utf-8') as f:
+                        recipe_data = json.load(f)
+
+                    # Country: from werks (first 2 chars) or fallback to filename
+                    country_code = extract_country_from_werks(recipe_data) or get_country_code(filename)
+                    country_name = get_country_name_from_code(country_code)
+
+                    # Version (stlan) from recipe JSON
+                    version = extract_stlan(recipe_data)
                     logger.debug(
                         f"Recipe {recipe_id}: extracted version={version}, "
                         f"available fields: {len(fields_data['available'])}/60")
+
+                    # Z_MU_KUNNR and Z_PR_KUNNR for filtering (value or 'Missing')
+                    z_mu_kunnr, z_pr_kunnr = extract_kunnr_values(recipe_data)
 
                     # Create normalized features and values from the 60 fields
                     # Uses English feature names for consistent multilingual search
@@ -1159,7 +1233,9 @@ def index_recipes_to_qdrant_batched(
                             'fields_data': fields_data,       # Full 60 fields structure
                             'description': enhanced_description,
                             'country': country_name,
-                            'version': version
+                            'version': version,
+                            'Z_MU_KUNNR': z_mu_kunnr,
+                            'Z_PR_KUNNR': z_pr_kunnr,
                         })
                     else:
                         # Recipe has no matching fields, skip but log
@@ -1259,6 +1335,8 @@ def index_recipes_to_qdrant_batched(
                             "description": recipe['description'],
                             "country": recipe['country'],
                             "version": recipe['version'],
+                            "Z_MU_KUNNR": recipe['Z_MU_KUNNR'],
+                            "Z_PR_KUNNR": recipe['Z_PR_KUNNR'],
                             
                             # 60 SPECIFIED FIELDS - structured for filtering
                             # Each field stored individually: spec_fields.Z_MAKTX, spec_fields.Z_BRIX, etc.
