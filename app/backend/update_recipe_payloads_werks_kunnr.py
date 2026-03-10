@@ -12,11 +12,15 @@ adds indexes for Z_MU_KUNNR and Z_PR_KUNNR).
 Usage:
     python update_recipe_payloads_werks_kunnr.py [--data-dir /path/to/data] [--batch-size 500]
 
-  Local (Mac/Linux, Qdrant in Docker): use default host localhost
-    python update_recipe_payloads_werks_kunnr.py --data-dir app/data
+  When running ON THE HOST (your Mac or the Azure VM): Qdrant is reached via port mapping.
+    Use --host localhost (default) so the script connects to 127.0.0.1:6333.
 
-  Server (Qdrant as service or same Docker network): use host qdrant
-    python update_recipe_payloads_werks_kunnr.py --host qdrant --port 6333 --data-dir /datadrive/RECIPE_AGENT/app/data --batch-size 1000
+  When running INSIDE a Docker container on the same network as Qdrant: use --host qdrant.
+
+  Example on server (script on VM, Qdrant in Docker with port 6333 published):
+    python app/backend/update_recipe_payloads_werks_kunnr.py --host localhost --port 6333 \\
+      --data-dir app/data --batch-size 10000 --workers 8
+  (No space after the backslash when splitting the command across lines.)
 """
 
 import argparse
