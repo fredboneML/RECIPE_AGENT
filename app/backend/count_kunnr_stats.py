@@ -24,6 +24,8 @@ from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+import pandas as pd
+
 COUNTRY_CODE_RE = re.compile(r'_([A-Z]{2})\d{2}_')
 TARGET_CHARACTS = {"Z_MU_KUNNR", "Z_PR_KUNNR"}
 
@@ -353,6 +355,65 @@ def main():
         writer.writerow(csv_row("ALL", "", "ALL", grand))
 
     print(f"\nCSV saved to: {csv_path}")
+
+    # ========== Export Excel (same data, three sheets) ==========
+    excel_path = app_dir / "kunnr_stats.xlsx"
+    excel_header = CSV_HEADER
+
+    def make_row(cc: str, name: str, ver: str, c: dict) -> list:
+        t = c["total"]
+        mu_pct = round(c["has_mu"] / t * 100, 1) if t else 0.0
+        pr_pct = round(c["has_pr"] / t * 100, 1) if t else 0.0
+        return [cc, name, ver, t, c["has_mu"], c["has_pr"], c["has_both"], c["has_neither"], mu_pct, pr_pct]
+
+    rows_detailed = []
+    grand = new_row()
+    for cc in countries:
+        name = COUNTRY_CODE_MAP.get(cc, "Unknown")
+        country_total = new_row()
+        for ver in versions:
+            key = (cc, ver)
+            if key not in merged:
+                continue
+            c = merged[key]
+            country_total = add_rows(country_total, c)
+            rows_detailed.append(make_row(cc, name, ver, c))
+        if country_total["total"] > 0:
+            rows_detailed.append(make_row(cc, name, "ALL", country_total))
+        grand = add_rows(grand, country_total)
+    rows_detailed.append(make_row("ALL", "", "ALL", grand))
+
+    rows_country = []
+    grand = new_row()
+    for cc in countries:
+        name = COUNTRY_CODE_MAP.get(cc, "Unknown")
+        country_total = new_row()
+        for ver in versions:
+            key = (cc, ver)
+            if key in merged:
+                country_total = add_rows(country_total, merged[key])
+        rows_country.append(make_row(cc, name, "", country_total))
+        grand = add_rows(grand, country_total)
+    rows_country.append(make_row("ALL", "", "", grand))
+
+    rows_version = []
+    grand = new_row()
+    for ver in versions:
+        ver_total = new_row()
+        for cc in countries:
+            key = (cc, ver)
+            if key in merged:
+                ver_total = add_rows(ver_total, merged[key])
+        rows_version.append(make_row("ALL", "", ver, ver_total))
+        grand = add_rows(grand, ver_total)
+    rows_version.append(make_row("ALL", "", "ALL", grand))
+
+    with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+        pd.DataFrame(rows_detailed, columns=excel_header).to_excel(writer, sheet_name="Detailed", index=False)
+        pd.DataFrame(rows_country, columns=excel_header).to_excel(writer, sheet_name="By Country", index=False)
+        pd.DataFrame(rows_version, columns=excel_header).to_excel(writer, sheet_name="By Version", index=False)
+
+    print(f"Excel saved to: {excel_path}")
 
 
 if __name__ == "__main__":
