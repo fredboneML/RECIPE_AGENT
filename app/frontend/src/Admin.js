@@ -206,7 +206,12 @@ function Admin() {
         throw new Error('Failed to load conversations');
       }
       const data = await response.json();
-      setConversations(data.conversations || []);
+      const sorted = (data.conversations || []).slice().sort((a, b) => {
+        const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return tb - ta; // most recent first
+      });
+      setConversations(sorted);
     } catch (err) {
       console.error('Error loading conversations:', err);
       setConversationsError('Failed to load conversations. Please try again.');
@@ -229,6 +234,8 @@ function Admin() {
     let metadata = null;
     let countryFilter = null;
     let versionFilter = null;
+    let zMuKunnrFilter = null;
+    let zPrKunnrFilter = null;
     let detectedLanguage = null;
     if (typeof text === 'string' && text.trim().startsWith('{')) {
       try {
@@ -238,12 +245,14 @@ function Admin() {
         metadata = parsed.metadata ?? null;
         countryFilter = parsed.country_filter ?? null;
         versionFilter = parsed.version_filter ?? null;
+        zMuKunnrFilter = parsed.z_mu_kunnr_filter ?? null;
+        zPrKunnrFilter = parsed.z_pr_kunnr_filter ?? null;
         detectedLanguage = parsed.detected_language ?? null;
       } catch (_) {
         /* keep text as-is */
       }
     }
-    return { text, comparisonTable, metadata, countryFilter, versionFilter, detectedLanguage };
+    return { text, comparisonTable, metadata, countryFilter, versionFilter, zMuKunnrFilter, zPrKunnrFilter, detectedLanguage };
   };
 
   /** Format response text: render **bold** as <strong> and newlines as <br/> for display */
@@ -594,7 +603,7 @@ function Admin() {
               {conversations.length > 0 && (
                 <div className="admin-conversations-cards">
                   {conversations.map((row, idx) => {
-                    const { text, comparisonTable, metadata, countryFilter, versionFilter, detectedLanguage } = parseStoredResponse(row);
+                    const { text, comparisonTable, metadata, countryFilter, versionFilter, zMuKunnrFilter, zPrKunnrFilter, detectedLanguage } = parseStoredResponse(row);
                     const filtersLabel = formatFiltersFromMetadata(metadata);
                     const isRecipeList = text && /^\d+\.\s+[A-Z0-9_]+.*Score:\s*\d/m.test(String(text));
                     const countryDisplay = countryFilter == null || (Array.isArray(countryFilter) && countryFilter.length === 0)
@@ -603,6 +612,8 @@ function Admin() {
                         ? countryFilter.join(', ')
                         : String(countryFilter);
                     const versionDisplay = versionFilter == null || versionFilter === '' || versionFilter === 'All' ? 'All' : String(versionFilter);
+                    const muKunnrDisplay = zMuKunnrFilter == null || zMuKunnrFilter === '' ? 'All' : String(zMuKunnrFilter);
+                    const prKunnrDisplay = zPrKunnrFilter == null || zPrKunnrFilter === '' ? 'All' : String(zPrKunnrFilter);
                     return (
                       <div key={`${row.conversation_id}-${row.message_order}-${idx}`} className="admin-conv-card">
                         <div className="admin-conv-meta">
@@ -613,6 +624,8 @@ function Admin() {
                           <span className="admin-conv-meta-item"><strong>Timestamp:</strong> {row.timestamp}</span>
                           <span className="admin-conv-meta-item"><strong>Country:</strong> {countryDisplay}</span>
                           <span className="admin-conv-meta-item"><strong>Version:</strong> {versionDisplay}</span>
+                          <span className="admin-conv-meta-item"><strong>MU-Kunnr:</strong> {muKunnrDisplay}</span>
+                          <span className="admin-conv-meta-item"><strong>PR-Kunnr:</strong> {prKunnrDisplay}</span>
                           {detectedLanguage && (
                             <span className="admin-conv-meta-item"><strong>Language:</strong> {detectedLanguage}</span>
                           )}

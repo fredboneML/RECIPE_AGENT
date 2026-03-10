@@ -1410,7 +1410,9 @@ class RecipeSearchAgent:
                        version_filter: Optional[str] = None,
                        numerical_filters: Optional[Dict[str,
                                                         Dict[str, Any]]] = None,
-                       categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
+                       categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                       z_mu_kunnr_filter: Optional[str] = None,
+                       z_pr_kunnr_filter: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str, str, Optional[Dict[str, Any]]]:
         """
         Search for similar recipes based on description and optional features
 
@@ -1501,7 +1503,9 @@ class RecipeSearchAgent:
                 version_filter=version_filter,
                 original_query=original_query,
                 numerical_filters=numerical_filters,
-                categorical_filters=categorical_filters
+                categorical_filters=categorical_filters,
+                z_mu_kunnr_filter=z_mu_kunnr_filter,
+                z_pr_kunnr_filter=z_pr_kunnr_filter
             )
 
             # Format response in the detected language using AI

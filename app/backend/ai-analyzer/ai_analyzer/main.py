@@ -16,7 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+import asyncio
 import hashlib
+import httpx
 import time
 import logging
 import uuid
@@ -772,6 +774,10 @@ async def process_query(
         final_top_k = body.get("final_top_k", 3)
         country_filter_raw = body.get("country_filter", None)
         version_filter = body.get("version_filter", None)
+        z_mu_kunnr_filter_raw = body.get("z_mu_kunnr_filter", None)
+        z_pr_kunnr_filter_raw = body.get("z_pr_kunnr_filter", None)
+        z_mu_kunnr_filter = z_mu_kunnr_filter_raw if z_mu_kunnr_filter_raw and z_mu_kunnr_filter_raw != "All" else None
+        z_pr_kunnr_filter = z_pr_kunnr_filter_raw if z_pr_kunnr_filter_raw and z_pr_kunnr_filter_raw != "All" else None
 
         # Handle country_filter: support both single string (backward compatibility) and list
         country_filter = None
@@ -1006,7 +1012,9 @@ async def process_query(
             country_filter=country_filter,
             version_filter=version_filter,
             numerical_filters=numerical_filters,
-            categorical_filters=categorical_filters
+            categorical_filters=categorical_filters,
+            z_mu_kunnr_filter=z_mu_kunnr_filter,
+            z_pr_kunnr_filter=z_pr_kunnr_filter
         )
 
         # Use the formatted response from the agent
@@ -1034,6 +1042,8 @@ async def process_query(
                 "comparison_table": comparison_table,  # For admin past-conversations view
                 "country_filter": country_filter,  # List or str; None means "All"
                 "version_filter": version_filter,  # P, L, Missing, or None for "All"
+                "z_mu_kunnr_filter": z_mu_kunnr_filter,  # Muster-Kundennummer filter; None means "All"
+                "z_pr_kunnr_filter": z_pr_kunnr_filter,  # Produktion-Kundennummer filter; None means "All"
             }
             response_to_store = json.dumps(response_with_metadata, default=str)
             
@@ -1102,6 +1112,74 @@ async def get_recipe_service_status(current_user: User = Depends(get_current_use
             "message": f"Error getting service status: {str(e)}",
             "total_recipes": 0
         }
+
+
+@app.get("/api/kunnr_values")
+async def get_kunnr_values(current_user: User = Depends(get_current_user)):
+    """Return distinct Z_MU_KUNNR and Z_PR_KUNNR values from Qdrant (excluding 'Missing').
+
+    Loaded once by the frontend on app mount and cached client-side for autocomplete.
+    Uses the existing Qdrant client via scroll with early stopping once all unique values
+    are found (no new values across 10 consecutive batches).
+    """
+    global recipe_search_agent
+
+    if not recipe_search_agent or not getattr(recipe_search_agent, "recipe_manager", None):
+        logger.warning("/api/kunnr_values: recipe_search_agent not ready, returning empty lists")
+        return {"mu_kunnr": [], "pr_kunnr": []}
+
+    def _collect_distinct_kunnr():
+        qdrant_client = recipe_search_agent.recipe_manager.qdrant_client
+        collection = recipe_search_agent.recipe_manager.collection_name
+
+        mu_values: set = set()
+        pr_values: set = set()
+        offset = None
+        batch_size = 1000
+        max_batches = 1000      # cap at 1 M records
+        consecutive_no_new = 0
+
+        for _ in range(max_batches):
+            records, next_offset = qdrant_client.scroll(
+                collection_name=collection,
+                with_payload=["Z_MU_KUNNR", "Z_PR_KUNNR"],
+                with_vectors=False,
+                limit=batch_size,
+                offset=offset,
+            )
+
+            prev_total = len(mu_values) + len(pr_values)
+
+            for record in records:
+                payload = record.payload or {}
+                mu = payload.get("Z_MU_KUNNR")
+                pr = payload.get("Z_PR_KUNNR")
+                if mu and mu not in ("Missing", ""):
+                    mu_values.add(str(mu))
+                if pr and pr not in ("Missing", ""):
+                    pr_values.add(str(pr))
+
+            if len(mu_values) + len(pr_values) == prev_total:
+                consecutive_no_new += 1
+                if consecutive_no_new >= 10:
+                    break
+            else:
+                consecutive_no_new = 0
+
+            if next_offset is None:
+                break
+            offset = next_offset
+
+        return sorted(mu_values), sorted(pr_values)
+
+    try:
+        loop = asyncio.get_event_loop()
+        mu_values, pr_values = await loop.run_in_executor(None, _collect_distinct_kunnr)
+        logger.info(f"/api/kunnr_values: returning {len(mu_values)} MU and {len(pr_values)} PR distinct values")
+        return {"mu_kunnr": mu_values, "pr_kunnr": pr_values}
+    except Exception as e:
+        logger.error(f"/api/kunnr_values: error collecting from Qdrant: {e}")
+        return {"mu_kunnr": [], "pr_kunnr": []}
 
 
 @app.post("/api/recipe-search")
@@ -1449,6 +1527,8 @@ async def get_conversation(
             comparison_table = None
             country_filter = None
             version_filter = None
+            z_mu_kunnr_filter = None
+            z_pr_kunnr_filter = None
             detected_language = None
 
             if response_text:
@@ -1461,6 +1541,8 @@ async def get_conversation(
                             comparison_table = parsed.get("comparison_table")
                             country_filter = parsed.get("country_filter")
                             version_filter = parsed.get("version_filter")
+                            z_mu_kunnr_filter = parsed.get("z_mu_kunnr_filter")
+                            z_pr_kunnr_filter = parsed.get("z_pr_kunnr_filter")
                             detected_language = parsed.get("detected_language")
                 except (json.JSONDecodeError, AttributeError, TypeError) as e:
                     logger.debug(f"Response is not JSON or parsing failed: {e}")
@@ -1481,6 +1563,10 @@ async def get_conversation(
                 message_data["country_filter"] = country_filter
             if version_filter is not None:
                 message_data["version_filter"] = version_filter
+            if z_mu_kunnr_filter is not None:
+                message_data["z_mu_kunnr_filter"] = z_mu_kunnr_filter
+            if z_pr_kunnr_filter is not None:
+                message_data["z_pr_kunnr_filter"] = z_pr_kunnr_filter
             if detected_language is not None:
                 message_data["detected_language"] = detected_language
 

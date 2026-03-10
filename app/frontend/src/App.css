@@ -268,6 +268,110 @@
   padding: 8px;
 }
 
+/* KUNNR filters (MU-Kunnr / PR-Kunnr) */
+.kunnr-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kunnr-filter label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+  white-space: nowrap;
+}
+
+.kunnr-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.kunnr-input {
+  padding: 8px 28px 8px 12px;
+  background-color: #9f1a15;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: text;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  min-width: 120px;
+  outline: none;
+}
+
+.kunnr-input::placeholder {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.kunnr-input:focus {
+  background-color: #851612;
+  box-shadow: 0 0 0 2px rgba(159, 26, 21, 0.3);
+}
+
+.kunnr-input.active {
+  background-color: #6e110d;
+  box-shadow: 0 0 0 2px rgba(110, 17, 13, 0.5);
+}
+
+.kunnr-clear-btn {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0.8;
+}
+
+.kunnr-clear-btn:hover {
+  opacity: 1;
+}
+
+.kunnr-autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 150px;
+  max-width: 220px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+}
+
+.kunnr-autocomplete-option {
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kunnr-autocomplete-option:hover,
+.kunnr-autocomplete-option.selected {
+  background-color: #f5e6e5;
+  color: #9f1a15;
+  font-weight: 500;
+}
+
+.kunnr-autocomplete-empty {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: #999;
+  font-style: italic;
+}
+
 .user-initial button {
   background-color: #9f1a15;
   color: white;
@@ -843,6 +947,20 @@
   .version-dropdown {
     min-width: 100px;
     padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+
+  .kunnr-filter {
+    gap: 5px;
+  }
+
+  .kunnr-filter label {
+    font-size: 0.8rem;
+  }
+
+  .kunnr-input {
+    min-width: 90px;
+    padding: 6px 24px 6px 10px;
     font-size: 0.85rem;
   }
 }

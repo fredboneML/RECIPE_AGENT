@@ -403,7 +403,9 @@ class QdrantRecipeManager:
                            country_filter: Optional[Union[str, List[str]]] = None,
                            version_filter: Optional[str] = None,
                            numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
-                           categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+                           categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                           z_mu_kunnr_filter: Optional[str] = None,
+                           z_pr_kunnr_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Search recipes by features using the feature vector in Qdrant.
 
@@ -511,6 +513,18 @@ class QdrantRecipeManager:
                 logger.info(
                     f"Applying version filter in feature search: {version_filter}")
 
+            if z_mu_kunnr_filter and z_mu_kunnr_filter != "All":
+                filter_conditions.append(
+                    FieldCondition(key="Z_MU_KUNNR", match=MatchValue(value=z_mu_kunnr_filter))
+                )
+                logger.info(f"Applying Z_MU_KUNNR filter in feature search: {z_mu_kunnr_filter}")
+
+            if z_pr_kunnr_filter and z_pr_kunnr_filter != "All":
+                filter_conditions.append(
+                    FieldCondition(key="Z_PR_KUNNR", match=MatchValue(value=z_pr_kunnr_filter))
+                )
+                logger.info(f"Applying Z_PR_KUNNR filter in feature search: {z_pr_kunnr_filter}")
+
             # Add numerical range filters (e.g., Brix > 40, pH < 4.1)
             if numerical_filters:
                 for field_code, range_spec in numerical_filters.items():
@@ -600,7 +614,9 @@ class QdrantRecipeManager:
                                    version_filter: Optional[str] = None,
                                    numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
                                    categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
-                                   return_embedding: bool = False):
+                                   return_embedding: bool = False,
+                                   z_mu_kunnr_filter: Optional[str] = None,
+                                   z_pr_kunnr_filter: Optional[str] = None):
         """
         Search recipes by text description using Qdrant vector search
 
@@ -660,6 +676,18 @@ class QdrantRecipeManager:
                     )
                 )
                 logger.info(f"Applying version filter: {version_filter}")
+
+            if z_mu_kunnr_filter and z_mu_kunnr_filter != "All":
+                filter_conditions.append(
+                    FieldCondition(key="Z_MU_KUNNR", match=MatchValue(value=z_mu_kunnr_filter))
+                )
+                logger.info(f"Applying Z_MU_KUNNR filter in text search: {z_mu_kunnr_filter}")
+
+            if z_pr_kunnr_filter and z_pr_kunnr_filter != "All":
+                filter_conditions.append(
+                    FieldCondition(key="Z_PR_KUNNR", match=MatchValue(value=z_pr_kunnr_filter))
+                )
+                logger.info(f"Applying Z_PR_KUNNR filter in text search: {z_pr_kunnr_filter}")
 
             # Add numerical range filters (e.g., Brix > 40, pH < 4.1)
             if numerical_filters:
@@ -1531,7 +1559,9 @@ class QdrantRecipeManager:
                         version_filter: Optional[str] = None,
                         original_query: Optional[str] = None,
                         numerical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
-                        categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                        categorical_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+                        z_mu_kunnr_filter: Optional[str] = None,
+                        z_pr_kunnr_filter: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Two-step hybrid search with TEXT-FIRST architecture:
         - Step 0: Exact/partial recipe name matching (unchanged)
@@ -1705,7 +1735,9 @@ class QdrantRecipeManager:
             version_filter=version_filter,
             numerical_filters=None,  # NO filters in text search
             categorical_filters=None,  # NO filters in text search
-            return_embedding=True
+            return_embedding=True,
+            z_mu_kunnr_filter=z_mu_kunnr_filter,
+            z_pr_kunnr_filter=z_pr_kunnr_filter
         )
 
         # Handle return value (may be tuple if return_embedding=True)
@@ -1729,7 +1761,9 @@ class QdrantRecipeManager:
                     version_filter=version_filter,
                     numerical_filters=None,
                     categorical_filters=None,
-                    return_embedding=False
+                    return_embedding=False,
+                    z_mu_kunnr_filter=z_mu_kunnr_filter,
+                    z_pr_kunnr_filter=z_pr_kunnr_filter
                 )
                 if isinstance(name_line_candidates, tuple):
                     name_line_candidates = name_line_candidates[0]
@@ -1866,7 +1900,9 @@ class QdrantRecipeManager:
                             version_filter=version_filter,
                             numerical_filters=None,
                             categorical_filters=None,
-                            return_embedding=False
+                            return_embedding=False,
+                            z_mu_kunnr_filter=z_mu_kunnr_filter,
+                            z_pr_kunnr_filter=z_pr_kunnr_filter
                         )
 
                         if isinstance(variant_candidates, tuple):
@@ -1902,7 +1938,9 @@ class QdrantRecipeManager:
                 version_filter=version_filter,
                 numerical_filters=None,  # NO filters
                 categorical_filters=None,  # NO filters
-                return_embedding=False
+                return_embedding=False,
+                z_mu_kunnr_filter=z_mu_kunnr_filter,
+                z_pr_kunnr_filter=z_pr_kunnr_filter
             )
 
             if isinstance(original_query_results, tuple):
@@ -2082,7 +2120,9 @@ class QdrantRecipeManager:
                         country_filter=country_filter,
                         version_filter=version_filter,
                         numerical_filters=None,  # NO filters in vector search
-                        categorical_filters=None   # NO filters in vector search
+                        categorical_filters=None,  # NO filters in vector search
+                        z_mu_kunnr_filter=z_mu_kunnr_filter,
+                        z_pr_kunnr_filter=z_pr_kunnr_filter
                     )
 
                     logger.info(f"  Found {len(vector_flavor_results)} flavor candidates for '{safeguard_query[:40]}'")

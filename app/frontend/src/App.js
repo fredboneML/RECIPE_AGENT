@@ -21,6 +21,16 @@ function App() {
   const [selectedVersion, setSelectedVersion] = useState('P');
   const [showCountryDropdown, setShowCountryDropdown] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  // KUNNR filter state — values loaded once and cached
+  const [muKunnrValues, setMuKunnrValues] = useState([]);
+  const [prKunnrValues, setPrKunnrValues] = useState([]);
+  const [selectedMuKunnr, setSelectedMuKunnr] = useState('');
+  const [selectedPrKunnr, setSelectedPrKunnr] = useState('');
+  const [muKunnrInput, setMuKunnrInput] = useState('');
+  const [prKunnrInput, setPrKunnrInput] = useState('');
+  const [showMuDropdown, setShowMuDropdown] = useState(false);
+  const [showPrDropdown, setShowPrDropdown] = useState(false);
   
   const navigate = useNavigate();
   const textareaRef = useRef(null);
@@ -29,6 +39,8 @@ function App() {
   const fileInputRef = useRef(null);
   const countryDropdownRef = useRef(null);
   const dropZoneRef = useRef(null);
+  const muKunnrRef = useRef(null);
+  const prKunnrRef = useRef(null);
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -131,6 +143,37 @@ function App() {
     };
   }, [showCountryDropdown]);
 
+  // Close KUNNR dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (muKunnrRef.current && !muKunnrRef.current.contains(event.target)) {
+        setShowMuDropdown(false);
+      }
+      if (prKunnrRef.current && !prKunnrRef.current.contains(event.target)) {
+        setShowPrDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Load KUNNR values once on mount — cached for local autocomplete, no repeated backend calls
+  useEffect(() => {
+    const loadKunnrValues = async () => {
+      try {
+        const response = await tokenManager.get('/kunnr_values');
+        if (response.ok) {
+          const data = await response.json();
+          setMuKunnrValues(data.mu_kunnr || []);
+          setPrKunnrValues(data.pr_kunnr || []);
+        }
+      } catch (error) {
+        console.error('Error loading KUNNR values:', error);
+      }
+    };
+    loadKunnrValues();
+  }, []);
+
   // Replace getHeaders with tokenManager logic
   const getHeaders = () => ({
     'Content-Type': 'application/json',
@@ -193,7 +236,9 @@ function App() {
         query: finalQuery,
         conversation_id: currentConversation?.id,
         country_filter: selectedCountries.length === 0 ? null : selectedCountries,
-        version_filter: selectedVersion === 'All' ? null : selectedVersion
+        version_filter: selectedVersion === 'All' ? null : selectedVersion,
+        z_mu_kunnr_filter: selectedMuKunnr || null,
+        z_pr_kunnr_filter: selectedPrKunnr || null
       }, {
         signal: abortControllerRef.current.signal
       });
@@ -551,6 +596,126 @@ function App() {
 
       <div className="content">
         <div className="top-bar">
+          {/* MU-Kunnr filter */}
+          <div className="kunnr-filter" ref={muKunnrRef}>
+            <label>MU-Kunnr:</label>
+            <div className="kunnr-input-wrapper">
+              <input
+                type="text"
+                className={`kunnr-input${selectedMuKunnr ? ' active' : ''}`}
+                placeholder="All"
+                value={muKunnrInput}
+                onChange={(e) => {
+                  setMuKunnrInput(e.target.value);
+                  setSelectedMuKunnr('');
+                  setShowMuDropdown(true);
+                }}
+                onFocus={() => setShowMuDropdown(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') { setShowMuDropdown(false); }
+                  if (e.key === 'Enter') {
+                    const trimmed = muKunnrInput.trim();
+                    if (trimmed) {
+                      setSelectedMuKunnr(trimmed);
+                      setMuKunnrInput(trimmed);
+                      setShowMuDropdown(false);
+                    }
+                  }
+                }}
+              />
+              {(selectedMuKunnr || muKunnrInput) && (
+                <button
+                  type="button"
+                  className="kunnr-clear-btn"
+                  onClick={() => { setSelectedMuKunnr(''); setMuKunnrInput(''); setShowMuDropdown(false); }}
+                  title="Clear"
+                >×</button>
+              )}
+              {showMuDropdown && (
+                <div className="kunnr-autocomplete-dropdown">
+                  {muKunnrValues
+                    .filter(v => !muKunnrInput || v.includes(muKunnrInput))
+                    .slice(0, 50)
+                    .map(v => (
+                      <div
+                        key={v}
+                        className={`kunnr-autocomplete-option${v === selectedMuKunnr ? ' selected' : ''}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSelectedMuKunnr(v);
+                          setMuKunnrInput(v);
+                          setShowMuDropdown(false);
+                        }}
+                      >{v}</div>
+                    ))}
+                  {muKunnrValues.filter(v => !muKunnrInput || v.includes(muKunnrInput)).length === 0 && (
+                    <div className="kunnr-autocomplete-empty">No match</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* PR-Kunnr filter */}
+          <div className="kunnr-filter" ref={prKunnrRef}>
+            <label>PR-Kunnr:</label>
+            <div className="kunnr-input-wrapper">
+              <input
+                type="text"
+                className={`kunnr-input${selectedPrKunnr ? ' active' : ''}`}
+                placeholder="All"
+                value={prKunnrInput}
+                onChange={(e) => {
+                  setPrKunnrInput(e.target.value);
+                  setSelectedPrKunnr('');
+                  setShowPrDropdown(true);
+                }}
+                onFocus={() => setShowPrDropdown(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') { setShowPrDropdown(false); }
+                  if (e.key === 'Enter') {
+                    const trimmed = prKunnrInput.trim();
+                    if (trimmed) {
+                      setSelectedPrKunnr(trimmed);
+                      setPrKunnrInput(trimmed);
+                      setShowPrDropdown(false);
+                    }
+                  }
+                }}
+              />
+              {(selectedPrKunnr || prKunnrInput) && (
+                <button
+                  type="button"
+                  className="kunnr-clear-btn"
+                  onClick={() => { setSelectedPrKunnr(''); setPrKunnrInput(''); setShowPrDropdown(false); }}
+                  title="Clear"
+                >×</button>
+              )}
+              {showPrDropdown && (
+                <div className="kunnr-autocomplete-dropdown">
+                  {prKunnrValues
+                    .filter(v => !prKunnrInput || v.includes(prKunnrInput))
+                    .slice(0, 50)
+                    .map(v => (
+                      <div
+                        key={v}
+                        className={`kunnr-autocomplete-option${v === selectedPrKunnr ? ' selected' : ''}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSelectedPrKunnr(v);
+                          setPrKunnrInput(v);
+                          setShowPrDropdown(false);
+                        }}
+                      >{v}</div>
+                    ))}
+                  {prKunnrValues.filter(v => !prKunnrInput || v.includes(prKunnrInput)).length === 0 && (
+                    <div className="kunnr-autocomplete-empty">No match</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="country-filter">
             <label htmlFor="country-select">Country:</label>
             <div className="country-multiselect-wrapper" ref={countryDropdownRef}>
@@ -653,9 +818,17 @@ function App() {
                 {/* Assistant response */}
                 {message.response && (
                   <div className="message assistant">
-                    {/* Country and version filters used for this message (e.g. from past conversation) */}
-                    {(message.country_filter != null || message.version_filter != null) && (
+                    {/* Filters used for this message (e.g. from past conversation) */}
+                    {(message.country_filter != null || message.version_filter != null || message.z_mu_kunnr_filter != null || message.z_pr_kunnr_filter != null) && (
                       <div className="message-filters-used">
+                        {message.z_mu_kunnr_filter != null && (
+                          <span><strong>MU-Kunnr:</strong> {message.z_mu_kunnr_filter}</span>
+                        )}
+                        {message.z_mu_kunnr_filter != null && (message.z_pr_kunnr_filter != null || message.country_filter != null || message.version_filter != null) && ' · '}
+                        {message.z_pr_kunnr_filter != null && (
+                          <span><strong>PR-Kunnr:</strong> {message.z_pr_kunnr_filter}</span>
+                        )}
+                        {message.z_pr_kunnr_filter != null && (message.country_filter != null || message.version_filter != null) && ' · '}
                         {message.country_filter != null && (
                           <span><strong>Country:</strong> {Array.isArray(message.country_filter) ? message.country_filter.join(', ') : message.country_filter}</span>
                         )}
