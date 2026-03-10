@@ -96,9 +96,13 @@ def main():
     df_country = by_country[by_country["Country"] != "ALL"].copy()
     df_country = df_country.sort_values("Total", ascending=True)
 
+    # Country axis label: "CC Name" or just "CC" when name is Unknown (no "?")
+    labels = (df_country["Country"] + " " + df_country["Name"]).where(
+        df_country["Name"] != "Unknown", df_country["Country"]
+    )
+
     # ---- 1. Total recipes per country (horizontal bar) ----
     fig, ax = plt.subplots(figsize=(10, 6))
-    labels = df_country["Country"] + " " + df_country["Name"].str.replace("Unknown", "?", regex=False)
     ax.barh(labels, df_country["Total"], color="steelblue", edgecolor="navy", alpha=0.85)
     ax.set_xlabel("Number of recipes")
     ax.set_title("Total recipes per country")
@@ -200,7 +204,9 @@ def main():
         pivot = pivot.fillna(0)
         pivot["_total"] = pivot["L"] + pivot["P"] + pivot["Missing"]
         pivot = pivot.sort_values("_total", ascending=True)
-        labels_v = pivot["Country"] + " " + pivot["Name"].str.replace("Unknown", "?", regex=False)
+        labels_v = (pivot["Country"] + " " + pivot["Name"]).where(
+            pivot["Name"] != "Unknown", pivot["Country"]
+        )
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.barh(labels_v, pivot["L"], label="L", color="#2ecc71", alpha=0.9)
         ax.barh(labels_v, pivot["P"], left=pivot["L"], label="P", color="#3498db", alpha=0.9)
