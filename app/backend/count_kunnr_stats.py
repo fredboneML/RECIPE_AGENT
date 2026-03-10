@@ -30,14 +30,14 @@ COUNTRY_CODE_RE = re.compile(r'_([A-Z]{2})\d{2}_')
 TARGET_CHARACTS = {"Z_MU_KUNNR", "Z_PR_KUNNR"}
 
 COUNTRY_CODE_MAP = {
-    "AT": "Austria", "BE": "Belgium", "BG": "Bulgaria", "CH": "Switzerland",
-    "CZ": "Czech Republic", "DE": "Germany", "DK": "Denmark", "EE": "Estonia",
-    "ES": "Spain", "FI": "Finland", "FR": "France", "GB": "United Kingdom",
-    "GR": "Greece", "HR": "Croatia", "HU": "Hungary", "IE": "Ireland",
-    "IT": "Italy", "LT": "Lithuania", "LV": "Latvia", "NL": "Netherlands",
-    "NO": "Norway", "PL": "Poland", "PT": "Portugal", "RO": "Romania",
-    "RS": "Serbia", "SE": "Sweden", "SI": "Slovenia", "SK": "Slovakia",
-    "TR": "Turkey", "UA": "Ukraine", "US": "United States",
+    "AT": "Austria", "AU": "Australia", "BE": "Belgium", "BG": "Bulgaria", "BR": "Brazil",
+    "CH": "Switzerland", "CN": "China", "CZ": "Czech Republic", "DE": "Germany", "DK": "Denmark",
+    "EE": "Estonia", "ES": "Spain", "FI": "Finland", "FR": "France", "GB": "United Kingdom",
+    "GR": "Greece", "HR": "Croatia", "HU": "Hungary", "IE": "Ireland", "IT": "Italy",
+    "LT": "Lithuania", "LV": "Latvia", "MX": "Mexico", "NL": "Netherlands", "NO": "Norway",
+    "PL": "Poland", "PT": "Portugal", "RO": "Romania", "RS": "Serbia", "RU": "Russia",
+    "SE": "Sweden", "SI": "Slovenia", "SK": "Slovakia", "TR": "Turkey", "UA": "Ukraine",
+    "US": "United States", "ZZ": "Custom / Unassigned",
 }
 
 EMPTY_ROW = {"total": 0, "has_mu": 0, "has_pr": 0, "has_both": 0, "has_neither": 0}
@@ -46,6 +46,35 @@ EMPTY_ROW = {"total": 0, "has_mu": 0, "has_pr": 0, "has_both": 0, "has_neither":
 def extract_country(filename: str) -> str:
     m = COUNTRY_CODE_RE.search(filename)
     return m.group(1) if m else "XX"
+
+
+def extract_country_from_werks(data: dict) -> str | None:
+    """
+    Extract country code from the first 'werks' field in the recipe JSON.
+    Werks values are like 'AU10', 'AT10', 'DE10' — first 2 letters are the country code.
+    Returns None if no werks found.
+    """
+    found_werks: list[str] = []
+
+    def _find(obj):
+        if isinstance(obj, dict):
+            if "werks" in obj:
+                val = obj.get("werks")
+                if val and isinstance(val, str) and len(val) >= 2:
+                    found_werks.append(str(val)[:2].upper())
+                    return
+            for v in obj.values():
+                _find(v)
+                if found_werks:
+                    return
+        elif isinstance(obj, list):
+            for item in obj:
+                _find(item)
+                if found_werks:
+                    return
+
+    _find(data)
+    return found_werks[0] if found_werks else None
 
 
 def extract_stlan(data: dict) -> str:
@@ -99,6 +128,14 @@ def process_batch(file_paths: list[str]) -> dict:
         try:
             with open(fpath, "rb") as f:
                 data = json.loads(f.read())
+
+            # Country: prefer first 2 letters of 'werks' from JSON (e.g. AU10 -> AU);
+            # fall back to filename pattern for recipes without country in name
+            country_from_werks = extract_country_from_werks(data)
+            if country_from_werks:
+                country = country_from_werks
+            else:
+                country = extract_country(fname)
 
             version = extract_stlan(data)
 
