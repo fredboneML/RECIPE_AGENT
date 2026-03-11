@@ -198,6 +198,84 @@ _kunnr_cache: dict | None = None
 _kunnr_cache_lock = None  # initialised lazily (needs event loop)
 
 
+def _collect_distinct_kunnr_sync() -> tuple[list, list]:
+    """Scan Qdrant for all distinct non-Missing KUNNR values. Blocking — run in executor."""
+    qdrant_client = recipe_search_agent.recipe_manager.qdrant_client
+    collection = recipe_search_agent.recipe_manager.collection_name
+
+    mu_values: set = set()
+    pr_values: set = set()
+    offset = None
+    batch_size = 2000
+    batches_done = 0
+
+    logger.info("/api/kunnr_values: starting full collection scan for distinct KUNNR values…")
+
+    while True:
+        records, next_offset = qdrant_client.scroll(
+            collection_name=collection,
+            with_payload=["Z_MU_KUNNR", "Z_PR_KUNNR"],
+            with_vectors=False,
+            limit=batch_size,
+            offset=offset,
+        )
+        batches_done += 1
+
+        for record in records:
+            payload = record.payload or {}
+            mu = payload.get("Z_MU_KUNNR")
+            pr = payload.get("Z_PR_KUNNR")
+            if mu and mu not in ("Missing", ""):
+                mu_values.add(str(mu))
+            if pr and pr not in ("Missing", ""):
+                pr_values.add(str(pr))
+
+        if batches_done % 50 == 0:
+            logger.info(
+                f"/api/kunnr_values: scanned {batches_done * batch_size:,} records, "
+                f"found {len(mu_values)} MU / {len(pr_values)} PR distinct so far"
+            )
+
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    logger.info(
+        f"/api/kunnr_values: scan complete — {batches_done} batches, "
+        f"{len(mu_values)} MU, {len(pr_values)} PR distinct values"
+    )
+    return sorted(mu_values), sorted(pr_values)
+
+
+async def _warm_kunnr_cache():
+    """Background task: populate _kunnr_cache once at startup. Safe to call multiple times."""
+    global _kunnr_cache, _kunnr_cache_lock
+
+    if _kunnr_cache is not None:
+        return
+
+    if not recipe_search_agent or not getattr(recipe_search_agent, "recipe_manager", None):
+        logger.warning("/api/kunnr_values: recipe_search_agent not ready, skipping warmup")
+        return
+
+    if _kunnr_cache_lock is None:
+        _kunnr_cache_lock = asyncio.Lock()
+
+    async with _kunnr_cache_lock:
+        if _kunnr_cache is not None:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            mu_values, pr_values = await loop.run_in_executor(None, _collect_distinct_kunnr_sync)
+            _kunnr_cache = {"mu_kunnr": mu_values, "pr_kunnr": pr_values}
+            logger.info(
+                f"/api/kunnr_values: cache populated — "
+                f"{len(mu_values)} MU and {len(pr_values)} PR values stored"
+            )
+        except Exception as e:
+            logger.error(f"/api/kunnr_values: error during cache warmup: {e}")
+
+
 def initialize_recipe_search_agent():
     """Initialize the recipe search agent"""
     global recipe_search_agent
@@ -322,6 +400,10 @@ async def startup_event():
 
         # Initialize data extractor router agent
         initialize_data_extractor_router_agent()
+
+        # Warm the KUNNR cache in the background so first user request is instant.
+        # Runs once per worker process — no impact on startup time or user queries.
+        asyncio.create_task(_warm_kunnr_cache())
 
         logger.info("Application startup completed successfully")
 
@@ -1123,89 +1205,25 @@ async def get_recipe_service_status(current_user: User = Depends(get_current_use
 async def get_kunnr_values(current_user: User = Depends(get_current_user)):
     """Return distinct Z_MU_KUNNR and Z_PR_KUNNR values for autocomplete.
 
-    Results are computed ONCE on the first call and cached in memory for the lifetime
-    of the server process. Subsequent calls return instantly without touching Qdrant.
-    This prevents the scroll-all-600k-records operation from running concurrently with
-    user queries and causing vector search timeouts.
+    Cache is pre-warmed at startup. All calls after warmup return instantly from memory.
+    If warmup is still in progress the request will wait for it to complete (via the lock).
     """
-    global recipe_search_agent, _kunnr_cache, _kunnr_cache_lock
+    # Fast path: cache already populated (startup warmup finished)
+    if _kunnr_cache is not None:
+        logger.info(
+            f"/api/kunnr_values: returning "
+            f"{len(_kunnr_cache['mu_kunnr'])} MU and {len(_kunnr_cache['pr_kunnr'])} PR distinct values"
+        )
+        return _kunnr_cache
 
-    # Return cached result immediately — no Qdrant work needed
+    # Warmup not finished yet — trigger it now and wait (covers edge case where startup
+    # warmup failed or the agent wasn't ready in time)
+    await _warm_kunnr_cache()
+
     if _kunnr_cache is not None:
         return _kunnr_cache
 
-    if not recipe_search_agent or not getattr(recipe_search_agent, "recipe_manager", None):
-        logger.warning("/api/kunnr_values: recipe_search_agent not ready, returning empty lists")
-        return {"mu_kunnr": [], "pr_kunnr": []}
-
-    # Lazy-init the asyncio lock (must be created inside a running event loop)
-    if _kunnr_cache_lock is None:
-        _kunnr_cache_lock = asyncio.Lock()
-
-    async with _kunnr_cache_lock:
-        # Double-check: another coroutine may have populated the cache while we waited
-        if _kunnr_cache is not None:
-            return _kunnr_cache
-
-        def _collect_distinct_kunnr():
-            qdrant_client = recipe_search_agent.recipe_manager.qdrant_client
-            collection = recipe_search_agent.recipe_manager.collection_name
-
-            mu_values: set = set()
-            pr_values: set = set()
-            offset = None
-            batch_size = 2000   # larger batches = fewer round-trips
-            batches_done = 0
-
-            logger.info("/api/kunnr_values: starting full collection scan for distinct KUNNR values…")
-
-            while True:
-                records, next_offset = qdrant_client.scroll(
-                    collection_name=collection,
-                    with_payload=["Z_MU_KUNNR", "Z_PR_KUNNR"],
-                    with_vectors=False,
-                    limit=batch_size,
-                    offset=offset,
-                )
-                batches_done += 1
-
-                for record in records:
-                    payload = record.payload or {}
-                    mu = payload.get("Z_MU_KUNNR")
-                    pr = payload.get("Z_PR_KUNNR")
-                    if mu and mu not in ("Missing", ""):
-                        mu_values.add(str(mu))
-                    if pr and pr not in ("Missing", ""):
-                        pr_values.add(str(pr))
-
-                if batches_done % 50 == 0:
-                    logger.info(
-                        f"/api/kunnr_values: scanned {batches_done * batch_size:,} records, "
-                        f"found {len(mu_values)} MU / {len(pr_values)} PR distinct so far"
-                    )
-
-                if next_offset is None:
-                    break
-                offset = next_offset
-
-            logger.info(
-                f"/api/kunnr_values: scan complete — {batches_done} batches, "
-                f"{len(mu_values)} MU, {len(pr_values)} PR distinct values"
-            )
-            return sorted(mu_values), sorted(pr_values)
-
-        try:
-            loop = asyncio.get_event_loop()
-            mu_values, pr_values = await loop.run_in_executor(None, _collect_distinct_kunnr)
-            _kunnr_cache = {"mu_kunnr": mu_values, "pr_kunnr": pr_values}
-            logger.info(
-                f"/api/kunnr_values: cache populated — "
-                f"{len(mu_values)} MU and {len(pr_values)} PR values stored"
-            )
-            return _kunnr_cache
-        except Exception as e:
-            logger.error(f"/api/kunnr_values: error collecting from Qdrant: {e}")
-            return {"mu_kunnr": [], "pr_kunnr": []}
+    return {"mu_kunnr": [], "pr_kunnr": []}
 
 
 @app.post("/api/recipe-search")
