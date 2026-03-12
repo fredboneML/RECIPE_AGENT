@@ -1251,7 +1251,7 @@ def format_response_in_language(results: List[Dict[str, Any]], language: str) ->
         score_prefix = "   Similarity Score: "
 
     for i, result in enumerate(results, 1):
-        recipe_id = result.get("id", f"recipe_{i}")
+        recipe_id = result.get("recipe_name") or result.get("id", f"recipe_{i}")
         description = result.get("description", "")
         text_score = result.get("text_score", 0)
         combined_score = result.get("combined_score", text_score)
@@ -1308,7 +1308,7 @@ def format_response_in_language_with_ai(results: List[Dict[str, Any]], language:
 
             results_data.append({
                 "rank": i,
-                "id": result.get("id", f"recipe_{i}"),
+                "id": result.get("recipe_name") or result.get("id", f"recipe_{i}"),
                 "description": description,
                 "similarity_score": f"{combined * 100:.1f}".replace(".", ",") + "%"
             })
